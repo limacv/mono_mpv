@@ -1,12 +1,17 @@
 from pytube import YouTube
+import torch
+from torch.nn import Sequential
+import torch.nn.functional as torchf
 import numpy as np
 from io import BytesIO
-from torchvision.transforms import ToTensor
+from torchvision.transforms import ToTensor, Resize, Compose
 import imageio
+from PIL import Image as PImage
 from torch.utils.data import Dataset
 import cv2
 import os
 from glob import glob
+from . import RealEstate10K_root, is_DEBUG
 from .colmap_wrapper import *
 
 
@@ -14,21 +19,42 @@ class RealEstate10K(Dataset):
     """
     The dataset has 7711 test video and 71556 train video from youtube real estate video
     """
-    def __init__(self, path):
-        self.root = os.path.abspath(path)
-        if "test" in path:
-            self.is_train = "test"
-        elif "train" in path:
-            self.is_train = "train"
+    def __init__(self, is_train=True, mode='resize', ptnum=2000):
+        """
+        model=  'none': do noting
+                'resize': resize to 512x512,
+                'pad': pad to multiple of 128, usually used in evaluation,
+                'crop': crop to 512x512 or multiple of 128
+        """
+        if is_train:
+            self.root = os.path.join(RealEstate10K_root, "train")
+            self.trainstr = "train"
         else:
-            raise RuntimeError(f"RealEstate10K: unrecoginized path")
+            self.root = os.path.join(RealEstate10K_root, "test")
+            self.trainstr = "test"
 
-        self.file_list = glob(f"{path}/*.txt")
-        print(f"RealEstate10K: find {len(self.file_list)} video files in {self.is_train} set")
+        self.name = f"RealEstate10K_{self.trainstr}"
+        self.file_list = glob(f"{self.root}/*.txt")
+        print(f"RealEstate10K: find {len(self.file_list)} video files in {self.trainstr} set")
 
-        self.tmp_root = os.path.join(os.path.dirname(self.root), f"{self.is_train}tmp")
+        self.tmp_root = os.path.join(os.path.dirname(self.root), f"{self.trainstr}tmp")
         if not os.path.exists(self.tmp_root):
             os.mkdir(self.tmp_root)
+
+        self.mode = mode
+        if mode == 'none':
+            self.preprocess = ToTensor()
+        elif mode == 'resize':
+            self.preprocess = Compose([Resize([512, 512]),
+                                       ToTensor()])
+        elif mode == 'pad':
+            self.preprocess = ToTensor()
+            raise NotImplementedError
+        elif mode == 'crop':
+            self.preprocess = ToTensor()
+            raise NotImplementedError
+
+        self.ptnum = ptnum
 
     def __len__(self):
         return len(self.file_list)
@@ -76,20 +102,28 @@ class RealEstate10K(Dataset):
                 extrin = list(map(float, line[7:19]))
                 extrins.append(np.array(extrin, dtype=np.float32).reshape((3, 4)))
 
-        # reduce memory by skip every 6 frames
-        timestamps = timestamps[::6]
-        extrins = extrins[::6]
         # ================================================
         # if we don't have the images, we need to fetch the video and save images
         # ================================================
         if not os.path.exists(image_path) or len(os.listdir(image_path)) == 0:
             try:
                 youtube = YouTube(link)
-                stream = youtube.streams.first()
+                stream = youtube.streams.get_highest_resolution()
                 stream.download(dir_base, "video", skip_existing=True)
-            except BaseException:
-                print(f"RealEstate10K: error when fetching link {link} specified in {file_base}.txt")
+            except KeyError as e:
+                print(f"RealEstate10K: error when fetching link {link} specified in {file_base}.txt"
+                      f"with error {e}")
                 return None
+            except Exception as _:
+                try:
+                    youtube = YouTube(link)
+                    stream = youtube.streams.first()
+                    stream.download(dir_base, "video", skip_existing=True)
+                except Exception as e:
+                    print(f"RealEstate10K: error when fetching link {link} specified in {file_base}.txt"
+                          f"with error {e} in second try")
+                finally:
+                    return None
 
             video_file = glob(f"{dir_base}/video*")[0]
             video = cv2.VideoCapture(video_file)
@@ -135,13 +169,34 @@ class RealEstate10K(Dataset):
                 return None
 
         # ================================================
-        # now we actually read data and return
+        # to save memory usage, we covert images to video
         # ================================================
         image_list = sorted(glob(f"{image_path}/*.jpg"))
-        refidx, taridx = np.random.choice(len(image_list), 2, replace=False)  # randomly choose two frames
+        # if not os.path.exists(os.path.join(dir_base, "video_Trim.mp4")) and len(image_list) > 0:
+
+        # ================================================
+        # now we actually read data and return
+        # ================================================
+        if self.trainstr == "train":
+            if len(image_list) < 3:
+                print(f"RealEstate10K: {file_base}.txt has less than 3 image, skip")
+                return None
+            stride = min(np.random.randint(3, 20), len(image_list) - 1)
+            startidx = np.random.randint(len(image_list) - stride)
+            endidx = startidx + stride
+            refidx, taridx = (startidx, endidx) if np.random.randint(2) else (endidx, startidx)
+        else:
+            refidx, taridx = 0, 5
+
+        if is_DEBUG:
+            print(f"read from {image_path} on {refidx} and {taridx}")
         refname, tarname = image_list[refidx], image_list[taridx]
-        refimg = imageio.imread(refname)
-        tarimg = imageio.imread(tarname)
+
+        refimg = PImage.open(refname)
+        widori, heiori = refimg.size
+
+        refimg = self.preprocess(refimg)
+        tarimg = self.preprocess(PImage.open(tarname))
 
         colcameras, colimages, colpoints3D = read_model(col_model_root, ".bin")
         refview, tarview = colimages[refidx + 1], colimages[taridx + 1]
@@ -149,20 +204,40 @@ class RealEstate10K(Dataset):
             print(f"RealEstate10K: error when choose ref view")
             return None
         point3ds = [colpoints3D[ptid].xyz for ptid in refview.point3D_ids if ptid >= 0]
-        point3ds = np.array(point3ds)
-        point2ds = refview.xys[refview.point3D_ids >= 0]
+        point3ds = np.array(point3ds, dtype=np.float32)
+        point2ds = refview.xys[refview.point3D_ids >= 0].astype(np.float32)
 
-        refpose = np.hstack([refview.qvec2rotmat(), refview.tvec.reshape(3, 1)])
-        tarpose = np.hstack([tarview.qvec2rotmat(), tarview.tvec.reshape(3, 1)])
+        refextrin = np.hstack([refview.qvec2rotmat(), refview.tvec.reshape(3, 1)]).astype(np.float32)
+        tarextrin = np.hstack([tarview.qvec2rotmat(), tarview.tvec.reshape(3, 1)]).astype(np.float32)
         intrin = colcameras[1].params
         intrin = np.array([[intrin[0], 0, intrin[2]],
                            [0, intrin[1], intrin[3]],
                            [0, 0, 1]], dtype=np.float32)
-        # compute depth of point3ds
-        point3ds_camnorm = refpose @ np.vstack([point3ds.T, np.ones((1, len(point3ds)), dtype=point3ds.dtype)])
-        point2ds_depth = point3ds_camnorm[2]
 
-        return refimg, tarimg, refpose, tarpose, intrin, point2ds, point2ds_depth
+        if self.mode == 'resize':
+            intrin_calib = np.array([512 / widori, 0, 0,
+                                     0, 512 / heiori, 0,
+                                     0, 0, 1], dtype=np.float32).reshape(3, 3)
+            intrin = intrin_calib @ intrin
+
+        # compute depth of point3ds
+        point3ds_camnorm = refextrin @ np.vstack([point3ds.T, np.ones((1, len(point3ds)), dtype=point3ds.dtype)])
+        point2ds_depth = point3ds_camnorm[2]
+        good_ptid = point2ds_depth > 0.01
+        point2ds = point2ds[good_ptid]
+        point2ds_depth = point2ds_depth[good_ptid]
+        # normalize pt2ds to -1 to 1
+        point2ds = point2ds * np.array([2 / widori, 2 / heiori], dtype=np.float32) - 1.
+
+        # random sample point so that output fixed number of points
+        ptnum = point2ds.shape[0]
+        ptsample = np.random.choice(ptnum, self.ptnum, replace=(ptnum < self.ptnum))
+        point2ds = point2ds[ptsample]
+        point2ds_depth = point2ds_depth[ptsample]
+
+        return refimg, tarimg, \
+               torch.tensor(refextrin), torch.tensor(tarextrin), \
+               torch.tensor(intrin), torch.tensor(point2ds), torch.tensor(point2ds_depth)
 
 
 if __name__ == "__main__":

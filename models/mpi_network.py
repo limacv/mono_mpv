@@ -5,7 +5,7 @@ from ._modules import *
 
 
 class MPINet(nn.Module):
-    def __init__(self, num_channels, mpi_layers):
+    def __init__(self, mpi_layers):
         super().__init__()
         self.mpi_layers = mpi_layers
         self.down = nn.MaxPool2d(2)
@@ -42,7 +42,7 @@ class MPINet(nn.Module):
         self.post2 = conv(64, 64, 3)
         self.up1 = conv(64, 64, 3)
         self.up1b = conv(64, 64, 3)
-        self.output = nn.Conv2d(64, num_channels, 3, padding=1)
+        self.output = nn.Conv2d(64, self.mpi_layers - 1 + 3, 3, padding=1)
         self.output_bias = apply_harmonic_bias
 
     def forward(self, img):
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     import numpy as np
     import matplotlib.pyplot as plt
     from utils import estimate_disparity_torch
-    model = MPINet(32 - 1 + 3, 32)
+    model = MPINet(32)
     model.initial_weights()
     model.load_state_dict(torch.load("../weights/mpinet_ori.pth"))
     model.cuda()

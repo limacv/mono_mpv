@@ -5,15 +5,13 @@ import subprocess
 import sys
 from .colmap_io_model import *
 from .colmap_database import *
+from . import colmap_path, is_DEBUG
 
-# $ mkdir $DATASET_PATH/dense
-colmap_path = "D:\\MSI_NB\\source\\maybeUseful\\COLMAP-3.6-exe\\COLMAP.bat"
 colmap_match_type = "exhaustive_matcher"
-colmap_isdebug = (getattr(sys, 'gettrace', None) is not None)
 
 
 def printdbg(_st):
-    if colmap_isdebug:
+    if is_DEBUG:
         print(_st)
 
 

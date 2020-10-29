@@ -80,7 +80,7 @@ class fakeMultiProcessing:
 
 
 if __name__ == "__main__":
-    from main import cfg
+    from train_main import cfg
     experiments = Experiments(cfg)
     experiments.add_experiment({"check_point": 0, "occ_cfg": {"estimate_occ": False}})
     experiments.add_experiments(["loss_weights", "photo_loss"], [1, 2, 3, 4, 5])

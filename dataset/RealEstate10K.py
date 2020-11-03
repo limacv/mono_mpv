@@ -16,6 +16,8 @@ from .colmap_wrapper import *
 
 
 RealEstate10K_skip_framenum = 3
+# resize_to_w, resize_to_h = 512 + 128 * 3, 512
+resize_to_w, resize_to_h = 512 + 128 * 3, 512
 
 
 class RealEstate10K(Dataset):
@@ -57,7 +59,7 @@ class RealEstate10K(Dataset):
         if mode == 'none':
             self.preprocess = ToTensor()
         elif mode == 'resize':
-            self.preprocess = Compose([Resize([512, 512]),
+            self.preprocess = Compose([Resize([resize_to_h, resize_to_w]),
                                        ToTensor()])
         elif mode == 'pad':
             self.preprocess = ToTensor()
@@ -89,13 +91,17 @@ class RealEstate10K(Dataset):
         return datas
 
     def getitem(self, item):
+        return self.getitem_bypath(self.file_list[item])
+
+    def getitem_bypath(self, path):
         """
         Get item specified in item-th .txt file
         Will return None is something's wrong, pay special attention to this cast
         Parse Txt file -> Download video -> Fetch&save frame -> SfM
         Attantion for the None return, means something is wrong
         """
-        file_name = self.file_list[item]
+        file_name = path  # self.file_list[item]
+        assert path in self.file_list
         file_base = os.path.basename(file_name).split('.')[0]
         dir_base = os.path.join(self.tmp_root, file_base)
         image_path = os.path.join(dir_base, "images")
@@ -119,6 +125,7 @@ class RealEstate10K(Dataset):
 
         timestamps = timestamps[::RealEstate10K_skip_framenum]
         extrins = extrins[::RealEstate10K_skip_framenum]
+        self._curtimestamps = timestamps.copy()
         # ================================================
         # if we don't have the images, we need to fetch the video and save images
         # ================================================
@@ -156,7 +163,7 @@ class RealEstate10K(Dataset):
                 if not ret or frame.size == 0:
                     print(f"RealEstate10K: error when reading frame {i} in {file_base}.txt")
                     return None
-                cv2.imwrite(os.path.join(image_path, f"{int(timestamp)}.jpg"), frame)
+                cv2.imwrite(os.path.join(image_path, f"{int(timestamp):010d}.jpg"), frame)
 
             video.release()
             os.remove(video_file)
@@ -210,6 +217,7 @@ class RealEstate10K(Dataset):
         # ================================================
         # now we actually read data and return
         # ================================================
+        self._curvideo_trim_path = video_trim_path
         video = cv2.VideoCapture(video_trim_path)
         if not video.isOpened():
             print(f"RealEstate10K: cannot open video file {video_trim_path}")
@@ -265,7 +273,7 @@ class RealEstate10K(Dataset):
         #     return None
         point3ds = [colpoints3D[ptid].xyz for ptid in refview.point3D_ids if ptid >= 0]
         point3ds = np.array(point3ds, dtype=np.float32)
-        if len(point3ds) <= 50:
+        if len(point3ds) <= 100:
             return None
         point2ds = refview.xys[refview.point3D_ids >= 0].astype(np.float32)
 
@@ -277,8 +285,8 @@ class RealEstate10K(Dataset):
                            [0, 0, 1]], dtype=np.float32)
 
         if self.mode == 'resize':
-            intrin_calib = np.array([512 / widori, 0, 0,
-                                     0, 512 / heiori, 0,
+            intrin_calib = np.array([resize_to_w / widori, 0, 0,
+                                     0, resize_to_h / heiori, 0,
                                      0, 0, 1], dtype=np.float32).reshape(3, 3)
             intrin = intrin_calib @ intrin
 
@@ -287,6 +295,7 @@ class RealEstate10K(Dataset):
         # print(f"later.shape={np.vstack([point3ds.T, np.ones((1, len(point3ds)), dtype=point3ds.dtype)]).shape}")
         point3ds_camnorm = refextrin @ np.vstack([point3ds.T, np.ones((1, len(point3ds)), dtype=point3ds.dtype)])
         point2ds_depth = point3ds_camnorm[2]
+
         good_ptid = point2ds_depth > 0.01
         point2ds = point2ds[good_ptid]
         point2ds_depth = point2ds_depth[good_ptid]

@@ -17,12 +17,12 @@ def draw_dense_disp(disp: torch.Tensor, scale) -> np.ndarray:
     return display
 
 
-def draw_sparse_depth(im: torch.Tensor, poses: torch.Tensor, depth: torch.Tensor, scale) -> np.ndarray:
+def draw_sparse_depth(im: torch.Tensor, poses: torch.Tensor, depth: torch.Tensor) -> np.ndarray:
     im_np = (im[0].detach().permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy()
     hei, wid, _ = im_np.shape
     poses = (poses[0].detach().cpu().numpy() + 1.) * np.array([wid, hei]).reshape(1, 2) / 2.
     poses = poses.astype(np.float32)
-    depth = (depth[0].detach() * 255 * scale).type(torch.uint8).cpu().numpy().reshape(-1, 1)
+    depth = (depth[0].detach() * 255).type(torch.uint8).cpu().numpy().reshape(-1, 1)
     depth_color = cv2.cvtColor(cv2.applyColorMap(depth, cv2.COLORMAP_HOT), cv2.COLOR_BGR2RGB).squeeze(1)
     im_np = cv2.UMat(im_np)
     for color, pos in zip(depth_color, poses):
@@ -31,7 +31,18 @@ def draw_sparse_depth(im: torch.Tensor, poses: torch.Tensor, depth: torch.Tensor
     return cv2.UMat.get(im_np)
 
 
-def photometric_loss(im, im_warp, order=1):
+def photometric_loss(imref, imreconstruct, mode='l1'):
+    if mode in ["L1", "l1", "l1_loss", "L1_loss"]:
+        return photo_l1loss(imref, imreconstruct)
+    elif mode in ["ssim", "SSIM", "ssim_loss", "SSIM_loss"]:
+        return ssim_loss(imref, imreconstruct)
+    elif mode in ["ternary", "ternary_loss"]:
+        return ternary_loss(imref, imreconstruct)
+    else:
+        raise NotImplementedError(f"loss_utils::{mode} not recognized")
+
+
+def photo_l1loss(im, im_warp, order=1):
     # scale = 3. / im.shape[1]  # normalize the loss to as if there were three channels
     diff = torch.abs(im - im_warp) + 0.0001  # why?
     diff = torch.sum(diff, dim=1) / 3.
@@ -78,7 +89,7 @@ def ssim_loss(im, im_warp):
     ssim_n = (2 * u_x_u_y + c1) * (2 * sigma_xy + c2)
     ssim_d = (u_x_u_x + u_y_u_y + c1) * (sigma_x + sigma_y + c2)
     ssim = ssim_n / ssim_d
-    ssim = torch.mean(ssim, dim=1, keepdim=True)
+    ssim = torch.mean(ssim, dim=1)
     dist = torch.clamp((- ssim + 1.) / 2, 0, 1)
     return dist
 
@@ -111,12 +122,12 @@ def ternary_loss(im, im_warp, max_distance=1):
     def _hamming_distance(_t1, _t2):
         _dist = torch.pow(_t1 - _t2, 2)
         dist_norm = _dist / (0.1 + _dist)
-        dist_mean = torch.mean(dist_norm, 1, keepdim=True)  # instead of sum
+        dist_mean = torch.mean(dist_norm, 1)  # instead of sum
         return dist_mean
 
     def _valid_mask(t, padding):
         n, _, h, w = t.size()
-        inner = torch.ones(n, 1, h - 2 * padding, w - 2 * padding).type_as(t)
+        inner = torch.ones(n, h - 2 * padding, w - 2 * padding).type_as(t)
         _mask = torchf.pad(inner, [padding] * 4)
         return _mask
 

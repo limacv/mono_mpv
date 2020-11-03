@@ -29,18 +29,23 @@ cfg = {
     # comment of current epoch, will print on config.txt
     "comment": "<Please add comment in experiments>",
     "model_name": "MPINet",
-    "batch_size": 4,
+    "batch_size": 2,
     "num_epoch": 100,
     "save_epoch_freq": 200,
     "sample_num_per_epoch": 2000,
     "lr": 0.0001,
     "check_point": "mpinet_ori.pth",
     "loss_weights": {
+        "pixel_loss_cfg": 'ssim',
         "pixel_loss": 1,
         "smooth_loss": 0.5,
         "depth_loss": 0.1,
+        "sparse_loss": 0.0001,
     },
 }
+
+# TODO:
+#  2. add black list to dataset
 
 
 def main(cfg):
@@ -71,9 +76,16 @@ if __name__ == "__main__":
     # ////////////////////////////////////////////////////////////////////////////////////////
     # This is where you can add experiments                                                 //
     experiments = Experiments(cfg, False)  # will add first experiment as default           //
-    experiments.add_experiment({"comment": "from pretrained, differentiable scale"})
-    experiments.add_experiment({"comment": "from scratch, differentiable scale",
-                                "check_point": "no"})
+    experiments.add_experiment({"comment": "newdata, newsz, ssim loss, from pretrained",
+                                "loss_weights": {
+                                    "sparse_loss": 0,
+                                }})
+    experiments.add_experiment({"comment": "newdata, newsz, sparse loss, ssim loss, from pretrained",
+                                "loss_weights": {
+                                    "sparse_loss": 0.0001,
+                                }})
+    experiments.add_experiment({"comment": "newdata, newsz, sparse loss, ssim loss, from scratch", "check_point": "no"})
+    experiments.add_experiments(["loss_weights", "pixel_loss_cfg"], ["ternary", "l1"])
 
     # End of adding experiments                                                             //
     # ////////////////////////////////////////////////////////////////////////////////////////

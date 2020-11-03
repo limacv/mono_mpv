@@ -8,15 +8,20 @@ import shutil
 sys.path.append("..")
 from dataset.RealEstate10K import RealEstate10K, RealEstate10K_root
 
-# np.random.seed(0)
+np.random.seed(0)
 process_train = True
 
 train_str = "train" if process_train else "test"
 success_file = os.path.join(RealEstate10K_root, f"{train_str}_valid.txt")
+black_list_name = os.path.join(RealEstate10K_root, "black_list.txt")
+
 print(f"synchonize with {success_file}")
 with open(success_file, 'r') as file:
     lines = file.readlines()
+with open(black_list_name, 'r') as file:
+    black_lines = file.readlines()
 lines = {line.strip('\n') for line in lines}
+black_lines = {os.path.basename(line.strip('\n')) for line in black_lines}
 
 trainset = RealEstate10K(process_train)
 
@@ -36,6 +41,9 @@ for train_id in train_seq:
         ret = None
         print(e)
     name = trainset.file_list[train_id]
+    if os.path.basename(name) in black_lines:
+        ret = None
+
     if ret is not None:
         if name in lines:
             print(f"{os.path.basename(name)} already exists")

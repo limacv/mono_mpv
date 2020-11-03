@@ -7,7 +7,6 @@ import sys
 from .loss_utils import *
 from torchvision.transforms import ToTensor, Resize
 from .mpi_utils import *
-from .loss_utils import *
 import cv2
 
 '''
@@ -71,7 +70,7 @@ class ModelandLossBase:
             # render target view
             tarview, tarmask = render_newview(mpi, refextrin, tarextrin, intrin, depth, True)
 
-            l1_map = photometric_loss(tarview, tarim)
+            l1_map = photo_l1loss(tarview, tarim)
             l1_loss = (l1_map * tarmask).sum() / tarmask.sum()
             val_dict["val_l1diff"] = float(l1_loss)
 
@@ -80,7 +79,7 @@ class ModelandLossBase:
             diff = (l1_map[0] * 255).detach().cpu().type(torch.uint8).numpy()
             val_dict["vis_newv"] = view0
             val_dict["vis_diff"] = cv2.cvtColor(cv2.applyColorMap(diff, cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
-            sparsedepth = draw_sparse_depth(refim, pt2ds, ptzs_gt, depth[0, -1])
+            # sparsedepth = draw_sparse_depth(refim, pt2ds, 1 / ptzs_gt, depth[0, -1])
             val_dict["vis_disp"] = draw_dense_disp(disparity, depth[0, -1])
         return val_dict
 
@@ -115,6 +114,7 @@ class ModelandLoss(ModelandLossBase):
     def __init__(self, model: nn.Module, loss_cfg: dict):
         super(ModelandLoss, self).__init__(model)
         self.loss_weight = loss_cfg.copy()
+        self.pixel_loss_mode = self.loss_weight.pop("pixel_loss_cfg", "l1")
 
     def train_forward(self, *args: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
         # tocuda and unzip
@@ -139,11 +139,11 @@ class ModelandLoss(ModelandLossBase):
 
         # render target view
         tarview, tarmask = render_newview(mpi, refextrin, tarextrin, intrin, depth, True)
-
+        # sparsedepth = draw_sparse_depth(refim, pt2ds, 1 / ptzs_gt)
         # compute final loss
         final_loss, loss_dict = torch.tensor(0., dtype=torch.float32).cuda(), {}
         if "pixel_loss" in self.loss_weight.keys():
-            l1_loss = photometric_loss(tarview, tarim)
+            l1_loss = photometric_loss(tarview, tarim, mode=self.pixel_loss_mode)
             l1_loss = (l1_loss * tarmask).sum() / tarmask.sum()
             final_loss += (l1_loss * self.loss_weight["pixel_loss"])
             loss_dict["pixel"] = float(l1_loss.detach())
@@ -159,5 +159,12 @@ class ModelandLoss(ModelandLossBase):
             diff = torch.pow(diff, 2).mean()
             final_loss += (diff * self.loss_weight["depth_loss"])
             loss_dict["depth"] = float(diff.detach())
+
+        if "sparse_loss" in self.loss_weight.keys():
+            alphas = mpi[:, :, -1, :, :]
+            alphas_norm = alphas / torch.norm(alphas, dim=1, keepdim=True)
+            sparse_loss = torch.sum(torch.abs(alphas_norm), dim=1).mean()
+            final_loss += sparse_loss * self.loss_weight["sparse_loss"]
+            loss_dict["sparse_loss"] = float(sparse_loss.detach())
 
         return final_loss, loss_dict

@@ -31,7 +31,7 @@ cfg = {
     "model_name": "MPINet",
     "batch_size": 4,
     "num_epoch": 100,
-    "save_epoch_freq": 2000,
+    "save_epoch_freq": 200,
     "sample_num_per_epoch": 2000,
     "lr": 0.0001,
     "check_point": "mpinet_ori.pth",
@@ -71,7 +71,9 @@ if __name__ == "__main__":
     # ////////////////////////////////////////////////////////////////////////////////////////
     # This is where you can add experiments                                                 //
     experiments = Experiments(cfg, False)  # will add first experiment as default           //
-    experiments.add_experiment({"comment": "repo last week, try on alley_1"})
+    experiments.add_experiment({"comment": "from pretrained, differentiable scale"})
+    experiments.add_experiment({"comment": "from scratch, differentiable scale",
+                                "check_point": "no"})
 
     # End of adding experiments                                                             //
     # ////////////////////////////////////////////////////////////////////////////////////////

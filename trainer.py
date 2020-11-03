@@ -54,15 +54,14 @@ def train(cfg: dict):
         check_point["optimizer"]["param_groups"][0]["lr"] = lr
         optimizer.load_state_dict(check_point["optimizer"])
 
-    evalset = RealEstate10K(is_train=False)
-    valid_visual_out = cfg["write_validate_result"]
+    evalset = RealEstate10K(is_train=False, subset_byfile=True)
     validate_gtnum = cfg["validate_num"] if 0 < cfg["validate_num"] < len(evalset) else len(evalset)
 
     datasubset = Subset(evalset, torch.randperm(len(evalset))[:validate_gtnum])
     evaluatedata = DataLoader(datasubset, batch_size=batch_sz, shuffle=False, pin_memory=True, drop_last=True,)
     validate_freq = cfg["valid_freq"]
 
-    trainset = RealEstate10K(is_train=True)
+    trainset = RealEstate10K(is_train=True, subset_byfile=True)
     train_report_freq = cfg["train_report_freq"]
     start_time = time.time()
     trainingdata = DataLoader(trainset, batch_sz, pin_memory=True, drop_last=True,
@@ -77,7 +76,7 @@ def train(cfg: dict):
     with open(cfg_out, 'a') as cfg_outfile:
         loss_str = ', '.join([f'{k}:{v}' for k, v in cfg['loss_weights'].items()])
         cfg_str = f"\n-------------------------------------------------\n" \
-                  f"|Name: {log_dir}|\n" \
+                  f"|Name: {log_dir}|\n"  \
                   f"-----------------\n" \
                   f"Comment: {cfg['comment']}\n" \
                   f"Dataset: train:{trainset.name}, len={len(trainset)}, eval:{evalset.name}, len={len(evalset)}\n" \
@@ -104,12 +103,12 @@ def train(cfg: dict):
 
             # output loss message
             if iternum % train_report_freq == 0:
-                time_per_iter = (time.time() - start_time) * 1e6 / train_report_freq
+                time_per_iter = (time.time() - start_time) / train_report_freq
                 # output iter infomation
                 loss_str = " | ".join([f"{k}:{v:.3f}" for k, v in loss_dict.items()])
                 curlr = optimizer.state_dict()["param_groups"][0]["lr"]
                 print(f"    iter {iternum}/{len(trainingdata)}::loss:{loss:.3f} | {loss_str} "
-                      f"| lr:{curlr} | time:{time_per_iter}s", flush=True)
+                      f"| lr:{curlr} | time:{time_per_iter:.3f}s", flush=True)
                 start_time = time.time()
 
             # perform evaluation
@@ -121,7 +120,7 @@ def train(cfg: dict):
                     _val_dict = modelloss.valid_forward(*evaldatas, visualize=(i == 0))
 
                     if i == 0:
-                        for k in _val_dict.keys():
+                        for k in _val_dict.copy().keys():
                             if "vis_" in k:
                                 tensorboard.add_image(k, _val_dict[k], step, dataformats='HWC')
                                 _val_dict.pop(k, None)
@@ -130,7 +129,8 @@ def train(cfg: dict):
                                 for k, v in _val_dict.items()}
 
                 val_dict = {k: v / len(evaluatedata) for k, v in val_dict.items()}
-
+                for val_name, val_value in val_dict.items():
+                    tensorboard.add_scalar(val_name, val_value, step)
                 print(" eval:" + ' | '.join([f"{k}: {v:.3f}" for k, v in val_dict.items()]), flush=True)
 
             # first evaluate and then backward so that first evaluate is always the same
@@ -138,9 +138,7 @@ def train(cfg: dict):
             loss.backward()
             optimizer.step()
 
-            # output epoch info
-            print(f"epoch {epoch} ================================")
-            if step % save_epoch_freq:
+            if step % save_epoch_freq == 0:
                 torch.save({
                     "state_dict": model.state_dict(),
                     "epoch": epoch,
@@ -148,6 +146,9 @@ def train(cfg: dict):
                     "cfg": cfg_str,
                     "optimizer": optimizer.state_dict()
                 }, f"{save_path}{unique_timestr}.pth")
-                print(f"checkpoint saved {epoch}.pth", flush=True)
+                print(f"checkpoint saved {epoch}{unique_timestr}.pth", flush=True)
+
+        # output epoch info
+        print(f"epoch {epoch} ================================")
 
     tensorboard.close()

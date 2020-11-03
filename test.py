@@ -15,8 +15,10 @@ modelloss = ModelandLoss(model, {
         "depth_loss": 0.1,
     })
 
-dataset = RealEstate10K(False)
-datas = dataset[1]
+dataset = RealEstate10K(True)
+for datas in dataset:
+    print(datas)
+datas = dataset[5]
 datas = [data.unsqueeze(0) for data in datas]
 
 modelloss.valid_forward(*datas, visualize=True)

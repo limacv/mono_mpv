@@ -1,12 +1,34 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as torchf
+import numpy as np
+import cv2
 from typing import List, Sequence, Union, Tuple, Dict
 
 '''
 implement all kinds of losses
 '''
 const_use_sobel = True
+
+
+def draw_dense_disp(disp: torch.Tensor, scale) -> np.ndarray:
+    display = (disp[0].detach() * 255 * scale).type(torch.uint8).cpu().numpy()
+    display = cv2.cvtColor(cv2.applyColorMap(display, cv2.COLORMAP_HOT), cv2.COLOR_BGR2RGB)
+    return display
+
+
+def draw_sparse_depth(im: torch.Tensor, poses: torch.Tensor, depth: torch.Tensor, scale) -> np.ndarray:
+    im_np = (im[0].detach().permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy()
+    hei, wid, _ = im_np.shape
+    poses = (poses[0].detach().cpu().numpy() + 1.) * np.array([wid, hei]).reshape(1, 2) / 2.
+    poses = poses.astype(np.float32)
+    depth = (depth[0].detach() * 255 * scale).type(torch.uint8).cpu().numpy().reshape(-1, 1)
+    depth_color = cv2.cvtColor(cv2.applyColorMap(depth, cv2.COLORMAP_HOT), cv2.COLOR_BGR2RGB).squeeze(1)
+    im_np = cv2.UMat(im_np)
+    for color, pos in zip(depth_color, poses):
+        cv2.circle(im_np, (pos[0], pos[1]), 2,
+                   (int(color[0]), int(color[1]), int(color[2])), -1)
+    return cv2.UMat.get(im_np)
 
 
 def photometric_loss(im, im_warp, order=1):

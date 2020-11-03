@@ -60,12 +60,12 @@ class ModelandLossBase:
             mpi, blend_weight = netout2mpi(netout, refim, ret_blendw=True)
 
             # estimate depth map and sample sparse point depth
-            depth = make_depths(32).type_as(mpi)
+            depth = make_depths(32).type_as(mpi).unsqueeze(0).repeat(batchsz, 1)
             disparity = estimate_disparity_torch(mpi, depth, blendweight=blend_weight)
             ptdis_e = torchf.grid_sample(disparity.unsqueeze(1), pt2ds.unsqueeze(1)).squeeze(1).squeeze(1)
 
             # compute scale
-            scale = torch.exp(torch.log(ptdis_e * ptzs_gt).mean(dim=-1))
+            scale = torch.exp(torch.log(ptdis_e * ptzs_gt).mean(dim=-1, keepdim=True))
             depth *= scale
 
             # render target view
@@ -73,15 +73,15 @@ class ModelandLossBase:
 
             l1_map = photometric_loss(tarview, tarim)
             l1_loss = (l1_map * tarmask).sum() / tarmask.sum()
-            val_dict["l1diff"] = float(l1_loss)
+            val_dict["val_l1diff"] = float(l1_loss)
 
         if "visualize" in kwargs.keys() and kwargs["visualize"]:
             view0 = (tarview[0] * 255).permute(1, 2, 0).detach().cpu().type(torch.uint8).numpy()
-            disp0 = (disparity[0] * 255 * depth[-1]).detach().cpu().type(torch.uint8).numpy()
             diff = (l1_map[0] * 255).detach().cpu().type(torch.uint8).numpy()
             val_dict["vis_newv"] = view0
             val_dict["vis_diff"] = cv2.cvtColor(cv2.applyColorMap(diff, cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
-            val_dict["vis_disp"] = cv2.cvtColor(cv2.applyColorMap(disp0, cv2.COLORMAP_HOT), cv2.COLOR_BGR2RGB)
+            sparsedepth = draw_sparse_depth(refim, pt2ds, ptzs_gt, depth[0, -1])
+            val_dict["vis_disp"] = draw_dense_disp(disparity, depth[0, -1])
         return val_dict
 
     def infer_forward(self, im: torch.Tensor):
@@ -129,12 +129,13 @@ class ModelandLoss(ModelandLossBase):
         mpi, blend_weight = netout2mpi(netout, refim, ret_blendw=True)
 
         # estimate depth map and sample sparse point depth
-        depth = make_depths(32).type_as(mpi)
+        depth = make_depths(32).type_as(mpi).unsqueeze(0).repeat(batchsz, 1)
         disparity = estimate_disparity_torch(mpi, depth, blendweight=blend_weight)
         ptdis_e = torchf.grid_sample(disparity.unsqueeze(1), pt2ds.unsqueeze(1)).squeeze(1).squeeze(1)
-        with torch.no_grad():  # compute scale
-            scale = torch.exp(torch.log(ptdis_e * ptzs_gt).mean(dim=-1))
-            depth *= scale
+
+        # with torch.no_grad():  # compute scale
+        scale = torch.exp(torch.log(ptdis_e * ptzs_gt).mean(dim=-1, keepdim=True))
+        depth *= scale
 
         # render target view
         tarview, tarmask = render_newview(mpi, refextrin, tarextrin, intrin, depth, True)

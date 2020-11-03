@@ -36,14 +36,14 @@ def make_depths(num_plane, min_depth=default_d_near, max_depth=default_d_far):
 def estimate_disparity_torch(mpi: torch.Tensor, depthes: torch.Tensor, blendweight=None):
     """Compute disparity map from a set of MPI layers.
     mpi: tensor of shape B x LayerNum x 4 x H x W
-    depthes: tensor of shape [LayerNum, ]
+    depthes: tensor of shape [B x LayerNum]
     blendweight: optional blendweight that to reduce reduntante computation
     return: tensor of shape B x H x W
     """
     assert (mpi.dim() == 5)
     batchsz, num_plane, _, height, width = mpi.shape
     disparities = torch.reciprocal(depthes)
-    disparities = disparities.reshape(1, -1, 1, 1).type_as(mpi)
+    disparities = disparities.reshape(batchsz, -1, 1, 1).type_as(mpi)
 
     alpha = mpi[:, :, -1, ...]  # alpha.shape == B x LayerNum x H x W
     if blendweight is None:
@@ -164,13 +164,13 @@ def render_newview(mpi: torch.Tensor, srcextrin: torch.Tensor, tarextrin: torch.
     """
     mpi: [B, 32, 4, H, W]
     srcpose&tarpose: [B, 3, 4]
-    depthes: tensor of shape [LayerNum, ]
+    depthes: tensor of shape [Bx LayerNum]
     intrin: [B, 3, 3]
     """
     batchsz, planenum, _, hei, wid = mpi.shape
 
     planenormal = torch.tensor([0, 0, 1]).reshape(1, 3).repeat(batchsz, 1).type_as(mpi)
-    distance = depths.reshape(1, planenum).repeat(batchsz, 1)
+    distance = depths.reshape(batchsz, planenum)
     with torch.no_grad():
         # switching the tar/src pose since we have extrinsic but compute_homography uses poses
         # srcextrin = torch.tensor([1, 0, 0, 0,

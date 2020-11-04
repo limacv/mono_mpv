@@ -81,31 +81,42 @@ class ModelandLossBase:
             val_dict["vis_diff"] = cv2.cvtColor(cv2.applyColorMap(diff, cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
             # sparsedepth = draw_sparse_depth(refim, pt2ds, 1 / ptzs_gt, depth[0, -1])
             val_dict["vis_disp"] = draw_dense_disp(disparity, depth[0, -1])
+            val_dict["save_mpi"] = mpi[0]
         return val_dict
 
-    def infer_forward(self, im: torch.Tensor):
-        if im.dim() == 3:
-            im = im.unsqueeze(0)
-
-        im = im.cuda()
-        batchsz, cnl, hei, wid = im.shape
-        hei_new, wid_new = ((hei - 1) // 128 + 1) * 128, ((wid - 1) // 128 + 1) * 128
-        padding = [
-            (wid_new - wid) // 2,
-            (wid_new - wid + 1) // 2,
-            (hei_new - hei) // 2,
-            (hei_new - hei + 1) // 2
-        ]
-        img_padded = torchf.pad(im, padding)
-
-        self.model.eval()
+    def infer_forward(self, im: torch.Tensor, mode='pad_constant'):
         with torch.no_grad():
+            if im.dim() == 3:
+                im = im.unsqueeze(0)
+
+            im = im.cuda()
+            batchsz, cnl, hei, wid = im.shape
+            if mode == 'resize':
+                hei_new, wid_new = 512, 512 + 128 * 3
+                img_padded = Resize([hei_new, wid_new])(im)
+            elif 'pad' in mode:
+                hei_new, wid_new = ((hei - 1) // 128 + 1) * 128, ((wid - 1) // 128 + 1) * 128
+                padding = [
+                    (wid_new - wid) // 2,
+                    (wid_new - wid + 1) // 2,
+                    (hei_new - hei) // 2,
+                    (hei_new - hei + 1) // 2
+                ]
+                mode = mode[4:] if "pad_" in mode else "constant"
+                img_padded = torchf.pad(im, padding, mode)
+            else:
+                raise NotImplementedError
+
+            self.model.eval()
             netout = self.model(img_padded)
 
             # depad
-            netout = netout[..., padding[2]: hei_new - padding[3], padding[0]: wid_new - padding[1]]
+            if mode == 'resize':
+                netout = Resize([hei_new, wid_new])(netout)
+            else:
+                netout = netout[..., padding[2]: hei_new - padding[3], padding[0]: wid_new - padding[1]]
             mpi = netout2mpi(netout, im)
-        self.model.train()
+            self.model.train()
 
         return mpi
 

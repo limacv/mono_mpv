@@ -40,11 +40,15 @@ cfg = {
         "pixel_loss": 1,
         "smooth_loss": 0.5,
         "depth_loss": 0.1,
-        "sparse_loss": 0.0001,
+        "sparse_loss": 0,
     },
 }
 
 # TODO:
+#  2. add mono temporal loss
+#  3. try LSTM model
+#  4. smooth term too small
+#  5. the new dataset
 #  2. add black list to dataset
 
 
@@ -76,6 +80,7 @@ if __name__ == "__main__":
     # ////////////////////////////////////////////////////////////////////////////////////////
     # This is where you can add experiments                                                 //
     experiments = Experiments(cfg, False)  # will add first experiment as default           //
+    """
     experiments.add_experiment({"comment": "newdata, newsz, ssim loss, from pretrained",
                                 "loss_weights": {
                                     "sparse_loss": 0,
@@ -86,6 +91,29 @@ if __name__ == "__main__":
                                 }})
     experiments.add_experiment({"comment": "newdata, newsz, sparse loss, ssim loss, from scratch", "check_point": "no"})
     experiments.add_experiments(["loss_weights", "pixel_loss_cfg"], ["ternary", "l1"])
+    """
+    experiments.add_experiment({"comment": "large smooth term, no sparse loss, from pretrained",
+                                "loss_weights": {
+                                    "smooth_loss": 3,
+                                    "sparse_loss": 0},
+                                })
+    experiments.add_experiment({"comment": "large smooth term, with sparse loss, from pretrained",
+                                "loss_weights": {
+                                    "smooth_loss": 3,
+                                    "sparse_loss": 0.01},
+                                })
+    experiments.add_experiment({"comment": "large smooth term, no sparse loss, from scratch",
+                                "check_point": "no",
+                                "loss_weights": {
+                                    "smooth_loss": 3,
+                                    "sparse_loss": 0},
+                                })
+    experiments.add_experiment({"comment": "large smooth term, with sparse loss, from scratch",
+                                "check_point": "no",
+                                "loss_weights": {
+                                    "smooth_loss": 3,
+                                    "sparse_loss": 0.01},
+                                })
 
     # End of adding experiments                                                             //
     # ////////////////////////////////////////////////////////////////////////////////////////

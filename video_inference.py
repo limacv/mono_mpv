@@ -6,20 +6,27 @@ from torchvision.transforms import ToTensor
 import numpy as np
 import cv2
 import os
+from models.mpi_utils import *
 
 
-state_dict_path = "./log/MPINet/mpinet_ori.pth"
-video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\traintmp\\aaa25e83a0ba9a36\\video_Trim.mp4"
-videoout_path = "D:\\MSI_NB\\source\\data\\Visual\\disparity.mp4"
-videoout1_path = "D:\\MSI_NB\\source\\data\\Visual\\newview.mp4"
+state_dict_path = "./log/MPINet1104_003211.pth"
+# state_dict_path = "./log/MPINet/mpinet_ori.pth"
+video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim.mp4"
+out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
+videoout_path = os.path.join(out_prefix, "disparity.mp4")
+videoout1_path = os.path.join(out_prefix, "newview.mp4")
+mpiout_path = os.path.join(out_prefix, "mpi")
 
 model = MPINet(32).cuda()
-model.load_state_dict(torch.load(state_dict_path)["state_dict"])
+state_dict = torch.load(state_dict_path, map_location='cuda:0')
+torch.save({ "state_dict": state_dict["state_dict"]}, state_dict_path)
+model.load_state_dict(state_dict["state_dict"])
 modelloss = ModelandLoss(model, {})
 
 cap = cv2.VideoCapture(video_path)
 out = cv2.VideoWriter()
 out1 = cv2.VideoWriter()
+frameidx = 0
 
 while True:
     ret, img = cap.read()
@@ -29,7 +36,10 @@ while True:
     hei, wid, _ = img.shape
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img_tensor = ToTensor()(img).cuda()
-    mpi = modelloss.infer_forward(img_tensor)
+    mpi = modelloss.infer_forward(img_tensor, mode='pad_reflect')
+
+    if frameidx == 0:
+        save_mpi(mpi, mpiout_path)
     depthes = make_depths(32).cuda()
     disparity = estimate_disparity_torch(mpi, depthes)
 
@@ -60,5 +70,7 @@ while True:
         out1.open(videoout1_path, 828601953, 30., (wid, hei), True)
     out.write(visdisp)
     out1.write(visview)
+
+    frameidx += 1
 
 out.release()

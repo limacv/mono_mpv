@@ -1,8 +1,28 @@
 import numpy as np
 import torch
 import torch.nn.functional as torchf
+import cv2
+import os
+
 default_d_near = 1
 default_d_far = 100
+
+
+def save_mpi(mpi: torch.Tensor, path):
+    """
+    mpi: tensor of shape [B, L, 4, H, W] or [L, 4, H, W]
+    only first mpi will be saved
+    """
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    if mpi.dim() == 5:
+        mpi = mpi[0]
+    mpi = (mpi.detach() * 255).type(torch.uint8)
+    permute = torch.tensor([2, 1, 0, 3], dtype=torch.long)
+    mpi = mpi[:, permute].permute(0, 2, 3, 1).cpu().numpy()  # rgb to bgr
+    for i, layer in enumerate(mpi):
+        cv2.imwrite(os.path.join(path, f"mpi{i:02d}.png"), layer)
 
 
 def estimate_disparity_np(mpi: np.ndarray, min_depth=1, max_depth=100):

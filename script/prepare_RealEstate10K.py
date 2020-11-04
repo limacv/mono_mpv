@@ -9,7 +9,7 @@ sys.path.append("..")
 from dataset.RealEstate10K import RealEstate10K, RealEstate10K_root
 
 np.random.seed(0)
-process_train = True
+process_train = False
 
 train_str = "train" if process_train else "test"
 success_file = os.path.join(RealEstate10K_root, f"{train_str}_valid.txt")

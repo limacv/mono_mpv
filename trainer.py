@@ -8,6 +8,7 @@ from tensorboardX import SummaryWriter
 
 from models.ModelWithLoss import ModelandLoss
 from models.mpi_network import MPINet
+from models.mpi_utils import save_mpi
 from dataset.RealEstate10K import RealEstate10K
 
 
@@ -124,6 +125,8 @@ def train(cfg: dict):
                             if "vis_" in k:
                                 tensorboard.add_image(k, _val_dict[k], step, dataformats='HWC')
                                 _val_dict.pop(k, None)
+                            if "save_" in k:
+                                save_mpi(_val_dict.pop(k), f"{save_path}{unique_timestr}")
 
                     val_dict = {k: val_dict[k] + v if k in val_dict.keys() else v
                                 for k, v in _val_dict.items()}
@@ -144,7 +147,7 @@ def train(cfg: dict):
                     "epoch": epoch,
                     "step": step,
                     "cfg": cfg_str,
-                    "optimizer": optimizer.state_dict()
+                    # "optimizer": optimizer.state_dict()
                 }, f"{save_path}{unique_timestr}.pth")
                 print(f"checkpoint saved {epoch}{unique_timestr}.pth", flush=True)
 

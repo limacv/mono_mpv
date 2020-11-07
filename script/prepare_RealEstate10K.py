@@ -6,7 +6,7 @@ import datetime
 import shutil
 
 sys.path.append("..")
-from dataset.RealEstate10K import RealEstate10K, RealEstate10K_root
+from dataset.RealEstate10K import RealEstate10K_Img, RealEstate10K_root
 
 np.random.seed(0)
 process_train = False
@@ -23,7 +23,7 @@ with open(black_list_name, 'r') as file:
 lines = {line.strip('\n') for line in lines}
 black_lines = {os.path.basename(line.strip('\n')) for line in black_lines}
 
-trainset = RealEstate10K(process_train)
+trainset = RealEstate10K_Img(process_train)
 
 print(f"totally {len(trainset)} {train_str} video")
 

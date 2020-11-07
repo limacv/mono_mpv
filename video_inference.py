@@ -1,6 +1,7 @@
-from models.ModelWithLoss import ModelandLoss
+from models.ModelWithLoss import ModelandSVLoss
 from models.mpi_network import MPINet
 from models.mpi_utils import *
+from models.loss_utils import *
 import torch
 from torchvision.transforms import ToTensor
 import numpy as np
@@ -9,19 +10,19 @@ import os
 from models.mpi_utils import *
 
 
-state_dict_path = "./log/MPINet1104_003211.pth"
+state_dict_path = "./log/MPINet1104_003019.pth"
 # state_dict_path = "./log/MPINet/mpinet_ori.pth"
-video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim.mp4"
+video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\traintmp\\3b253958e49a169f\\video_Trim.mp4"
 out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
 videoout_path = os.path.join(out_prefix, "disparity.mp4")
 videoout1_path = os.path.join(out_prefix, "newview.mp4")
-mpiout_path = os.path.join(out_prefix, "mpi")
+mpiout_path = os.path.join(out_prefix, "mpi_traindata" + ("_ori" if "_ori" in state_dict_path else ""))
 
 model = MPINet(32).cuda()
 state_dict = torch.load(state_dict_path, map_location='cuda:0')
-torch.save({ "state_dict": state_dict["state_dict"]}, state_dict_path)
+# torch.save({"state_dict": state_dict["state_dict"]}, state_dict_path)
 model.load_state_dict(state_dict["state_dict"])
-modelloss = ModelandLoss(model, {})
+modelloss = ModelandSVLoss(model, {})
 
 cap = cv2.VideoCapture(video_path)
 out = cv2.VideoWriter()
@@ -60,8 +61,9 @@ while True:
     ).type_as(mpi).unsqueeze(0)
     view = render_newview(mpi, source_pose, target_pose, intrin, depthes)
 
-    disp0 = (disparity[0] * 255 * depthes[-1]).detach().cpu().type(torch.uint8).numpy()
-    visdisp = cv2.applyColorMap(disp0, cv2.COLORMAP_HOT)
+    visdisp = draw_dense_disp(disparity, depthes[-1])
+    # disp0 = (disparity[0] * 255 * depthes[-1]).detach().cpu().type(torch.uint8).numpy()
+    # visdisp = cv2.applyColorMap(disp0, cv2.COLORMAP_HOT)
     visview = (view * 255).type(torch.uint8).squeeze(0).permute(1, 2, 0).cpu().numpy()
     visview = cv2.cvtColor(visview, cv2.COLOR_RGB2BGR)
 

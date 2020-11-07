@@ -7,11 +7,11 @@ import shutil
 from glob import glob
 
 sys.path.append("..")
-from dataset.RealEstate10K import RealEstate10K, RealEstate10K_root
+from dataset.RealEstate10K import RealEstate10K_Img, RealEstate10K_root
 
 
 def main(istrain=True):
-    trainset = RealEstate10K(istrain)
+    trainset = RealEstate10K_Img(istrain)
     file_list_from_tmp = glob(os.path.join(RealEstate10K_root, f"{trainset.trainstr}tmp/*"))
     file_list_from_tmp = {os.path.join(RealEstate10K_root, trainset.trainstr, f"{os.path.basename(_f)}.txt")
                           for _f in file_list_from_tmp}

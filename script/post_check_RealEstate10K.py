@@ -6,11 +6,11 @@ import datetime
 import shutil
 
 sys.path.append("..")
-from dataset.RealEstate10K import RealEstate10K, RealEstate10K_root
+from dataset.RealEstate10K import RealEstate10K_Img, RealEstate10K_root
 
 
 def main(istrain=True):
-    trainset = RealEstate10K(istrain, subset_byfile=True)
+    trainset = RealEstate10K_Img(istrain, subset_byfile=True)
     trainset_list = list(set(trainset.file_list))
     new_trainset_list = []
 

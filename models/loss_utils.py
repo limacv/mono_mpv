@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as torchf
 import numpy as np
 import cv2
+from typing import Sequence
 from typing import List, Sequence, Union, Tuple, Dict
 
 '''
@@ -11,19 +12,65 @@ implement all kinds of losses
 const_use_sobel = True
 
 
+class ParamScheduler:
+    def __init__(self, milestones, values, mode='linear'):
+        """
+        milestone should be sorted
+        mode shoule be eighter one string or list of string that len > len(milestone-1)
+        """
+        assert len(milestones) == len(values), "scheduler::len(milestones) == len(values)"
+        if isinstance(mode, List):
+            assert len(mode) >= len(milestones) - 1, "scheduler::len(mode) >= len(milestones) - 1"
+        self.milestone = np.array(milestones, dtype=np.long)
+        self.values = values
+        self.modes = mode[:(len(milestones) - 1)] if isinstance(mode, List) else [mode] * (len(milestones) - 1)
+
+        assert all([m_ in ['linear', 'step', 'expo'] for m_ in self.modes])
+
+    def get_value(self, step):
+        stage_idx = np.searchsorted(self.milestone, step)
+        if stage_idx == 0:
+            return self.values[0]
+        elif stage_idx == len(self.milestone):
+            return self.values[-1]
+        else:
+            id0, id1 = stage_idx - 1, stage_idx
+            mode = self.modes[id0]
+            val0, val1 = self.values[id0], self.values[id1]
+            pct = (step - self.milestone[id0]) / (self.milestone[1] - self.milestone[0])
+            if mode == 'linear':
+                return val0 + (val1 - val0) * pct
+            elif mode == 'step':
+                return val0 if pct < 0.5 else val1
+            elif mode == 'expo':
+                # todo: implement this
+                return val0 + (val1 - val0) * pct
+            else:
+                return val0 + (val1 - val0) * pct
+
+
 def draw_dense_disp(disp: torch.Tensor, scale) -> np.ndarray:
     display = (disp[0].detach() * 255 * scale).type(torch.uint8).cpu().numpy()
     display = cv2.cvtColor(cv2.applyColorMap(display, cv2.COLORMAP_HOT), cv2.COLOR_BGR2RGB)
     return display
 
 
-def draw_sparse_depth(im: torch.Tensor, poses: torch.Tensor, depth: torch.Tensor) -> np.ndarray:
-    im_np = (im[0].detach().permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy()
+def draw_sparse_depth(im: torch.Tensor, poses: torch.Tensor, depth: torch.Tensor, colormap="HOT") -> np.ndarray:
+    if im.dim() == 4:
+        im = im[0]
+    if poses.dim() == 3:
+        poses = poses[0]
+    if depth.dim() == 2:
+        depth = depth[0]
+    im_np = (im.detach().permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy()
     hei, wid, _ = im_np.shape
-    poses = (poses[0].detach().cpu().numpy() + 1.) * np.array([wid, hei]).reshape(1, 2) / 2.
+    poses = (poses.detach().cpu().numpy() + 1.) * np.array([wid, hei]).reshape(1, 2) / 2.
     poses = poses.astype(np.float32)
-    depth = (depth[0].detach() * 255).type(torch.uint8).cpu().numpy().reshape(-1, 1)
-    depth_color = cv2.cvtColor(cv2.applyColorMap(depth, cv2.COLORMAP_HOT), cv2.COLOR_BGR2RGB).squeeze(1)
+    depth = (depth.detach() * 255).type(torch.uint8).cpu().numpy().reshape(-1, 1)
+    if colormap == "JET":
+        depth_color = cv2.cvtColor(cv2.applyColorMap(depth, cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB).squeeze(1)
+    else:
+        depth_color = cv2.cvtColor(cv2.applyColorMap(depth, cv2.COLORMAP_HOT), cv2.COLOR_BGR2RGB).squeeze(1)
     im_np = cv2.UMat(im_np)
     for color, pos in zip(depth_color, poses):
         cv2.circle(im_np, (pos[0], pos[1]), 2,
@@ -141,12 +188,12 @@ def ternary_loss(im, im_warp, max_distance=1):
 
 def gradient(data, order=1):
     data_cnl = data.shape[1]
-    sobel_x = torch.tensor(((0.5, 0, -0.5),
-                            (1., 0, -1.),
-                            (0.5, 0, -0.5))).repeat(data_cnl, 1, 1, 1).reshape((data_cnl, 1, 3, 3)).type_as(data)
-    sobel_y = torch.tensor(((0.5, 1., 0.5),
+    sobel_x = torch.tensor(((1., 0, -1.),
+                            (2., 0, -2.),
+                            (1., 0, -1.))).repeat(data_cnl, 1, 1, 1).reshape((data_cnl, 1, 3, 3)).type_as(data)
+    sobel_y = torch.tensor(((1., 2., 1.),
                             (0, 0, 0),
-                            (-0.5, -1., -0.5))).repeat(data_cnl, 1, 1, 1).reshape((data_cnl, 1, 3, 3)).type_as(data)
+                            (-1., -2., -1.))).repeat(data_cnl, 1, 1, 1).reshape((data_cnl, 1, 3, 3)).type_as(data)
 
     data_dx, data_dy = data, data
     for i in range(order):
@@ -168,11 +215,13 @@ def smooth_grad(disp: torch.Tensor, image: torch.Tensor, e_min=0.1, g_min=0.05):
         disp = disp.unsqueeze(-3)
     img_dx, img_dy = gradient(image)
     disp_dx, disp_dy = gradient(disp)
+    batchsz, _, hei, wid = image.shape
 
     grad_im = (img_dx.abs() + img_dy.abs()).sum(dim=-3, keepdim=True)
+    grad_im_max = torch.max(grad_im.reshape(batchsz, -1), dim=-1)[0].reshape(-1, 1, 1, 1)
     grad_disp = disp_dx.abs() + disp_dy.abs()
 
-    weights = - torch.min(grad_im / (e_min * grad_im.max()), torch.tensor(1.).type_as(disp)) + 1.
+    weights = - torch.min(grad_im / (e_min * grad_im_max), torch.tensor(1.).type_as(disp)) + 1.
     smooth = torch.max(grad_disp - g_min, torch.tensor(0.).type_as(disp))
     return weights.squeeze(-3) * smooth.squeeze(-3)
 

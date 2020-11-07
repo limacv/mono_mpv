@@ -6,11 +6,12 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from dataset.RealEstate10K import RealEstate10K
+from dataset.RealEstate10K import RealEstate10K_Img
 
 from util.config import Experiments
 import trainer
 import multiprocessing as mp
+
 # from util.config import fakeMultiProcessing as mp
 # fakeDeviceNum = 100
 
@@ -30,13 +31,13 @@ cfg = {
     "comment": "<Please add comment in experiments>",
     "model_name": "MPINet",
     "batch_size": 2,
-    "num_epoch": 100,
+    "num_epoch": 1000,
     "save_epoch_freq": 200,
     "sample_num_per_epoch": 2000,
-    "lr": 0.0001,
+    "lr": 0.00002,
     "check_point": "mpinet_ori.pth",
     "loss_weights": {
-        "pixel_loss_cfg": 'ssim',
+        "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "smooth_loss": 0.5,
         "depth_loss": 0.1,
@@ -44,12 +45,18 @@ cfg = {
     },
 }
 
+
 # TODO:
-#  2. add mono temporal loss
-#  3. try LSTM model
-#  4. smooth term too small
-#  5. the new dataset
-#  2. add black list to dataset
+#  >>> test that my render-new-view is same as tensorflow implementation
+#  >>> train network only on one video
+#  >>> refine dataset
+#  >>> figuring out why the scale is odd
+#  >>> add mono temporal loss
+#  >>> should add other metric
+#  >>> try LSTM model
+#  >>> smooth term too small
+#  >>> the new dataset
+#  >>> add black list to dataset
 
 
 def main(cfg):
@@ -80,6 +87,22 @@ if __name__ == "__main__":
     # ////////////////////////////////////////////////////////////////////////////////////////
     # This is where you can add experiments                                                 //
     experiments = Experiments(cfg, False)  # will add first experiment as default           //
+    experiments.add_experiment({"comment": "original implementation from scratch",
+                                "check_point": "no",
+                                })
+    experiments.add_experiment({"comment": "original implementation from scratch, with sparse loss",
+                                "check_point": "no",
+                                "loss_weights": {
+                                    "sparse_loss": 0.0005,
+                                },
+                                })
+    experiments.add_experiment({"comment": "original implementation from scratch, with sparse loss ssim",
+                                "check_point": "no",
+                                "loss_weights": {
+                                    "pixel_loss_cfg": 'ssim',
+                                    "sparse_loss": 0.0005,
+                                },
+                                })
     """
     experiments.add_experiment({"comment": "newdata, newsz, ssim loss, from pretrained",
                                 "loss_weights": {
@@ -91,30 +114,66 @@ if __name__ == "__main__":
                                 }})
     experiments.add_experiment({"comment": "newdata, newsz, sparse loss, ssim loss, from scratch", "check_point": "no"})
     experiments.add_experiments(["loss_weights", "pixel_loss_cfg"], ["ternary", "l1"])
+    experiments.add_experiment({"comment": "the depth remove first 5% and last 95%",
+                                "loss_weights": {
+                                    "smooth_loss": 0.5,
+                                    "sparse_loss": 0},
+                                })
+    experiments.add_experiment({"comment": "the depth remove first 5% and last 95%",
+                                "loss_weights": {
+                                    "smooth_loss": 0.5,
+                                    "sparse_loss": 0.002},
+                                })
+    experiments.add_experiment({"comment": "the depth remove first 5% and last 95%",
+                                "loss_weights": {
+                                    "smooth_loss": 1.5,
+                                    "sparse_loss": 0},
+                                })
+    experiments.add_experiment({"comment": "the depth remove first 5% and last 95%, from scratch",
+                                "check_point": "no",
+                                "loss_weights": {
+                                    "pixel_loss_cfg": 'ssim',
+                                    "smooth_loss": 1.5,
+                                    "sparse_loss": 0.002},
+                                })
+    experiments.add_experiment({"comment": "experiment run, only depth loss",
+                                "loss_weights": {"pixel_loss_cfg": 'l1',
+                                                 "pixel_loss": 0,
+                                                 "smooth_loss": 0,
+                                                 "depth_loss": 0.1,
+                                                 "sparse_loss": 0, }
+                                })
+    experiments.add_experiment({"comment": "experiment run, depth loss and smooth",
+                                "loss_weights": {"pixel_loss_cfg": 'l1',
+                                                 "pixel_loss": 0,
+                                                 "smooth_loss": 0.5,
+                                                 "depth_loss": 0.1,
+                                                 "sparse_loss": 0, }
+                                })
+    experiments.add_experiment({"comment": "experiment run, only pixel",
+                                "loss_weights": {"pixel_loss_cfg": 'l1',
+                                                 "pixel_loss": 1,
+                                                 "smooth_loss": 0,
+                                                 "depth_loss": 0,
+                                                 "sparse_loss": 0, }
+                                })
+    experiments.add_experiment({"comment": "from scratch, only depth",
+                                "check_point": "no",
+                                "loss_weights": {"pixel_loss_cfg": 'l1',
+                                                 "pixel_loss": 0,
+                                                 "smooth_loss": 0,
+                                                 "depth_loss": 0.1,
+                                                 "sparse_loss": 0, }
+                                })
+    experiments.add_experiment({"comment": "from scratch, depth + smooth",
+                                "check_point": "no",
+                                "loss_weights": {"pixel_loss_cfg": 'l1',
+                                                 "pixel_loss": 0,
+                                                 "smooth_loss": 0.5,
+                                                 "depth_loss": 0.1,
+                                                 "sparse_loss": 0, }
+                                })
     """
-    experiments.add_experiment({"comment": "large smooth term, no sparse loss, from pretrained",
-                                "loss_weights": {
-                                    "smooth_loss": 3,
-                                    "sparse_loss": 0},
-                                })
-    experiments.add_experiment({"comment": "large smooth term, with sparse loss, from pretrained",
-                                "loss_weights": {
-                                    "smooth_loss": 3,
-                                    "sparse_loss": 0.01},
-                                })
-    experiments.add_experiment({"comment": "large smooth term, no sparse loss, from scratch",
-                                "check_point": "no",
-                                "loss_weights": {
-                                    "smooth_loss": 3,
-                                    "sparse_loss": 0},
-                                })
-    experiments.add_experiment({"comment": "large smooth term, with sparse loss, from scratch",
-                                "check_point": "no",
-                                "loss_weights": {
-                                    "smooth_loss": 3,
-                                    "sparse_loss": 0.01},
-                                })
-
     # End of adding experiments                                                             //
     # ////////////////////////////////////////////////////////////////////////////////////////
 
@@ -132,7 +191,7 @@ if __name__ == "__main__":
         if idx == devices_num:
             break
         process = mp.Process(target=main, args=(experiment_cfg,))
-        print(f"\n>>>>>>>>Start Process {idx+1}, with following changes:")
+        print(f"\n>>>>>>>>Start Process {idx + 1}, with following changes:")
         print(experiments.get_info_str(), flush=True)
         process.start()
         processes.append(process)

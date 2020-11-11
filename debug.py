@@ -29,9 +29,10 @@ def main(kwargs):
     else:
         tensorboard = None
 
-    dataset = RealEstate10K_Img(True, subset_byfile=True)
-    for i in range(int(1e7)):
-        datas = dataset.getitem_bypath(os.path.join(dataset.root, "01bfb80e5b8fe757.txt"))
+    dataset = RealEstate10K_Img(True)
+    for i in range(int(14000)):
+        # t = dataset.post_check("01bfb80e5b8fe757", True)
+        datas = dataset.getitem_bybase("01bfb80e5b8fe757")
 
         datas = [data.unsqueeze(0).cuda() for data in datas]
 
@@ -69,6 +70,14 @@ def main(kwargs):
 #        "depth_loss": 0.1},
 
 
+# main({
+#         "cuda_device": 0,
+#         # "savefile": "./log/DBG_pretrain.pth",
+#         "savefile": "./checkpoint/DBG_pretrain.pth",
+#         "loss_cfg": {"pixel_loss": 1,
+#                      "smooth_loss": 0.5,
+#                      "depth_loss": 0.1},
+#     })
 if __name__ == "__main__":
     mp.set_start_method("spawn")
     processes = []
@@ -76,9 +85,9 @@ if __name__ == "__main__":
     cfg1 = {
         "cuda_device": 0,
         "checkpoint": "./log/MPINet/mpinet_ori.pth",
-        "logdir": "./log/run/dbg_pretrain/",
-        "mpioutdir": "./log/DBG_pretrain",
-        "savefile": "./log/DBG_pretrain.pth",
+        "logdir": "./log/run/dbg_pretrain_tmp/",
+        # "mpioutdir": "./log/DBG_pretrain",
+        "savefile": "./log/DBG_pretrain_mid.pth",
         "loss_cfg": {"pixel_loss": 1,
                      "smooth_loss": 0.5,
                      "depth_loss": 0.1},
@@ -86,33 +95,33 @@ if __name__ == "__main__":
 
     cfg2 = {
         "cuda_device": 1,
-        "logdir": "./log/run/dbg_scratch/",
-        "mpioutdir": "./log/DBG_scratch",
-        "savefile": "./log/DBG_scratch.pth",
+        "logdir": "./log/run/dbg_scratch_tmp/",
+        # "mpioutdir": "./log/DBG_scratch",
+        "savefile": "./log/DBG_scratch_mid.pth",
         "loss_cfg": {"pixel_loss": 1,
                      "smooth_loss": 0.5,
                      "depth_loss": 0.1}
     }
 
-    cfg3 = {
-        "cuda_device": 2,
-        "logdir": "./log/run/dbg_scratchssim/",
-        "mpioutdir": "./log/DBG_scratchssim",
-        "savefile": "./log/DBG_scratchssim.pth",
-        "loss_cfg": {"pixel_loss_cfg": 'ssim',
-                     "pixel_loss": 1,
-                     "smooth_loss": 0.5,
-                     "depth_loss": 0.1}
-    }
+    # cfg3 = {
+    #     "cuda_device": 2,
+    #     "logdir": "./log/run/dbg_scratchssim/",
+    #     "mpioutdir": "./log/DBG_scratchssim",
+    #     "savefile": "./log/DBG_scratchssim.pth",
+    #     "loss_cfg": {"pixel_loss_cfg": 'ssim',
+    #                  "pixel_loss": 1,
+    #                  "smooth_loss": 0.5,
+    #                  "depth_loss": 0.1}
+    # }
     process = mp.Process(target=main, args=(cfg1,))
     process.start()
     processes.append(process)
     process = mp.Process(target=main, args=(cfg2,))
     process.start()
     processes.append(process)
-    process = mp.Process(target=main, args=(cfg3,))
-    process.start()
-    processes.append(process)
+    # process = mp.Process(target=main, args=(cfg3,))
+    # process.start()
+    # processes.append(process)
 
     print("waiting...", flush=True)
     for process in processes:

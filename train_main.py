@@ -20,11 +20,13 @@ cfg = {
     "cuda_device": 0,
     "log_prefix": "./log/",
     "tensorboard_logdir": "run/",
+    "mpi_outdir": "mpi/",
+    "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
     "validate_num": 32,
-    "valid_freq": 200,
-    "train_report_freq": 10,
+    "valid_freq": 500,
+    "train_report_freq": 1,  # 10
 
     # about training <<<<<<<<<<<<<<<<
     # comment of current epoch, will print on config.txt
@@ -32,10 +34,10 @@ cfg = {
     "model_name": "MPINet",
     "batch_size": 2,
     "num_epoch": 1000,
-    "save_epoch_freq": 200,
-    "sample_num_per_epoch": 2000,
-    "lr": 0.00002,
-    "check_point": "mpinet_ori.pth",
+    "save_epoch_freq": 500,
+    "sample_num_per_epoch": -1,  # < 0 means randompermute
+    "lr": 5e-5,
+    "check_point": "MPINet/mpinet_ori.pth",  # relative to log_prefix
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
@@ -47,10 +49,6 @@ cfg = {
 
 
 # TODO:
-#  >>> test that my render-new-view is same as tensorflow implementation
-#  >>> train network only on one video
-#  >>> refine dataset
-#  >>> figuring out why the scale is odd
 #  >>> add mono temporal loss
 #  >>> should add other metric
 #  >>> try LSTM model
@@ -87,93 +85,26 @@ if __name__ == "__main__":
     # ////////////////////////////////////////////////////////////////////////////////////////
     # This is where you can add experiments                                                 //
     experiments = Experiments(cfg, False)  # will add first experiment as default           //
-    experiments.add_experiment({"comment": "original implementation from scratch",
+    experiments.add_experiment({"comment": "good data, original implementation"})
+    experiments.add_experiment({"comment": "good data, original implementation, with sparse loss",
+                                "loss_weights": {"sparse_loss": 0.0001},
+                                })
+    experiments.add_experiment({"comment": "good data, from scratch",
                                 "check_point": "no",
+                                "loss_weights": {"sparse_loss": 0},
                                 })
-    experiments.add_experiment({"comment": "original implementation from scratch, with sparse loss",
+    experiments.add_experiment({"comment": "good data, from scratch, with sparse loss",
                                 "check_point": "no",
-                                "loss_weights": {
-                                    "sparse_loss": 0.0005,
-                                },
+                                "loss_weights": {"sparse_loss": 0.00001},
                                 })
-    experiments.add_experiment({"comment": "original implementation from scratch, with sparse loss ssim",
+    experiments.add_experiment({"comment": "good data, from scratch, mid sparse loss",
                                 "check_point": "no",
-                                "loss_weights": {
-                                    "pixel_loss_cfg": 'ssim',
-                                    "sparse_loss": 0.0005,
-                                },
+                                "loss_weights": {"sparse_loss": 0.0001},
                                 })
-    """
-    experiments.add_experiment({"comment": "newdata, newsz, ssim loss, from pretrained",
-                                "loss_weights": {
-                                    "sparse_loss": 0,
-                                }})
-    experiments.add_experiment({"comment": "newdata, newsz, sparse loss, ssim loss, from pretrained",
-                                "loss_weights": {
-                                    "sparse_loss": 0.0001,
-                                }})
-    experiments.add_experiment({"comment": "newdata, newsz, sparse loss, ssim loss, from scratch", "check_point": "no"})
-    experiments.add_experiments(["loss_weights", "pixel_loss_cfg"], ["ternary", "l1"])
-    experiments.add_experiment({"comment": "the depth remove first 5% and last 95%",
-                                "loss_weights": {
-                                    "smooth_loss": 0.5,
-                                    "sparse_loss": 0},
-                                })
-    experiments.add_experiment({"comment": "the depth remove first 5% and last 95%",
-                                "loss_weights": {
-                                    "smooth_loss": 0.5,
-                                    "sparse_loss": 0.002},
-                                })
-    experiments.add_experiment({"comment": "the depth remove first 5% and last 95%",
-                                "loss_weights": {
-                                    "smooth_loss": 1.5,
-                                    "sparse_loss": 0},
-                                })
-    experiments.add_experiment({"comment": "the depth remove first 5% and last 95%, from scratch",
+    experiments.add_experiment({"comment": "good data, from scratch, large sparse loss",
                                 "check_point": "no",
-                                "loss_weights": {
-                                    "pixel_loss_cfg": 'ssim',
-                                    "smooth_loss": 1.5,
-                                    "sparse_loss": 0.002},
+                                "loss_weights": {"sparse_loss": 0.001},
                                 })
-    experiments.add_experiment({"comment": "experiment run, only depth loss",
-                                "loss_weights": {"pixel_loss_cfg": 'l1',
-                                                 "pixel_loss": 0,
-                                                 "smooth_loss": 0,
-                                                 "depth_loss": 0.1,
-                                                 "sparse_loss": 0, }
-                                })
-    experiments.add_experiment({"comment": "experiment run, depth loss and smooth",
-                                "loss_weights": {"pixel_loss_cfg": 'l1',
-                                                 "pixel_loss": 0,
-                                                 "smooth_loss": 0.5,
-                                                 "depth_loss": 0.1,
-                                                 "sparse_loss": 0, }
-                                })
-    experiments.add_experiment({"comment": "experiment run, only pixel",
-                                "loss_weights": {"pixel_loss_cfg": 'l1',
-                                                 "pixel_loss": 1,
-                                                 "smooth_loss": 0,
-                                                 "depth_loss": 0,
-                                                 "sparse_loss": 0, }
-                                })
-    experiments.add_experiment({"comment": "from scratch, only depth",
-                                "check_point": "no",
-                                "loss_weights": {"pixel_loss_cfg": 'l1',
-                                                 "pixel_loss": 0,
-                                                 "smooth_loss": 0,
-                                                 "depth_loss": 0.1,
-                                                 "sparse_loss": 0, }
-                                })
-    experiments.add_experiment({"comment": "from scratch, depth + smooth",
-                                "check_point": "no",
-                                "loss_weights": {"pixel_loss_cfg": 'l1',
-                                                 "pixel_loss": 0,
-                                                 "smooth_loss": 0.5,
-                                                 "depth_loss": 0.1,
-                                                 "sparse_loss": 0, }
-                                })
-    """
     # End of adding experiments                                                             //
     # ////////////////////////////////////////////////////////////////////////////////////////
 

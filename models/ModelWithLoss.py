@@ -158,9 +158,6 @@ class ModelandSVLoss(ModelandLossBase):
         depth *= scale
         # render target view
         tarview, tarmask = render_newview(mpi, refextrin, tarextrin, intrin, depth, True)
-        # tarviewtf = np.load("./visual.npy")
-        # tarviewtorch = tarview[0].cpu().detach().permute(1, 2, 0).numpy()
-
         # sparsedepthgt = draw_sparse_depth(refim, pt2ds, 1 / ptzs_gt)
         # sparsedepth1 = draw_sparse_depth(refim, pt2ds, ptdis_e / scale)
         # compute final loss

@@ -20,7 +20,7 @@ def main(istrain=True):
     print(f"detect {len(file_list_from_tmp)} files from {trainset.trainstr}set", flush=True)
     for name in file_list_from_tmp:
         try:
-            ret = trainset.getitem_bypath(name)
+            ret = trainset.getitem_bybase(name)
         except Exception as e:
             print(e)
             ret = None

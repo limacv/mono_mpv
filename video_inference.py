@@ -10,25 +10,26 @@ import os
 from models.mpi_utils import *
 
 
-state_dict_path = "./log/MPINet1104_003019.pth"
-# state_dict_path = "./log/MPINet/mpinet_ori.pth"
-video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\traintmp\\3b253958e49a169f\\video_Trim.mp4"
+# state_dict_path = "./log/checkpoint/DBG_scratch.pth"
+state_dict_path = "./log/MPINet/mpinet_ori.pth"
+video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\traintmp\\01bfb80e5b8fe757\\video_Trim.mp4"
 out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
-videoout_path = os.path.join(out_prefix, "disparity.mp4")
-videoout1_path = os.path.join(out_prefix, "newview.mp4")
-mpiout_path = os.path.join(out_prefix, "mpi_traindata" + ("_ori" if "_ori" in state_dict_path else ""))
+videoout_path = os.path.join(out_prefix, "dbg_ori_disparity.mp4")
+videoout1_path = os.path.join(out_prefix, "dbg_ori_newview.mp4")
+mpiout_path = os.path.join(out_prefix, "dbg_ori_mpi" + ("_ori" if "_ori" in state_dict_path else ""))
 
 model = MPINet(32).cuda()
 state_dict = torch.load(state_dict_path, map_location='cuda:0')
 # torch.save({"state_dict": state_dict["state_dict"]}, state_dict_path)
-model.load_state_dict(state_dict["state_dict"])
+if "state_dict" in state_dict:
+    state_dict = state_dict["state_dict"]
+model.load_state_dict(state_dict)
 modelloss = ModelandSVLoss(model, {})
 
 cap = cv2.VideoCapture(video_path)
 out = cv2.VideoWriter()
 out1 = cv2.VideoWriter()
 frameidx = 0
-
 while True:
     ret, img = cap.read()
     if not ret:
@@ -39,7 +40,7 @@ while True:
     img_tensor = ToTensor()(img).cuda()
     mpi = modelloss.infer_forward(img_tensor, mode='pad_reflect')
 
-    if frameidx == 0:
+    if frameidx == 27:
         save_mpi(mpi, mpiout_path)
     depthes = make_depths(32).cuda()
     disparity = estimate_disparity_torch(mpi, depthes)
@@ -61,7 +62,7 @@ while True:
     ).type_as(mpi).unsqueeze(0)
     view = render_newview(mpi, source_pose, target_pose, intrin, depthes)
 
-    visdisp = draw_dense_disp(disparity, depthes[-1])
+    visdisp = draw_dense_disp(disparity, depthes[-1])[:, :, ::-1]
     # disp0 = (disparity[0] * 255 * depthes[-1]).detach().cpu().type(torch.uint8).numpy()
     # visdisp = cv2.applyColorMap(disp0, cv2.COLORMAP_HOT)
     visview = (view * 255).type(torch.uint8).squeeze(0).permute(1, 2, 0).cpu().numpy()

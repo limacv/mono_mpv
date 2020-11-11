@@ -21,7 +21,7 @@ resize_to_w, resize_to_h = 512 + 128 * 3, 512
 
 
 class RealEstate10K_Base:
-    def __init__(self, is_train=True, subset_byfile=False, mode='resize', ptnum=2000):
+    def __init__(self, is_train, black_list, mode, ptnum):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         model=  'none': do noting
@@ -36,14 +36,19 @@ class RealEstate10K_Base:
             self.root = os.path.join(RealEstate10K_root, "test")
             self.trainstr = "test"
 
-        if subset_byfile:
-            self.valid_file_name = os.path.join(RealEstate10K_root, f"{self.trainstr}_valid.txt")
-            with open(self.valid_file_name, 'r') as valid_file:
-                lines = valid_file.readlines()
-                self.file_list = [os.path.join(self.root, os.path.basename(line.strip('\n').replace('\\', '/')))
-                                  for line in lines]
-        else:
-            self.file_list = glob(f"{self.root}/*.txt")
+        self.valid_file_name = os.path.join(RealEstate10K_root, f"{self.trainstr}_valid.txt")
+        with open(self.valid_file_name, 'r') as valid_file:
+            lines = valid_file.readlines()
+            self.file_list = [self.txtpath2basename(line) for line in lines]
+
+        if black_list:
+            with open(os.path.join(RealEstate10K_root, "black_list.txt")) as bl_file:
+                lines = bl_file.readlines()
+                _black_list = {self.txtpath2basename(line) for line in lines}
+            print(f"RealEstate10K: originally {len(self.file_list)}")
+            self.file_list = list(set(self.file_list) - _black_list)
+            print(f"RealEstate10K: find {len(_black_list)} in black_list, "
+                  f"after removal, got {len(self.file_list)} datas")
 
         self.name = f"RealEstate10K_Base_{self.trainstr}"
         print(f"RealEstate10K: find {len(self.file_list)} video files in {self.trainstr} set")
@@ -73,6 +78,13 @@ class RealEstate10K_Base:
         """
         return os.path.join(self.tmp_root, base_name, "video_Trim.mp4")
 
+    @staticmethod
+    def txtpath2basename(path):
+        return os.path.splitext(os.path.basename(path.strip('\n').replace('\\', '/')))[0]
+
+    def txt_path(self, base_name):
+        return os.path.join(self.root, f"{base_name}.txt")
+
     def image_path(self, base_name):
         return os.path.join(self.tmp_root, base_name, "images")
 
@@ -82,13 +94,11 @@ class RealEstate10K_Base:
     def colmap_model_path(self, base_name):
         return os.path.join(self.tmp_root, base_name, "sparse", "0")
 
-    def pre_fetch_bypath(self, path):
+    def pre_fetch_bybase(self, file_base):
         """
         Parse Txt file -> Download video -> Fetch&save frame -> SfM
         return: True: successfully fetch, False: failed
         """
-        file_name = path
-        file_base = os.path.basename(file_name).split('.')[0]
         image_path = self.image_path(file_base)
         tmp_base_path = self.tmp_base_path(file_base)
 
@@ -98,7 +108,7 @@ class RealEstate10K_Base:
             os.mkdir(image_path)
 
         timestamps, extrins = [], []
-        with open(file_name, 'r') as file:
+        with open(self.txt_path(file_base), 'r') as file:
             link = file.readline()
             while True:
                 line = file.readline().split(' ')
@@ -201,9 +211,67 @@ class RealEstate10K_Base:
             videoout.release()
         return True
 
+    def post_check(self, file_base, verbose=False):
+        """
+        check the quality of the point cloud
+        make sure to call pre_fetcih_bybase before call this function,
+        return false if not pass
+        return true if pass
+        """
+        col_model_root = self.colmap_model_path(file_base)
+
+        colcameras, colimages, colpoints3D = read_model(col_model_root, ".bin")
+
+        framenum = len(colimages)
+        # condition1: number of frames shouldn't be too little
+        # -----------------------------------------------------
+        if framenum < 15:
+            if verbose:
+                print(f"RealEstate10K: too little frame ({framenum} frames)")
+            return False
+
+        ptnum = len(colpoints3D)
+        pt3ds = [
+            pt.xyz
+            for i, pt in colpoints3D.items()
+        ]
+        pt3ds = np.array(pt3ds)
+        # condition2: number of points shouldn't be too little
+        # ---------------------------------------------------
+        if ptnum < 2500:
+            if verbose:
+                print(f"RealEstate10K: too little 3d points ({ptnum} points)")
+            return False
+
+        campt3d = [
+            - cam.qvec2rotmat().T @ cam.tvec.reshape(3, 1)
+            for i, cam in colimages.items()
+        ]
+        campt3d = np.array(campt3d).squeeze(-1)
+        travel_distance = np.linalg.norm(campt3d[1:] - campt3d[:-1], axis=-1).sum()
+        # condition3: camera position should be large enough
+        # ---------------------------------------------------
+        if travel_distance < 1.3:
+            if verbose:
+                print(f"RealEstate10K: too little travel distance ({travel_distance})")
+                return False
+
+        # condition4: a special case when points are in a common plane
+        # ---------------------------------------------------
+        abc = np.linalg.inv(pt3ds.T @ pt3ds) @ pt3ds.T  @ np.ones_like(pt3ds[:, 0:1])
+        abc /= np.linalg.norm(abc)
+        dist2plane = pt3ds @ abc
+        zs_std = np.std(dist2plane)
+        if zs_std < 0.7:
+            if verbose:
+                print(f"RealEstate10K: z direction std: ({zs_std})")
+                return False
+
+        return True
+
 
 class RealEstate10K_Img(Dataset, RealEstate10K_Base):
-    def __init__(self, is_train=True, subset_byfile=False, mode='resize', ptnum=2000):
+    def __init__(self, is_train=True, black_list=True, mode='resize', ptnum=2000):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         model=  'none': do noting
@@ -211,10 +279,10 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
                 'pad': pad to multiple of 128, usually used in evaluation,
                 'crop': crop to 512x512 or multiple of 128
         """
-        super(RealEstate10K_Img, self).__init__(is_train=is_train,
-                                                subset_byfile=subset_byfile,
-                                                mode=mode,
-                                                ptnum=ptnum)
+        super().__init__(is_train=is_train,
+                         black_list=black_list,
+                         mode=mode,
+                         ptnum=ptnum)
         self.name = f"RealEstate10K_Img_{self.trainstr}"
 
     def __len__(self):
@@ -238,9 +306,9 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         return datas
 
     def getitem(self, item):
-        return self.getitem_bypath(self.file_list[item])
+        return self.getitem_bybase(self.file_list[item])
 
-    def getitem_bypath(self, path):
+    def getitem_bybase(self, file_base):
         """
         get triplit from path (img&pose_in_reference_view, img&pose_in_target_view, sparse_depth_in_ref_view)
         Get item specified in .txt file
@@ -250,10 +318,9 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         # ================================================
         # now we actually read data and return
         # ================================================
-        if not self.pre_fetch_bypath(path):
+        if not self.pre_fetch_bybase(file_base):
             return None
 
-        file_base = os.path.basename(path).split('.')[0]
         video_trim_path = self.video_trim_path(file_base)
         col_model_root = self.colmap_model_path(file_base)
         self._cur_file_base = file_base
@@ -274,9 +341,6 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
             refidx, taridx = (startidx, endidx) if np.random.randint(2) else (endidx, startidx)
         else:
             refidx, taridx = 0, 5
-
-        if is_DEBUG:
-            print(f"read from {video_trim_path} on {refidx} and {taridx}")
 
         video.set(cv2.CAP_PROP_POS_FRAMES, refidx)
         ret0, refimg = video.read()
@@ -336,13 +400,13 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         point3ds_camnorm = refextrin @ np.vstack([point3ds.T, np.ones((1, len(point3ds)), dtype=point3ds.dtype)])
         point2ds_depth = point3ds_camnorm[2]
 
-        ptindex = np.argsort(point2ds_depth)
-        ptindex = ptindex[int(0.02 * len(ptindex)):int(0.98 * len(ptindex))]
-        point2ds = point2ds[ptindex]
-        point2ds_depth = point2ds_depth[ptindex]
-        # good_ptid = point2ds_depth > 0.01
-        # point2ds = point2ds[good_ptid]
-        # point2ds_depth = point2ds_depth[good_ptid]
+        # ptindex = np.argsort(point2ds_depth)
+        # ptindex = ptindex[int(0.01 * len(ptindex)):int(0.99 * len(ptindex))]
+        # point2ds = point2ds[ptindex]
+        # point2ds_depth = point2ds_depth[ptindex]
+        good_ptid = point2ds_depth > 0.01
+        point2ds = point2ds[good_ptid]
+        point2ds_depth = point2ds_depth[good_ptid]
         # normalize pt2ds to -1 to 1
         point2ds = point2ds * np.array([2 / widori, 2 / heiori], dtype=np.float32) - 1.
 
@@ -352,13 +416,14 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         point2ds = point2ds[ptsample]
         point2ds_depth = point2ds_depth[ptsample]
 
+        print(f"RealEstate10K returning {file_base}.txt")
         return refimg, tarimg, \
                torch.tensor(refextrin), torch.tensor(tarextrin), \
                torch.tensor(intrin), torch.tensor(point2ds), torch.tensor(point2ds_depth)
 
 
 class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
-    def __init__(self, is_train=True, subset_byfile=False, mode='resize', ptnum=2000, seq_len=4):
+    def __init__(self, is_train=True, black_list=True, mode='resize', ptnum=2000, seq_len=4):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         model=  'none': do noting
@@ -367,7 +432,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
                 'crop': crop to 512x512 or multiple of 128
         """
         super().__init__(is_train=is_train,
-                         subset_byfile=subset_byfile,
+                         black_list=black_list,
                          mode=mode,
                          ptnum=ptnum)
         self.name = f"RealEstate10K_Video_{self.trainstr}"
@@ -406,7 +471,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         # ================================================
         # select index and read images
         # ================================================
-        if not self.pre_fetch_bypath(path):
+        if not self.pre_fetch_bybase(path):
             return None
 
         file_base = os.path.basename(path).split('.')[0]

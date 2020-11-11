@@ -21,7 +21,7 @@ save_prefix = "/scratch/PI/psander/mali_data/RealEstate10K/visualize"
 
 
 def main(istrain=True):
-    trainset = RealEstate10K_Img(istrain, subset_byfile=True)
+    trainset = RealEstate10K_Img(istrain, black_list=True)
     save_path = os.path.join(save_prefix, trainset.trainstr)
     if not os.path.exists(save_path):
         os.makedirs(save_path)
@@ -43,11 +43,11 @@ def main(istrain=True):
         diffmean = torch.pow(diff, 2).mean()
         print(f"diff = {diffmean}")
 
-        depth_hist = np.histogram((1 / ptzs_gt).cpu().numpy(), 100)
+        # depth_hist = np.histogram((1 / ptzs_gt).cpu().numpy(), 100)
+        # plt.plot(depth_hist[1][1:], depth_hist[0])
+        # plt.savefig(os.path.join(save_path, f"{trainset._cur_file_base}_zhisto.jpg"))
+        # plt.clf()
         diff_hist = np.histogram(diff.cpu().numpy(), 100)
-        plt.plot(depth_hist[1][1:], depth_hist[0])
-        plt.savefig(os.path.join(save_path, f"{trainset._cur_file_base}_zhisto.jpg"))
-        plt.clf()
         plt.plot(diff_hist[1][1:], diff_hist[0], 'r')
         plt.savefig(os.path.join(save_path, f"{trainset._cur_file_base}_zhistodiff.jpg"))
         plt.clf()
@@ -58,7 +58,6 @@ def main(istrain=True):
         sparsediff = sparsediff[:, :, ::-1]
         cv2.imwrite(os.path.join(save_path, f"{trainset._cur_file_base}_depth.jpg"), sparsedepth)
         cv2.imwrite(os.path.join(save_path, f"{trainset._cur_file_base}_diff.jpg"), sparsediff)
-
 
 
 main(True)

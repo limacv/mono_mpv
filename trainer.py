@@ -29,10 +29,12 @@ def select_modelloss(name: str) -> object:
         raise ValueError(f"unrecognized modelloss name: {name}")
 
 
+def mkdir_ifnotexist(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+
 def train(cfg: dict):
-    # ------------------------------
-    # figuring out configuration
-    # -----------------------------
     model = select_module(cfg["model_name"])
     modelloss = ModelandSVLoss(model, cfg["loss_weights"])
 
@@ -40,13 +42,21 @@ def train(cfg: dict):
     batch_sz = cfg["batch_size"]
     lr = cfg["lr"]
 
-    save_epoch_freq = cfg["save_epoch_freq"]
+    # figuring out all the path
     log_prefix = cfg["log_prefix"]
-    save_path = os.path.join(log_prefix, cfg["model_name"])
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
+    unique_timestr = datetime.now().strftime("%m%d_%H%M%S")  # used to track different runs
+    mpi_save_path = os.path.join(log_prefix, cfg["mpi_outdir"], f"mpi{unique_timestr}")
+    checkpoint_path = os.path.join(log_prefix, cfg["checkpoint_dir"])
+    tensorboard_log_prefix = os.path.join(log_prefix, cfg["tensorboard_logdir"])
+    cfgstr_out = os.path.join(tensorboard_log_prefix, "configs.txt")
+    log_dir = os.path.join(tensorboard_log_prefix, str(unique_timestr))
+
+    mkdir_ifnotexist(mpi_save_path)
+    mkdir_ifnotexist(checkpoint_path)
+    mkdir_ifnotexist(tensorboard_log_prefix)
+
     try:
-        check_point = torch.load(os.path.join(save_path, cfg["check_point"]))
+        check_point = torch.load(os.path.join(log_prefix, cfg["check_point"]))
     except FileNotFoundError:
         print(f"cannot open check point file {cfg['check_point']}")
         check_point = {}
@@ -60,31 +70,32 @@ def train(cfg: dict):
         model.initial_weights()
         print(f"initial the model weights")
 
+    save_epoch_freq = cfg["save_epoch_freq"]
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
     if "optimizer" in check_point.keys():
         check_point["optimizer"]["param_groups"][0]["lr"] = lr
         optimizer.load_state_dict(check_point["optimizer"])
 
-    evalset = RealEstate10K_Img(is_train=False, subset_byfile=True)
+    evalset = RealEstate10K_Img(is_train=False, black_list=True)
     validate_gtnum = cfg["validate_num"] if 0 < cfg["validate_num"] < len(evalset) else len(evalset)
 
     datasubset = Subset(evalset, torch.randperm(len(evalset))[:validate_gtnum])
     evaluatedata = DataLoader(datasubset, batch_size=batch_sz, shuffle=False, pin_memory=True, drop_last=True,)
     validate_freq = cfg["valid_freq"]
 
-    trainset = RealEstate10K_Img(is_train=True, subset_byfile=True)
+    trainset = RealEstate10K_Img(is_train=True, black_list=True)
     train_report_freq = cfg["train_report_freq"]
-    start_time = time.time()
+    train_num_per_epoch = cfg["sample_num_per_epoch"]
+    train_set_inplacement = True
+    if train_num_per_epoch < 0:
+        train_num_per_epoch = None
+        train_set_inplacement = False
     trainingdata = DataLoader(trainset, batch_sz, pin_memory=True, drop_last=True,
-                              sampler=RandomSampler(trainset, True, cfg["sample_num_per_epoch"]))
+                              sampler=RandomSampler(trainset, train_set_inplacement, train_num_per_epoch))
 
-    unique_timestr = datetime.now().strftime("%m%d_%H%M%S")  # used to track different runs
-    tsb_log_dir = os.path.join(log_prefix, cfg["tensorboard_logdir"])
-    log_dir = tsb_log_dir + unique_timestr
     tensorboard = SummaryWriter(log_dir)
     # write configure of the current training
-    cfg_out = tsb_log_dir + "configs.txt"
-    with open(cfg_out, 'a') as cfg_outfile:
+    with open(cfgstr_out, 'a') as cfg_outfile:
         loss_str = ', '.join([f'{k}:{v}' for k, v in cfg['loss_weights'].items()])
         cfg_str = f"\n-------------------------------------------------\n" \
                   f"|Name: {log_dir}|\n"  \
@@ -101,6 +112,7 @@ def train(cfg: dict):
     # =============================================
     # kick-off training
     # =============================================
+    start_time = time.time()
     for epoch in range(begin_epoch, num_epoch):
         for iternum, datas in enumerate(trainingdata):
             step = len(trainingdata) * epoch + iternum
@@ -137,7 +149,7 @@ def train(cfg: dict):
                                 tensorboard.add_image(k, _val_dict[k], step, dataformats='HWC')
                                 _val_dict.pop(k, None)
                             if "save_" in k:
-                                save_mpi(_val_dict.pop(k), f"{save_path}{unique_timestr}")
+                                save_mpi(_val_dict.pop(k), mpi_save_path)
 
                     val_dict = {k: val_dict[k] + v if k in val_dict.keys() else v
                                 for k, v in _val_dict.items()}
@@ -154,16 +166,17 @@ def train(cfg: dict):
 
             if step % save_epoch_freq == 0:
                 torch.save({
-                    "state_dict": model.cpu().state_dict(),
                     "epoch": epoch,
                     "step": step,
                     "cfg": cfg_str,
+                    "state_dict": model.cpu().state_dict(),
                     # "optimizer": optimizer.state_dict()
-                }, f"{save_path}{unique_timestr}.pth")
+                }, os.path.join(checkpoint_path, f"{unique_timestr}.pth"))
                 print(f"checkpoint saved {epoch}{unique_timestr}.pth", flush=True)
                 model.cuda()
 
         # output epoch info
         print(f"epoch {epoch} ================================")
 
+    print("TRAINING Finished!!!!!!!!!!!!", flush=True)
     tensorboard.close()

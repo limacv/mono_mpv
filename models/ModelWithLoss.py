@@ -17,7 +17,7 @@ This class is a model container provide interface between
 
 
 class ModelandLossBase:
-    def __init__(self, model: nn.Module):
+    def __init__(self, model: nn.Module, loss_cfg: Dict):
         """
         the model should satisfy:
             1. take two Bx3xHxW Tensors as input
@@ -28,6 +28,7 @@ class ModelandLossBase:
             3. the occ_map should between (0, 1), while flow is the displacement in image space
             4.[optional] if the model implement encode_only(), then the input should take feature and image as input
         """
+        self.loss_weight = loss_cfg.copy()
         torch.set_default_tensor_type(torch.FloatTensor)
         self.model = model
         self.model.train()
@@ -49,13 +50,16 @@ class ModelandLossBase:
         """
         args = [_t.cuda() for _t in args]
         refim, tarim, refextrin, tarextrin, intrin, pt2ds, ptzs_gt = args
-
+        # TODO: valid for seq input
         batchsz, _, heiori, widori = refim.shape
         val_dict = {}
         with torch.no_grad():
             self.model.eval()
             netout = self.model(refim)
             self.model.train()
+
+            if isinstance(netout, Tuple):
+                netout = netout[0]
             # compute mpi from netout
             mpi, blend_weight = netout2mpi(netout, refim, ret_blendw=True)
 
@@ -127,9 +131,9 @@ class ModelandSVLoss(ModelandLossBase):
     """
     SV stand for single view
     """
+
     def __init__(self, model: nn.Module, loss_cfg: dict):
-        super(ModelandSVLoss, self).__init__(model)
-        self.loss_weight = loss_cfg.copy()
+        super(ModelandSVLoss, self).__init__(model, loss_cfg)
         self.pixel_loss_mode = self.loss_weight.pop("pixel_loss_cfg", "l1")
         self.scheduler = ParamScheduler([1e5, 2e5], [0.5, 1])
 
@@ -194,65 +198,117 @@ class ModelandSVLoss(ModelandLossBase):
 
 class ModelandTimeLoss(ModelandLossBase):
     def __init__(self, model: nn.Module, loss_cfg: dict):
-        super().__init__(model)
-        self.loss_weight = loss_cfg.copy()
-        self.pixel_loss_mode = self.loss_weight.pop("pixel_loss_cfg", "ssim")
+        super().__init__(model, loss_cfg)
+        self.pixel_loss_mode = self.loss_weight.pop("pixel_loss_cfg", "l1")
+        self.scheduler = ParamScheduler([1e5, 2e5], [0.5, 1])
+        # self.pixel_loss_mode = self.loss_weight.pop("pixel_loss_cfg", "ssim")
 
-    def train_forward(self, *args: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
+    def train_forward(self, *args, **kwargs) -> Tuple[torch.Tensor, Dict]:
         # tocuda and unzip
         args = [_t.cuda() for _t in args]
-        refims, tarim, refextrins, tarextrin, intrin, ptxyzs = args
-        if refims.shape[0] != 0:
-            raise NotImplementedError("now only batch size 1 is supported")
-        refims = refims.squeeze(0)
-        refextrins = refextrins.squeeze(0)
-        ptxyzs = ptxyzs.squeeze(0)
+        refims, tarim, refextrins, tarextrin, intrin, pt2ds, ptzs_gts = args
+        # if refims.shape[0] != 0:
+        #     raise NotImplementedError("now only batch size 1 is supported")
+        batchsz, framenum, _, heiori, widori = refims.shape
+        layernum = self.model.mpi_layers
 
-        framenum, _, heiori, widori = tarim.shape
+        mpis, blend_weights = [], []
+        netout, feat_last = self.model(refims[:, 0])
+        mpi, blend_weight = netout2mpi(netout, refims[:, 0], ret_blendw=True)
+        mpis.append(mpi)
+        blend_weights.append(blend_weight)
 
-        netout = self.model(refims)
+        for frameidx in range(1, framenum):
+            netout, feat_last = self.model(refims[:, frameidx], feat_last)
+            mpi, blend_weight = netout2mpi(netout, refims[:, frameidx], ret_blendw=True)
+            mpis.append(mpi)
+            blend_weights.append(blend_weight)
 
-        # compute mpi from netout
-        mpi, blend_weight = netout2mpi(netout, refims, ret_blendw=True)
+        bsz_fnum = batchsz * framenum
+        mpis = torch.stack(mpis, dim=1).reshape(bsz_fnum, layernum, 4, heiori, widori)
+        blend_weights = torch.stack(blend_weights, dim=1).reshape(bsz_fnum, layernum, heiori, widori)
 
         # estimate depth map and sample sparse point depth
-        depth = make_depths(32).type_as(mpi).unsqueeze(0).repeat(framenum, 1)
-        disparity = estimate_disparity_torch(mpi, depth, blendweight=blend_weight)
-        ptdis_e = torchf.grid_sample(disparity.unsqueeze(1), pt2ds.unsqueeze(1)).squeeze(1).squeeze(1)
+        # use first frame's scale as the global scale
+        depth = make_depths(32).type_as(mpis).unsqueeze(0).repeat(bsz_fnum, 1)
+        disparitys = estimate_disparity_torch(mpis, depth, blendweight=blend_weights)
+        ptdis_e = torchf.grid_sample(disparitys.unsqueeze(1),
+                                     pt2ds.reshape(bsz_fnum, 1, -1, 2)).reshape(batchsz, framenum, -1)
 
-        # with torch.no_grad():  # compute scale
-        scale = torch.exp(torch.log(ptdis_e * ptzs_gt).mean(dim=-1, keepdim=True))
-        depth *= scale
+        # TODO: decide whether scale = mean on time dim is good, or simply use first frame's scale
+        scale = torch.exp(torch.log(ptdis_e * ptzs_gts).mean(dim=[-1, -2], keepdim=True))  # [batchsz x 1 x 1]
+        depth = (scale * depth.reshape(batchsz, framenum, layernum)).reshape(bsz_fnum, layernum)
+
+        # expand single frame tensor to temporal tensor
+        tarextrin = tarextrin.reshape(batchsz, 1, 3, 4).expand(-1, framenum, -1, -1)
+        tarim = tarim.reshape(batchsz, 1, 3, heiori, widori).expand(-1, framenum, -1, -1, -1)
+        intrin = intrin.reshape(batchsz, 1, 3, 3).expand(-1, framenum, -1, -1)
 
         # render target view
-        tarview, tarmask = render_newview(mpi, refextrin, tarextrin, intrin, depth, True)
+        (tarviews, tarmasks), tardisps = render_newview(mpi=mpis,  # [batchsz*frameNum x layerNum x 4 x hei x wid]
+                                                        srcextrin=refextrins.reshape(bsz_fnum, 3, 4),
+                                                        tarextrin=tarextrin.reshape(bsz_fnum, 3, 4),
+                                                        # or tarextrin.repeat_interleave(framenum, 3, 4)
+                                                        intrin=intrin.reshape(bsz_fnum, 3, 3),
+                                                        depths=depth,  # [batchsz*frameNum x layerNum]
+                                                        ret_mask=True, ret_dispmap=True)
+        # tarviews: tensor of shape [batchsz*frameNum x 3 x H x W]
+        # tarmasks: tensor of shape [batchsz*frameNum x H x W] (per-frame mask)
+        # tardisps: tensor of shape [batchsz*frameNum x H x W]
         # sparsedepth = draw_sparse_depth(refim, pt2ds, 1 / ptzs_gt)
         # compute final loss
         final_loss, loss_dict = torch.tensor(0., dtype=torch.float32).cuda(), {}
+        intermediate_var = {}  # used for store intermediate variable to reduce redundant computation
         if "pixel_loss" in self.loss_weight.keys():
-            l1_loss = photometric_loss(tarview, tarim, mode=self.pixel_loss_mode)
-            l1_loss = (l1_loss * tarmask).sum() / tarmask.sum()
+            l1_loss = photometric_loss(imref=tarim.reshape(bsz_fnum, 3, heiori, widori),
+                                       imreconstruct=tarviews,
+                                       mode=self.pixel_loss_mode)
+            l1_loss = (l1_loss * tarmasks).sum() / tarmasks.sum()
             final_loss += (l1_loss * self.loss_weight["pixel_loss"])
             loss_dict["pixel"] = float(l1_loss.detach())
 
+        if "pixel_std_loss" in self.loss_weight.keys():
+            tarview_mean = tarviews.reshape(batchsz, framenum, 3, heiori, widori).mean(dim=1, keepdim=True)
+            valid_mask = tarmasks.reshape(batchsz, framenum, heiori, widori).prod(dim=1, keepdim=True)
+            intermediate_var["per_batch_mask"] = valid_mask
+            std_loss = torch.abs(tarviews.reshape(batchsz, framenum, 3, heiori, widori) - tarview_mean).sum(dim=2)
+            std_loss = (std_loss * valid_mask).sum() / valid_mask.sum() / framenum
+            final_loss += (std_loss * self.loss_weight["pixel_std_loss"])
+            loss_dict["pixel_std"] = float(std_loss.detach())
+
         if "smooth_loss" in self.loss_weight.keys():
-            smth_loss = smooth_grad(disparity, refim)
+            smth_loss = smooth_grad(disparitys, refims.reshape(bsz_fnum, 3, heiori, widori))
             smth_loss = smth_loss.mean()
             final_loss += (smth_loss * self.loss_weight["smooth_loss"])
             loss_dict["smth"] = float(smth_loss.detach())
 
+        if "smooth_tar_loss" in self.loss_weight.keys():
+            print("ModelWithLoss::warning! smooth_tar_loss not tested")
+            smth_loss = smooth_grad(tardisps, tarim.reshape(bsz_fnum, 3, heiori, widori))
+            smth_loss = smth_loss.mean()
+            final_loss += (smth_loss * self.loss_weight["smooth_tar_loss"])
+            loss_dict["smthtar"] = float(smth_loss.detach())
+
+        if "temporal_loss" in self.loss_weight.keys():
+            tardisp_mean = tardisps.reshape(batchsz, framenum, heiori, widori).mean(dim=1, keepdim=True)
+            valid_mask = tarmasks.reshape(batchsz, framenum, heiori, widori).prod(dim=1, keepdim=True) \
+                if "per_batch_mask" not in intermediate_var.keys() else intermediate_var["per_batch_mask"]
+            temp_loss = torch.abs(tardisps.reshape(batchsz, framenum, heiori, widori) - tardisp_mean)
+            temp_loss = (temp_loss * valid_mask).sum() / valid_mask.sum() / framenum
+            final_loss += (temp_loss * self.loss_weight["temporal_loss"])
+            loss_dict["temp"] = float(temp_loss.detach())
+
         if "depth_loss" in self.loss_weight.keys():
-            diff = torch.log(ptdis_e * ptzs_gt / scale)
-            diff = torch.pow(diff, 2).mean()
+            diff = torch.log(ptdis_e * ptzs_gts / scale)
+            diff = torch.pow(diff, 2).mean()  # mean among: batch & frames & points
             final_loss += (diff * self.loss_weight["depth_loss"])
             loss_dict["depth"] = float(diff.detach())
 
         if "sparse_loss" in self.loss_weight.keys():
-            alphas = mpi[:, :, -1, :, :]
+            alphas = mpis[:, :, -1, :, :]  # shape [batchsz*framenum x layerNum x H x W]
             alphas_norm = alphas / torch.norm(alphas, dim=1, keepdim=True)
             sparse_loss = torch.sum(torch.abs(alphas_norm), dim=1).mean()
             final_loss += sparse_loss * self.loss_weight["sparse_loss"]
             loss_dict["sparse_loss"] = float(sparse_loss.detach())
 
         return final_loss, loss_dict
-

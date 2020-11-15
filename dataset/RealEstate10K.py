@@ -11,17 +11,14 @@ from torch.utils.data import Dataset
 import cv2
 import os
 from glob import glob
-from . import RealEstate10K_root, is_DEBUG
+from . import RealEstate10K_root, is_DEBUG, RealEstate10K_skip_framenum
+from . import OutputSize as outSize
 from .colmap_wrapper import *
-
-
-RealEstate10K_skip_framenum = 3
-# resize_to_w, resize_to_h = 512 + 128 * 3, 512
-resize_to_w, resize_to_h = 512 + 128 * 3, 512
+from .Augmenter import DataAugmenter
 
 
 class RealEstate10K_Base:
-    def __init__(self, is_train, black_list, mode, ptnum):
+    def __init__(self, is_train, black_list, ptnum):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         model=  'none': do noting
@@ -39,38 +36,28 @@ class RealEstate10K_Base:
         self.valid_file_name = os.path.join(RealEstate10K_root, f"{self.trainstr}_valid.txt")
         with open(self.valid_file_name, 'r') as valid_file:
             lines = valid_file.readlines()
-            self.file_list = [self.txtpath2basename(line) for line in lines]
+            self.filebase_list = [self.txtpath2basename(line) for line in lines]
 
         if black_list:
             with open(os.path.join(RealEstate10K_root, "black_list.txt")) as bl_file:
                 lines = bl_file.readlines()
                 _black_list = {self.txtpath2basename(line) for line in lines}
-            print(f"RealEstate10K: originally {len(self.file_list)}")
-            self.file_list = list(set(self.file_list) - _black_list)
+            print(f"RealEstate10K: originally {len(self.filebase_list)}")
+            self.filebase_list = list(set(self.filebase_list) - _black_list)
             print(f"RealEstate10K: find {len(_black_list)} in black_list, "
-                  f"after removal, got {len(self.file_list)} datas")
+                  f"after removal, got {len(self.filebase_list)} datas")
 
         self.name = f"RealEstate10K_Base_{self.trainstr}"
-        print(f"RealEstate10K: find {len(self.file_list)} video files in {self.trainstr} set")
+        print(f"RealEstate10K: find {len(self.filebase_list)} video files in {self.trainstr} set")
 
         self.tmp_root = os.path.join(os.path.dirname(self.root), f"{self.trainstr}tmp")
         if not os.path.exists(self.tmp_root):
             os.mkdir(self.tmp_root)
 
-        self.mode = mode
-        if mode == 'none':
-            self.preprocess = ToTensor()
-        elif mode == 'resize':
-            self.preprocess = Compose([Resize([resize_to_h, resize_to_w]),
-                                       ToTensor()])
-        elif mode == 'pad':
-            self.preprocess = ToTensor()
-            raise NotImplementedError
-        elif mode == 'crop':
-            self.preprocess = ToTensor()
-            raise NotImplementedError
-
         self.ptnum = ptnum
+        self.totensor = ToTensor()
+        self._cur_file_base = ""
+        self._curvideo_trim_path = ""
 
     def video_trim_path(self, base_name):
         """
@@ -186,7 +173,7 @@ class RealEstate10K_Base:
 
             # run colmap with provided model
             try:
-                run_colmap(tmp_base_path, ["feature", "match", "triangulator"],
+                run_colmap(tmp_base_path, ["feature", "match", "triangulator", "bundle_adjust"],
                            camera=colcamera, images=colimages, remove_database=True)
             except BaseException as e:
                 print(f"RealEstate10K: error when doing colmap in {file_base}.txt with error {e}")
@@ -281,12 +268,13 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         """
         super().__init__(is_train=is_train,
                          black_list=black_list,
-                         mode=mode,
                          ptnum=ptnum)
         self.name = f"RealEstate10K_Img_{self.trainstr}"
 
+        self.augmenter = DataAugmenter(outSize, mode=mode)
+
     def __len__(self):
-        return len(self.file_list)
+        return len(self.filebase_list)
 
     def __getitem__(self, item):
         # try 3 times
@@ -306,7 +294,7 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         return datas
 
     def getitem(self, item):
-        return self.getitem_bybase(self.file_list[item])
+        return self.getitem_bybase(self.filebase_list[item])
 
     def getitem_bybase(self, file_base):
         """
@@ -353,10 +341,11 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         # refname, tarname = image_list[refidx], image_list[taridx]
 
         heiori, widori, _ = refimg.shape
-        refimg = PImage.fromarray(cv2.cvtColor(refimg, cv2.COLOR_BGR2RGB))
-        tarimg = PImage.fromarray(cv2.cvtColor(tarimg, cv2.COLOR_BGR2RGB))
-        refimg = self.preprocess(refimg)
-        tarimg = self.preprocess(tarimg)
+        self.augmenter.random_generate((heiori, widori))
+        refimg = cv2.cvtColor(refimg, cv2.COLOR_BGR2RGB)
+        tarimg = cv2.cvtColor(tarimg, cv2.COLOR_BGR2RGB)
+        refimg = self.totensor(self.augmenter.apply_img(refimg))
+        tarimg = self.totensor(self.augmenter.apply_img(tarimg))
         # refimg = PImage.open(refname)
         # widori, heiori = refimg.size
         #
@@ -388,17 +377,16 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
                            [0, intrin[1], intrin[3]],
                            [0, 0, 1]], dtype=np.float32)
 
-        if self.mode == 'resize':
-            intrin_calib = np.array([resize_to_w / widori, 0, 0,
-                                     0, resize_to_h / heiori, 0,
-                                     0, 0, 1], dtype=np.float32).reshape(3, 3)
-            intrin = intrin_calib @ intrin
+        intrin = self.augmenter.apply_intrin(intrin)
 
         # compute depth of point3ds
         # print(f"refextrin.shape={refextrin.shape}")
         # print(f"later.shape={np.vstack([point3ds.T, np.ones((1, len(point3ds)), dtype=point3ds.dtype)]).shape}")
         point3ds_camnorm = refextrin @ np.vstack([point3ds.T, np.ones((1, len(point3ds)), dtype=point3ds.dtype)])
         point2ds_depth = point3ds_camnorm[2]
+        # debug for corectness of intrin please delete afterwards
+        # point3ds_imgnorm = intrin @ point3ds_camnorm
+        # point3ds_imgnorm /= point3ds_imgnorm[2]
 
         # ptindex = np.argsort(point2ds_depth)
         # ptindex = ptindex[int(0.01 * len(ptindex)):int(0.99 * len(ptindex))]
@@ -407,8 +395,8 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         good_ptid = point2ds_depth > 0.01
         point2ds = point2ds[good_ptid]
         point2ds_depth = point2ds_depth[good_ptid]
-        # normalize pt2ds to -1 to 1
-        point2ds = point2ds * np.array([2 / widori, 2 / heiori], dtype=np.float32) - 1.
+
+        point2ds, point2ds_depth = self.augmenter.apply_pts(point2ds, point2ds_depth)
 
         # random sample point so that output fixed number of points
         ptnum = point2ds.shape[0]
@@ -416,7 +404,6 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         point2ds = point2ds[ptsample]
         point2ds_depth = point2ds_depth[ptsample]
 
-        print(f"RealEstate10K returning {file_base}.txt")
         return refimg, tarimg, \
                torch.tensor(refextrin), torch.tensor(tarextrin), \
                torch.tensor(intrin), torch.tensor(point2ds), torch.tensor(point2ds_depth)
@@ -433,13 +420,13 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         """
         super().__init__(is_train=is_train,
                          black_list=black_list,
-                         mode=mode,
                          ptnum=ptnum)
         self.name = f"RealEstate10K_Video_{self.trainstr}"
         self.sequence_length = seq_len
+        self.augmenter = DataAugmenter(outSize, mode=mode)
 
     def __len__(self):
-        return len(self.file_list)
+        return len(self.filebase_list)
 
     def __getitem__(self, item):
         # try 3 times
@@ -459,9 +446,9 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         return datas
 
     def getitem(self, item):
-        return self.getitem_bypath(self.file_list[item])
+        return self.getitem_bybase(self.filebase_list[item])
 
-    def getitem_bypath(self, path):
+    def getitem_bybase(self, file_base):
         """
         get sequence from file
         Get item specified in .txt file
@@ -471,12 +458,13 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         # ================================================
         # select index and read images
         # ================================================
-        if not self.pre_fetch_bybase(path):
+        if not self.pre_fetch_bybase(file_base):
             return None
 
-        file_base = os.path.basename(path).split('.')[0]
+        file_base = os.path.basename(file_base).split('.')[0]
         video_trim_path = self.video_trim_path(file_base)
         col_model_root = self.colmap_model_path(file_base)
+        self._cur_file_base = file_base
         self._curvideo_trim_path = video_trim_path
 
         video = cv2.VideoCapture(video_trim_path)
@@ -490,8 +478,10 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         if self.trainstr == "train":
             startid = np.random.randint(0, framenum - self.sequence_length)
             refidxs = np.arange(startid, startid + self.sequence_length)
-            taridxs = list(range(max(startid - 2, 0), startid)) +\
-                      list(range(refidxs[-1] + 1, min(refidxs[-1] + 3, framenum)))
+            taridxs = list(range(max(startid - 2, 0),
+                                 min(refidxs[-1] + 3, framenum)))
+            # taridxs = list(range(max(startid - 2, 0), startid)) +\
+            #           list(range(refidxs[-1] + 1, min(refidxs[-1] + 3, framenum)))
             taridx = taridxs[np.random.randint(len(taridxs))]
         else:
             refidxs, taridx = np.arange(1, 1 + self.sequence_length), 0
@@ -504,9 +494,12 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
                 print(f"RealEstate10K: {file_base}.txt cannot read frame idx {taridx}")
                 return None
 
-            refimg = PImage.fromarray(refimg[:, :, ::-1])
-            refimg = self.preprocess(refimg)
+            refimg = refimg[:, :, ::-1]
             refimgs.append(refimg)
+
+        heiori, widori, _ = refimgs[0].shape
+        self.augmenter.random_generate((heiori, widori))
+        refimgs = [self.totensor(self.augmenter.apply_img(im)) for im in refimgs]
 
         video.set(cv2.CAP_PROP_POS_FRAMES, taridx)
         ret1, tarimg = video.read()
@@ -515,9 +508,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
             return None
         video.release()
 
-        heiori, widori, _ = tarimg.shape
-        tarimg = PImage.fromarray(tarimg[:, :, ::-1])
-        tarimg = self.preprocess(tarimg)
+        tarimg = self.totensor(self.augmenter.apply_img(tarimg))
         refimgs = torch.stack(refimgs, dim=0)
 
         # ================================================
@@ -533,7 +524,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
             return None
         # 3d points in each reference view
 
-        refextrins, pointxyzs = [], []
+        refextrins, pointxys, pointzs = [], [], []
         for refidx in refidxs:
             refview = colimages[refidx + 1]
             point3ds = [colpoints3D[ptid].xyz for ptid in refview.point3D_ids if ptid >= 0]
@@ -549,17 +540,18 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
             good_ptid = point2ds_depth > 0.01
             point2ds = point2ds[good_ptid]
             point2ds_depth = point2ds_depth[good_ptid]
-            # normalize pt2ds to -1 to 1 so it's resolution invariant
-            point2ds = point2ds * np.array([2 / widori, 2 / heiori], dtype=np.float32) - 1.
 
+            point2ds, point2ds_depth = self.augmenter.apply_pts(point2ds, point2ds_depth)
             # random sample point so that output fixed number of points
             ptnum = point2ds.shape[0]
             ptsample = np.random.choice(ptnum, self.ptnum, replace=(ptnum < self.ptnum))
-            point2dxyz = np.hstack([point2ds, point2ds_depth.reshape(-1, 1)])
-            point2dxyz = point2dxyz[ptsample]
-            pointxyzs.append(point2dxyz)
+
+            pointxys.append(point2ds[ptsample])
+            pointzs.append(point2ds_depth[ptsample])
+
         refextrins = np.stack(refextrins, axis=0)
-        pointxyzs = np.stack(pointxyzs, axis=0)
+        pointxys = np.stack(pointxys, axis=0)
+        pointzs = np.stack(pointzs, axis=0)
 
         # target view parameters and intrinsic
         tarview = colimages[taridx + 1]
@@ -569,14 +561,9 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         intrin = np.array([[intrin[0], 0, intrin[2]],
                            [0, intrin[1], intrin[3]],
                            [0, 0, 1]], dtype=np.float32)
-
-        if self.mode == 'resize':
-            intrin_calib = np.array([resize_to_w / widori, 0, 0,
-                                     0, resize_to_h / heiori, 0,
-                                     0, 0, 1], dtype=np.float32).reshape(3, 3)
-            intrin = intrin_calib @ intrin
+        intrin = self.augmenter.apply_intrin(intrin)
 
         return refimgs, tarimg, \
                torch.tensor(refextrins), torch.tensor(tarextrin), \
-               torch.tensor(intrin), torch.tensor(pointxyzs)
+               torch.tensor(intrin), torch.tensor(pointxys), torch.tensor(pointzs)
 

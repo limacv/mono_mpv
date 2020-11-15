@@ -15,7 +15,7 @@ from dataset.RealEstate10K import RealEstate10K_Img, RealEstate10K_root
 
 def main(istrain=True, check_black_list=False):
     trainset = RealEstate10K_Img(istrain, black_list=False)
-    trainset_list = list(set(trainset.file_list))
+    trainset_list = list(set(trainset.filebase_list))
     new_trainset_list = []
     new_black_list = set()
 

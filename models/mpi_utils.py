@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as torchf
 import cv2
 import os
+from typing import *
 
 default_d_near = 1
 default_d_far = 1000
@@ -56,14 +57,15 @@ def make_depths(num_plane, min_depth=default_d_near, max_depth=default_d_far):
 def estimate_disparity_torch(mpi: torch.Tensor, depthes: torch.Tensor, blendweight=None):
     """Compute disparity map from a set of MPI layers.
     mpi: tensor of shape B x LayerNum x 4 x H x W
-    depthes: tensor of shape [B x LayerNum]
+    depthes: tensor of shape [B x LayerNum] or [B x LayerNum x H x W] (means different depth for each pixel]
     blendweight: optional blendweight that to reduce reduntante computation
     return: tensor of shape B x H x W
     """
     assert (mpi.dim() == 5)
     batchsz, num_plane, _, height, width = mpi.shape
     disparities = torch.reciprocal(depthes)
-    disparities = disparities.reshape(batchsz, -1, 1, 1).type_as(mpi)
+    if disparities.dim() != 4:
+        disparities = disparities.reshape(batchsz, num_plane, 1, 1).type_as(mpi)
 
     alpha = mpi[:, :, -1, ...]  # alpha.shape == B x LayerNum x H x W
     if blendweight is None:
@@ -103,7 +105,8 @@ def netout2mpi(netout: torch.Tensor, img: torch.Tensor, bg_pct=1., ret_blendw=Fa
         return mpi
 
 
-def overcompose(mpi: torch.Tensor, blendweight=None, ret_mask=False):
+def overcompose(mpi: torch.Tensor, blendweight=None, ret_mask=False)\
+        -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """
     compose mpi back to front
     mpi: [B, 32, 4, H, W]
@@ -140,8 +143,52 @@ def warp_homography(homos: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
     new_grid = (new_grid.squeeze(-1) / new_grid[..., 2:3, 0])[..., 0:2]  # grid: B x D x H x W x 2
     new_grid = new_grid / torch.tensor([wid / 2, hei / 2]).type_as(new_grid) - 1.
     warpped = torchf.grid_sample(images.reshape(batchsz * planenum, cnl, hei, wid),
-                                 new_grid.reshape(batchsz * planenum, hei, wid, 2), align_corners=True)
+                                 new_grid.reshape(batchsz * planenum, hei, wid, 2))
     return warpped.reshape(batchsz, planenum, cnl, hei, wid)
+
+
+def get_tardepth_homography(homosref2tar: torch.Tensor, refdepth: torch.Tensor) -> torch.Tensor:
+    """
+    given depth value in *ref space*, and a homograph that warp 3D point coord from *ref im space* to *tar im space*
+    note that here homo is actually a 3D transformation matrix that transform 3D point coordinates
+    explanation:
+        let P1 be point in ref im space [x1, y1, d1], which has constant depth in our case
+            P2 be point in tar im space [x2, y2, d2], x2, y2 is known and d2 is what we want
+        P1 = H @ P2
+        d1 = [H31, H32] @ [x2, y2]^T + H33 * d2
+    """
+    pass
+
+
+def warp_homography_withdepth(homos: torch.Tensor, images: torch.Tensor, depth: torch.Tensor) \
+        -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Please note that homographies here are not scale invariant. make sure that rotation matrix has 1 det. R.det() == 1.
+    apply differentiable homography
+    homos: [B x D x 3 x 3]
+    images: [B x D x 4 x H x W]
+    depth: [B x D] or [B x D x 1] (depth in *ref space*)
+    ret:
+        the warpped mpi
+        the warpped depth
+    """
+    batchsz, planenum, cnl, hei, wid = images.shape
+    y, x = torch.meshgrid([torch.arange(hei), torch.arange(wid)])
+    x, y = x.type_as(images), y.type_as(images)
+    one = torch.ones_like(x)
+    grid = torch.stack([x, y, one], dim=-1).reshape(1, 1, hei, wid, 3, 1)
+    if depth.dim() == 4:
+        depth = depth.reshape(batchsz, planenum, 1, hei, wid)
+    else:
+        depth = depth.reshape(batchsz, planenum, 1, 1, 1)
+
+    new_grid = homos.unsqueeze(-3).unsqueeze(-3) @ grid
+    new_depth = depth.reshape(batchsz, planenum, 1, 1) / new_grid[..., -1, 0]
+    new_grid = (new_grid.squeeze(-1) / new_grid[..., 2:3, 0])[..., 0:2]  # grid: B x D x H x W x 2
+    new_grid = new_grid / torch.tensor([wid / 2, hei / 2]).type_as(new_grid) - 1.
+    warpped = torchf.grid_sample(images.reshape(batchsz * planenum, cnl, hei, wid),
+                                 new_grid.reshape(batchsz * planenum, hei, wid, 2))
+    return warpped.reshape(batchsz, planenum, cnl, hei, wid), new_depth
 
 
 def compute_homography(src_extrin: torch.Tensor, src_intrin: torch.Tensor,
@@ -188,12 +235,15 @@ def compute_homography(src_extrin: torch.Tensor, src_intrin: torch.Tensor,
 
 
 def render_newview(mpi: torch.Tensor, srcextrin: torch.Tensor, tarextrin: torch.Tensor, intrin: torch.Tensor,
-                   depths: torch.Tensor, ret_mask=False):
+                   depths: torch.Tensor, ret_mask=False, ret_dispmap=False)\
+        -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor],
+                 Tuple[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]]:
     """
     mpi: [B, 32, 4, H, W]
     srcpose&tarpose: [B, 3, 4]
     depthes: tensor of shape [Bx LayerNum]
     intrin: [B, 3, 3]
+    ret: ref_view_images[, mask][, disparitys]
     """
     batchsz, planenum, _, hei, wid = mpi.shape
 
@@ -201,13 +251,19 @@ def render_newview(mpi: torch.Tensor, srcextrin: torch.Tensor, tarextrin: torch.
     distance = depths.reshape(batchsz, planenum)
     with torch.no_grad():
         # switching the tar/src pose since we have extrinsic but compute_homography uses poses
-        # srcextrin = torch.tensor([1, 0, 0, 0,
+        # srcextrin = torch.tensor([1, 0, 0, 0,  # for debug usage
         #                           0, 1, 0, 0,
         #                           0, 0, 1, 0]).reshape(1, 3, 4).type_as(intrin)
-        # tarextrin = torch.tensor([-np.cos(0.3), 0, np.sin(0.3), 0,
-        #                           0, 1, 0, 0,
-        #                           np.sin(0.3), 0, np.cos(0.3), 1.5]).reshape(1, 3, 4).type_as(intrin)
+        # tarextrin = torch.tensor([np.cos(0.3), -np.sin(0.3), 0, 0,
+        #                           np.sin(0.3), np.cos(0.3), 0, 0,
+        #                           0, 0, 1, 1.5]).reshape(1, 3, 4).type_as(intrin)
         homos = compute_homography(srcextrin, intrin, tarextrin, intrin,
                                    planenormal, distance)
-    mpi_warp = warp_homography(homos, mpi)
-    return overcompose(mpi_warp, ret_mask=ret_mask)
+    if not ret_dispmap:
+        mpi_warp = warp_homography(homos, mpi)
+        return overcompose(mpi_warp, ret_mask=ret_mask)
+    else:
+        mpi_warp, mpi_depth = warp_homography_withdepth(homos, mpi, distance)
+        disparitys = estimate_disparity_torch(mpi_warp, mpi_depth)
+        return overcompose(mpi_warp, ret_mask=ret_mask), disparitys
+

@@ -90,9 +90,8 @@ def photometric_loss(imref, imreconstruct, mode='l1'):
 
 
 def photo_l1loss(im, im_warp, order=1):
-    # scale = 3. / im.shape[1]  # normalize the loss to as if there were three channels
-    diff = torch.abs(im - im_warp) + 0.0001  # why?
-    diff = torch.sum(diff, dim=1) / 3.
+    diff = torch.abs(im - im_warp) + 0.0001
+    diff = torch.sum(diff, dim=1)
     if order != 1:
         diff = torch.pow(diff, order)
     return diff  # * scale

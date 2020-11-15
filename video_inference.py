@@ -9,14 +9,20 @@ import cv2
 import os
 from models.mpi_utils import *
 
+mpiout_path = None
+outframeidx = None
+
 
 # state_dict_path = "./log/checkpoint/DBG_scratch.pth"
-state_dict_path = "./log/MPINet/mpinet_ori.pth"
+# state_dict_path = "./log/MPINet/mpinet_ori.pth"
+state_dict_path = "./log/checkpoint/MPINet1109_004009.pth"
 video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\traintmp\\01bfb80e5b8fe757\\video_Trim.mp4"
+# testtmp\\ccc439d4b28c87b2 -> test_set  traintmp\\01bfb80e5b8fe757 -> used in dbg
 out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
-videoout_path = os.path.join(out_prefix, "dbg_ori_disparity.mp4")
-videoout1_path = os.path.join(out_prefix, "dbg_ori_newview.mp4")
-mpiout_path = os.path.join(out_prefix, "dbg_ori_mpi" + ("_ori" if "_ori" in state_dict_path else ""))
+videoout_path = os.path.join(out_prefix, "baddata_scratch_disparity.mp4")
+videoout1_path = os.path.join(out_prefix, "baddata_scratch_newview.mp4")
+# mpiout_path = os.path.join(out_prefix, "1110_233116")
+outframeidx = 27#6  # 27
 
 model = MPINet(32).cuda()
 state_dict = torch.load(state_dict_path, map_location='cuda:0')
@@ -29,6 +35,9 @@ modelloss = ModelandSVLoss(model, {})
 cap = cv2.VideoCapture(video_path)
 out = cv2.VideoWriter()
 out1 = cv2.VideoWriter()
+if outframeidx is not None:
+    cap.set(cv2.CAP_PROP_POS_FRAMES, outframeidx)
+
 frameidx = 0
 while True:
     ret, img = cap.read()
@@ -40,8 +49,6 @@ while True:
     img_tensor = ToTensor()(img).cuda()
     mpi = modelloss.infer_forward(img_tensor, mode='pad_reflect')
 
-    if frameidx == 27:
-        save_mpi(mpi, mpiout_path)
     depthes = make_depths(32).cuda()
     disparity = estimate_disparity_torch(mpi, depthes)
 
@@ -67,6 +74,12 @@ while True:
     # visdisp = cv2.applyColorMap(disp0, cv2.COLORMAP_HOT)
     visview = (view * 255).type(torch.uint8).squeeze(0).permute(1, 2, 0).cpu().numpy()
     visview = cv2.cvtColor(visview, cv2.COLOR_RGB2BGR)
+    if frameidx == 0 and outframeidx is not None:
+        if mpiout_path is not None:
+            save_mpi(mpi, mpiout_path)
+        cv2.imwrite(videoout_path + ".jpg", visdisp)
+        # cv2.imwrite(videoout1_path + ".jpg", visview)
+        break
 
     if not out.isOpened():
         out.open(videoout_path, 828601953, 30., (wid, hei), True)

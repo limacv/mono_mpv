@@ -1,5 +1,5 @@
 from dataset.RealEstate10K import *
-from models.ModelWithLoss import ModelandSVLoss
+from models.ModelWithLoss import ModelandTimeLoss
 from models.mpi_network import MPINet
 from models.hourglass import *
 from models.mpi_utils import *
@@ -8,7 +8,7 @@ import torch
 import numpy as np
 from tensorboardX import SummaryWriter
 import multiprocessing as mp
-from trainer import select_module
+from trainer import select_module, select_modelloss
 
 np.random.seed(5)
 torch.manual_seed(0)
@@ -16,13 +16,13 @@ torch.manual_seed(0)
 
 def main(kwargs):
     torch.cuda.set_device(kwargs["cuda_device"])
-    model = select_module("MPINet")
+    model = select_module("MPVNet")
     if "checkpoint" in kwargs:
         model.load_state_dict(torch.load(kwargs["checkpoint"])["state_dict"])
     else:
         model.initial_weights()
     model.cuda()
-    modelloss = ModelandSVLoss(model, kwargs["loss_cfg"])
+    modelloss = ModelandTimeLoss(model, kwargs["loss_cfg"])
     optimizer = torch.optim.Adam(params=model.parameters(), lr=2e-5)
     if "logdir" in kwargs.keys():
         log_dir = kwargs["logdir"]
@@ -30,13 +30,13 @@ def main(kwargs):
     else:
         tensorboard = None
 
-    dataset = RealEstate10K_Img(True, mode='crop')
+    dataset = RealEstate10K_Seq(True, mode='crop', seq_len=5)
     for i in range(int(14000)):
         # t = dataset.post_check("01bfb80e5b8fe757", True)
         datas = dataset.getitem_bybase("01bfb80e5b8fe757")
 
         datas = [data.unsqueeze(0).cuda() for data in datas]
-        loss, loss_dict = modelloss.train_forward(*datas, step=i)
+        loss, loss_dict = modelloss.train_forward(*datas)
         for lossname, lossval in loss_dict.items():
             if tensorboard is not None:
                 tensorboard.add_scalar(lossname, lossval, i)
@@ -72,12 +72,15 @@ def main(kwargs):
 
 main({
     "cuda_device": 0,
-    "checkpoint": "./log/MPINet/mpinet_ori.pth",
+    # "checkpoint": "./log/MPINet/mpinet_ori.pth",
     # "savefile": "./log/DBG_pretrain.pth",
     "savefile": "./checkpoint/DBG_pretrain.pth",
     "loss_cfg": {"pixel_loss": 1,
                  "smooth_loss": 0.5,
-                 "depth_loss": 0.1},
+                 "depth_loss": 0.1,
+                 "pixel_std_loss": 0.5,
+                 "smooth_tar_loss": 0.5,
+                 "temporal_loss": 0.5},
 })
 if __name__ == "__main__":
     mp.set_start_method("spawn")

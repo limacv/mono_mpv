@@ -3,23 +3,30 @@ import time
 import os
 import torch.optim
 import torch.nn as nn
+from torch.utils.data import Dataset
 from torch.utils.data import DataLoader, Subset, random_split, RandomSampler
 from tensorboardX import SummaryWriter
 
 from models.ModelWithLoss import *
 from models.mpi_network import MPINet
+from models.hourglass import Hourglass
+from models.mpv_network import MPVNet
 from models.mpi_utils import save_mpi
-from dataset.RealEstate10K import RealEstate10K_Img
+from dataset.RealEstate10K import *
 
 
 def select_module(name: str) -> nn.Module:
     if "MPINet" in name:
         return MPINet(32)
+    elif "hourglass" in name:
+        return Hourglass(32)
+    elif "MPVNet" in name:
+        return MPVNet(32)
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
 
-def select_modelloss(name: str) -> object:
+def select_modelloss(name: str) -> Type[ModelandLossBase]:
     name = name.lower()
     if "single_view" in name or "sv" in name:
         return ModelandSVLoss
@@ -29,6 +36,15 @@ def select_modelloss(name: str) -> object:
         raise ValueError(f"unrecognized modelloss name: {name}")
 
 
+def select_dataset(name: str):
+    if "RealEstate10K_seq" in name:
+        return RealEstate10K_Seq
+    elif "RealEstate10K_img" in name:
+        return RealEstate10K_Img
+    else:
+        return RealEstate10K_Img
+
+
 def mkdir_ifnotexist(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -36,7 +52,8 @@ def mkdir_ifnotexist(path):
 
 def train(cfg: dict):
     model = select_module(cfg["model_name"])
-    modelloss = ModelandSVLoss(model, cfg["loss_weights"])
+    modelloss = select_modelloss(cfg["modelloss_name"])(model, cfg["loss_weights"])
+    DataSetClass = select_dataset(cfg["dataset"])
 
     num_epoch = cfg["num_epoch"]
     batch_sz = cfg["batch_size"]
@@ -83,7 +100,7 @@ def train(cfg: dict):
     evaluatedata = DataLoader(datasubset, batch_size=batch_sz, shuffle=False, pin_memory=True, drop_last=True,)
     validate_freq = cfg["valid_freq"]
 
-    trainset = RealEstate10K_Img(is_train=True, black_list=True)
+    trainset = DataSetClass(is_train=True, black_list=True)
     train_report_freq = cfg["train_report_freq"]
     train_num_per_epoch = cfg["sample_num_per_epoch"]
     train_set_inplacement = True

@@ -63,7 +63,7 @@ class MPINet(nn.Module):
         x = self.post2(self.post1(torch.cat([x, down1], dim=1)))
         x = self.output(self.up1b(self.up1(x)))
         x = self.output_bias(x, self.mpi_layers)
-        return (torch.tanh(x) + 1.) / 2.0
+        return x
 
     def initial_weights(self):
         for layer in self.modules():

@@ -43,7 +43,7 @@ for train_id in train_seq:
     except Exception as e:
         ret = None
         print(e)
-    name = trainset.file_list[train_id]
+    name = trainset.filebase_list[train_id]
     if os.path.basename(name) in black_lines:
         ret = None
 

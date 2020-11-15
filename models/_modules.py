@@ -26,4 +26,45 @@ def apply_harmonic_bias(inputs: torch.Tensor, num_layers):
     shift = torch.atanh(2. * alpha - 1.)
     no_shift = torch.zeros([inputs.shape[1] - (num_layers - 1)])
     shift = torch.cat([shift, no_shift], dim=-1).type_as(inputs).reshape(1, -1, 1, 1)
-    return inputs + shift
+    out = inputs + shift
+    return (torch.tanh(out) + 1.) / 2.0
+
+
+class inception(nn.Module):
+    def __init__(self, input_size, config):
+        self.config = config
+        super(inception, self).__init__()
+        self.convs = nn.ModuleList()
+
+        # Base 1*1 conv layer
+        self.convs.append(nn.Sequential(
+            nn.Conv2d(input_size, config[0][0], 1),
+            nn.BatchNorm2d(config[0][0], affine=False),
+            nn.ReLU(True),
+        ))
+
+        # Additional layers
+        for i in range(1, len(config)):
+            filt = config[i][0]
+            pad = int((filt - 1) / 2)
+            out_a = config[i][1]
+            out_b = config[i][2]
+            conv = nn.Sequential(
+                nn.Conv2d(input_size, out_a, 1),
+                nn.BatchNorm2d(out_a, affine=False),
+                nn.ReLU(True),
+                nn.Conv2d(out_a, out_b, filt, padding=pad),
+                nn.BatchNorm2d(out_b, affine=False),
+                nn.ReLU(True)
+            )
+            self.convs.append(conv)
+
+    def __repr__(self):
+        return "inception" + str(self.config)
+
+    def forward(self, x):
+        ret = []
+        for conv in self.convs:
+            ret.append(conv(x))
+        # print(torch.cat(ret,dim=1))
+        return torch.cat(ret, dim=1)

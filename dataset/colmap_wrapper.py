@@ -80,6 +80,18 @@ def run_colmap(basedir, pipeline=("feature", "match", "mapper"), **kwargs):
         os.remove(os.path.join(tmp_model_path, "points3D.txt"))
         os.removedirs(tmp_model_path)
 
+        if "bundle_adjust" in pipeline:
+            ba_args = [
+                colmap_path, 'bundle_adjuster',
+                '--input_path', out_model_path,
+                '--output_path', out_model_path,
+                '--BundleAdjustment.refine_principal_point', '1',
+            ]
+
+            ba_output = (subprocess.check_output(ba_args, universal_newlines=True))
+
+            printdbg(ba_output)
+
     if "mapper" in pipeline:
         p = os.path.join(basedir, 'sparse')
         if not os.path.exists(p):

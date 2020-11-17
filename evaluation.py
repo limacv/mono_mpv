@@ -1,4 +1,4 @@
-from train_main import select_module
+from train_main_simple import select_module
 import torch
 import numpy as np
 from dataset.sintel_seq import SintelSeq

@@ -16,8 +16,10 @@ import multiprocessing as mp
 # fakeDeviceNum = 100
 
 cfg = {
+    "cuda_device": 0,  # default device
+    "device_ids": [0],  # will be added by experiments, list of GPU used
+    "gpu_num": 1,
     # const configuration <<<<<<<<<<<<<<<<
-    "cuda_device": 0,
     "log_prefix": "./log/",
     "tensorboard_logdir": "run/",
     "mpi_outdir": "mpi/",
@@ -30,15 +32,17 @@ cfg = {
 
     # about training <<<<<<<<<<<<<<<<
     # comment of current epoch, will print on config.txt
+    "id": "<Please add id in experiments, by default it's the current time>",
     "comment": "<Please add comment in experiments>",
     "dataset": "RealEstate10K_seq",
+    "dataset_seq_length": 2,
     "model_name": "MPVNet",
     "modelloss_name": "time",
-    "batch_size": 2,
+    "batch_size": 12,
     "num_epoch": 1000,
     "save_epoch_freq": 1000,
     "sample_num_per_epoch": -1,  # < 0 means randompermute
-    "lr": 1e-4,
+    "lr": 1e-3,
     "check_point": "no",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
@@ -63,6 +67,8 @@ def main(cfg):
     if 'COMPUTERNAME' in os.environ.keys() and os.environ['COMPUTERNAME'] == "MSI":
         cfg["train_report_freq"] = 1
         cfg["batch_size"] = 1
+        cfg["gpu_num"] = 1
+        cfg["device_ids"] = [0]
     else:
         sys.stdout = open(f"./stdout_{datetime.now().strftime('%Y%m%d_%H%M')}.txt", "w")
 
@@ -86,26 +92,15 @@ if __name__ == "__main__":
     # ////////////////////////////////////////////////////////////////////////////////////////
     # This is where you can add experiments                                                 //
     experiments = Experiments(cfg, False)  # will add first experiment as default           //
-    experiments.add_experiment({"comment": "good data, original implementation"})
+    experiments.add_experiment({"comment": "test run on video data",
+                                "id": "video_testrun",
+                                "gpu_num": 1})
+    """
     experiments.add_experiment({"comment": "good data, original implementation, with sparse loss",
+                                "gpu_num": 4,
                                 "loss_weights": {"sparse_loss": 0.0001},
                                 })
-    experiments.add_experiment({"comment": "good data, from scratch",
-                                "check_point": "no",
-                                "loss_weights": {"sparse_loss": 0},
-                                })
-    experiments.add_experiment({"comment": "good data, from scratch, with sparse loss",
-                                "check_point": "no",
-                                "loss_weights": {"sparse_loss": 0.00001},
-                                })
-    experiments.add_experiment({"comment": "good data, from scratch, mid sparse loss",
-                                "check_point": "no",
-                                "loss_weights": {"sparse_loss": 0.0001},
-                                })
-    experiments.add_experiment({"comment": "good data, from scratch, large sparse loss",
-                                "check_point": "no",
-                                "loss_weights": {"sparse_loss": 0.001},
-                                })
+    """
     # End of adding experiments                                                             //
     # ////////////////////////////////////////////////////////////////////////////////////////
 

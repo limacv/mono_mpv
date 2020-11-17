@@ -5,6 +5,10 @@ import torch.optim
 import torch.nn as nn
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader, Subset, random_split, RandomSampler
+import torch.distributed as dist
+import torch.multiprocessing as torchmp
+from torch.nn.parallel import DataParallel
+# from torch.nn.parallel import DistributedDataParallel as Ddp
 from tensorboardX import SummaryWriter
 
 from models.ModelWithLoss import *
@@ -26,6 +30,7 @@ def select_module(name: str) -> nn.Module:
         raise ValueError(f"unrecognized modelin name: {name}")
 
 
+"""
 def select_modelloss(name: str) -> Type[ModelandLossBase]:
     name = name.lower()
     if "single_view" in name or "sv" in name:
@@ -34,6 +39,7 @@ def select_modelloss(name: str) -> Type[ModelandLossBase]:
         return ModelandTimeLoss
     else:
         raise ValueError(f"unrecognized modelloss name: {name}")
+"""
 
 
 def select_dataset(name: str):
@@ -52,21 +58,26 @@ def mkdir_ifnotexist(path):
 
 def train(cfg: dict):
     model = select_module(cfg["model_name"])
-    modelloss = select_modelloss(cfg["modelloss_name"])(model, cfg["loss_weights"])
-    DataSetClass = select_dataset(cfg["dataset"])
+    modelloss = ModelandTimeLoss(model, cfg)
+
+    device_ids = cfg["device_ids"]
+    # dist.init_process_group('nccl', world_size=len(device_ids))
 
     num_epoch = cfg["num_epoch"]
-    batch_sz = cfg["batch_size"]
+    batch_sz = cfg["batch_size"] * len(device_ids)
     lr = cfg["lr"]
 
     # figuring out all the path
     log_prefix = cfg["log_prefix"]
-    unique_timestr = datetime.now().strftime("%m%d_%H%M%S")  # used to track different runs
-    mpi_save_path = os.path.join(log_prefix, cfg["mpi_outdir"], f"mpi{unique_timestr}")
+    if "id" in cfg.keys():
+        unique_id = f"{cfg['id']}_{datetime.now().strftime('%d%H%M')}"
+    else:
+        unique_id = datetime.now().strftime("%m%d_%H%M%S")
+    mpi_save_path = os.path.join(log_prefix, cfg["mpi_outdir"], f"{unique_id}")
     checkpoint_path = os.path.join(log_prefix, cfg["checkpoint_dir"])
     tensorboard_log_prefix = os.path.join(log_prefix, cfg["tensorboard_logdir"])
     cfgstr_out = os.path.join(tensorboard_log_prefix, "configs.txt")
-    log_dir = os.path.join(tensorboard_log_prefix, str(unique_timestr))
+    log_dir = os.path.join(tensorboard_log_prefix, str(unique_id))
 
     mkdir_ifnotexist(mpi_save_path)
     mkdir_ifnotexist(checkpoint_path)
@@ -93,22 +104,26 @@ def train(cfg: dict):
         check_point["optimizer"]["param_groups"][0]["lr"] = lr
         optimizer.load_state_dict(check_point["optimizer"])
 
-    evalset = RealEstate10K_Img(is_train=False, black_list=True)
+    evalset = RealEstate10K_Seq(is_train=False, black_list=True, seq_len=cfg["evalset_seq_length"])
     validate_gtnum = cfg["validate_num"] if 0 < cfg["validate_num"] < len(evalset) else len(evalset)
 
     datasubset = Subset(evalset, torch.randperm(len(evalset))[:validate_gtnum])
-    evaluatedata = DataLoader(datasubset, batch_size=batch_sz, shuffle=False, pin_memory=True, drop_last=True,)
+    evaluatedata = DataLoader(datasubset, batch_size=batch_sz, shuffle=False,
+                              pin_memory=True, drop_last=True,
+                              )
     validate_freq = cfg["valid_freq"]
 
-    trainset = DataSetClass(is_train=True, black_list=True)
+    trainset = RealEstate10K_Seq(is_train=True, black_list=True, mode="crop", seq_len=cfg["dataset_seq_length"])
     train_report_freq = cfg["train_report_freq"]
     train_num_per_epoch = cfg["sample_num_per_epoch"]
     train_set_inplacement = True
     if train_num_per_epoch < 0:
         train_num_per_epoch = None
         train_set_inplacement = False
-    trainingdata = DataLoader(trainset, batch_sz, pin_memory=True, drop_last=True,
-                              sampler=RandomSampler(trainset, train_set_inplacement, train_num_per_epoch))
+    trainingdata = DataLoader(trainset, batch_sz,
+                              pin_memory=True, drop_last=True,
+                              sampler=RandomSampler(trainset, train_set_inplacement, train_num_per_epoch),
+                              num_workers=6)
 
     tensorboard = SummaryWriter(log_dir)
     # write configure of the current training
@@ -129,14 +144,18 @@ def train(cfg: dict):
     # =============================================
     # kick-off training
     # =============================================
+    modelloss = DataParallel(modelloss, device_ids)
     start_time = time.time()
     for epoch in range(begin_epoch, num_epoch):
         for iternum, datas in enumerate(trainingdata):
             step = len(trainingdata) * epoch + iternum
             # one epoch
             step_scheduler = 1e10 if "mpinet_ori.pth" in cfg["check_point"] else step
-            loss, loss_dict = modelloss.train_forward(*datas, step=step_scheduler)
-
+            loss_dict = modelloss(*datas, step=step_scheduler)
+            loss = loss_dict["loss"]
+            loss_dict = loss_dict["loss_dict"]
+            loss = loss.mean()
+            loss_dict = {k: v.mean() for k, v in loss_dict.items()}
             # recored iter loss
             tensorboard.add_scalar("final_loss", float(loss), step)
             for lossname, lossval in loss_dict.items():
@@ -158,7 +177,7 @@ def train(cfg: dict):
 
                 val_dict, val_display = {}, None
                 for i, evaldatas in enumerate(evaluatedata):
-                    _val_dict = modelloss.valid_forward(*evaldatas, visualize=(i == 0))
+                    _val_dict = modelloss.module.valid_forward(*evaldatas, visualize=(i == 0))
 
                     if i == 0:
                         for k in _val_dict.copy().keys():
@@ -188,8 +207,8 @@ def train(cfg: dict):
                     "cfg": cfg_str,
                     "state_dict": model.cpu().state_dict(),
                     # "optimizer": optimizer.state_dict()
-                }, os.path.join(checkpoint_path, f"{unique_timestr}.pth"))
-                print(f"checkpoint saved {epoch}{unique_timestr}.pth", flush=True)
+                }, os.path.join(checkpoint_path, f"{unique_id}.pth"))
+                print(f"checkpoint saved {epoch}{unique_id}.pth", flush=True)
                 model.cuda()
 
         # output epoch info

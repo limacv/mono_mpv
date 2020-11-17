@@ -7,6 +7,7 @@ class Experiments:
         self.newcfg_list = [{}, ] if addfirst else []
         self.acccfg = {}
         self.idx = 0
+        self.default_device_id = 0
 
     def add_experiment(self, _newcfg: Dict):
         """
@@ -43,8 +44,8 @@ class Experiments:
     def __next__(self):
         if self.idx == len(self.newcfg_list):
             raise StopIteration
-        self.cfg.update({"cuda_device": self.idx})
-        self.acccfg.update({"cuda_device": self.idx})
+        self.cfg.update({"cuda_device": self.default_device_id})
+        self.acccfg.update({"cuda_device": self.default_device_id})
         for k, v in self.newcfg_list[self.idx].items():
             if isinstance(v, dict):
                 self.cfg[k].update(v)
@@ -56,6 +57,12 @@ class Experiments:
                 self.cfg.update({k: v})
                 self.acccfg.update({k: v})
         self.idx += 1
+
+        # add device id
+        num_gpu = self.cfg["gpu_num"] if "gpu_num" in self.cfg.keys() else 1
+        self.cfg.update({"device_ids": list(range(self.default_device_id, self.default_device_id + num_gpu))})
+        self.acccfg.update({"device_ids": list(range(self.default_device_id, self.default_device_id + num_gpu))})
+        self.default_device_id += num_gpu
         return self.cfg
 
     def get_info_str(self):
@@ -80,7 +87,7 @@ class fakeMultiProcessing:
 
 
 if __name__ == "__main__":
-    from train_main import cfg
+    from train_main_simple import cfg
     experiments = Experiments(cfg)
     experiments.add_experiment({"check_point": 0, "occ_cfg": {"estimate_occ": False}})
     experiments.add_experiments(["loss_weights", "photo_loss"], [1, 2, 3, 4, 5])

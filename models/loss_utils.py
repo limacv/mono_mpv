@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as torchf
 import numpy as np
 import cv2
+from .mpi_utils import *
 from typing import Sequence
 from typing import List, Sequence, Union, Tuple, Dict
 
@@ -223,4 +224,3 @@ def smooth_grad(disp: torch.Tensor, image: torch.Tensor, e_min=0.1, g_min=0.05):
     weights = - torch.min(grad_im / (e_min * grad_im_max), torch.tensor(1.).type_as(disp)) + 1.
     smooth = torch.max(grad_disp - g_min, torch.tensor(0.).type_as(disp))
     return weights.squeeze(-3) * smooth.squeeze(-3)
-

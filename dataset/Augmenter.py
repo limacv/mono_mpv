@@ -8,7 +8,7 @@ class DataAugmenter:
     __init__() -> generate() -> apply_*()
     """
 
-    def __init__(self, outshape, mode="crop", ratio_tol=1.1, resize_tol=1.2):
+    def __init__(self, outshape, mode="crop", ratio_tol=1.1, resize_tol=1.1):
         """
         outshape: (height, weight)
         mode="none", "crop", "resize", *"pad"   * = not implemented
@@ -46,8 +46,8 @@ class DataAugmenter:
                 wid_major = False
             if min_rsz > self.resize_tol:
                 print("DataAugmenter: warning! minimum resize factor exceed the tollerant, input is too small")
-                print(f"    adjusting resize_tollerant to {min_rsz}")
-                self.resize_tol = min_rsz
+                print(f"    If you see this warning often, please adjust resize_tollerant to {min_rsz}")
+                # self.resize_tol = min_rsz
             self.cur_resize = np.random.uniform(min_rsz, self.resize_tol)
             if wid_major:  # min for security reason
                 self.cur_crop_wid = min(int(self.outwid / self.cur_resize), self.cur_inwid)
@@ -97,6 +97,9 @@ class DataAugmenter:
             ptxy = ptxy * np.array([2 / (self.cur_inwid - 1), 2 / (self.cur_inhei - 1)]).astype(ptxy.dtype) - 1.
         else:
             raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")
+        if len(ptxy) < 50:
+            print(f"DataAugmenter: warning! after filter the points, only {len(ptxy)} pts left")
+            print(f"    If you see this warning often, please add fitering to the dataset")
         return ptxy, ptz
 
     def apply_intrin(self, intrin: np.array):

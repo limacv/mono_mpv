@@ -410,7 +410,7 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
 
 
 class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
-    def __init__(self, is_train=True, black_list=True, mode='resize', ptnum=2000, seq_len=4):
+    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=2000, seq_len=4):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         model=  'none': do noting

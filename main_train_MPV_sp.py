@@ -5,6 +5,7 @@ import time
 import torch
 import numpy as np
 import trainer
+import warnings
 
 cfg = {
     "cuda_device": 0,  # default device
@@ -27,13 +28,14 @@ cfg = {
     "comment": "",
 
     "dataset": "RealEstate10K_seq",
+    "evalset": "RealEstate10K_seq",
     "dataset_seq_length": 2,
     "evalset_seq_length": 5,
     "model_name": "MPVNet",
     "modelloss_name": "time",
     "batch_size": 1,
     "num_epoch": 1000,
-    "save_epoch_freq": 200,
+    "savepth_iter_freq": 2000,
     "sample_num_per_epoch": -1,  # < 0 means randompermute
     "lr": 1e-4,
     "check_point": "no",
@@ -50,27 +52,30 @@ cfg = {
 }
 
 # TODO:
-#   >>> refine the code
+#   >>> prepare for the dataset
 #   >>> adjust weights
 #   >>> data distributedDataParallel
 #   >>> validation on video data
+#   >>> adjustment to current framework:
+#       >> modify the training so that it skip the first frame
+#       >> modify the network structure so that it can accept arbitrary input size
 
 
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "test_run"
-    cfg["comment"] = "test run for video data"
+    cfg["id"] = "mpvnet_onseq"
+    cfg["comment"] = "parallel expirment on video data"
 
     # the settings for debug
     # please comment this
-    cfg["id"] = "testest"
-    cfg["comment"] = "testest"
-    cfg["train_report_freq"] = 1
-    cfg["batch_size"] = 1
-    cfg["gpu_num"] = 1
-    cfg["device_ids"] = [0]
+    # cfg["id"] = "testest"
+    # cfg["comment"] = "testest"
+    # cfg["train_report_freq"] = 1
+    # cfg["batch_size"] = 1
+    # cfg["gpu_num"] = 1
+    # cfg["device_ids"] = [0]
 
     print("Cuda available devices:")
     devices_num = torch.cuda.device_count()

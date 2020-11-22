@@ -1,5 +1,5 @@
 from dataset.RealEstate10K import *
-from models.ModelWithLoss import ModelandTimeLoss
+from models.ModelWithLoss import ModelandSVLoss
 from models.mpi_network import MPINet
 from models.hourglass import *
 from models.mpi_utils import *
@@ -11,20 +11,20 @@ from tensorboardX import SummaryWriter
 import multiprocessing as mp
 from trainer import select_module
 
-np.random.seed(5)
-torch.manual_seed(0)
+np.random.seed(666)
+torch.manual_seed(666)
 
 
 def main(kwargs):
     device_ids = kwargs["device_ids"]
     batchsz = kwargs["batchsz"]
-    model = select_module("MPVNet")
+    model = select_module("MPINet")
     if "checkpoint" in kwargs:
         model.load_state_dict(torch.load(kwargs["checkpoint"])["state_dict"])
     else:
         model.initial_weights()
     model.cuda()
-    modelloss = ModelandTimeLoss(model, kwargs)
+    modelloss = ModelandSVLoss(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
     if "logdir" in kwargs.keys():
         log_dir = kwargs["logdir"]
@@ -32,22 +32,22 @@ def main(kwargs):
     else:
         tensorboard = None
 
-    dataset = RealEstate10K_Seq(True, mode='crop', seq_len=2)
-    dataset_eval = RealEstate10K_Seq(True, mode='crop', seq_len=5)
+    dataset = RealEstate10K_Img(True, mode='crop')
     modelloss = DataParallel(modelloss, device_ids)
     for i in range(int(14000)):
-        # t = dataset.post_check("01bfb80e5b8fe757", True)
         datas_all = [[]] * 7
         for dev in range(len(device_ids) * batchsz):
             datas = dataset.getitem_bybase("01bfb80e5b8fe757")
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
+
         loss_dict = modelloss(*datas, step=i)
         loss = loss_dict["loss"]
         loss = loss.mean()
         loss_dict = loss_dict["loss_dict"]
         loss_dict = {k: v.mean() for k, v in loss_dict.items()}
+
         for lossname, lossval in loss_dict.items():
             if tensorboard is not None:
                 tensorboard.add_scalar(lossname, lossval, i)
@@ -59,8 +59,7 @@ def main(kwargs):
         loss_str = " | ".join([f"{k}:{v:.3f}" for k, v in loss_dict.items()])
         print(f"loss:{loss:.3f} | {loss_str}", flush=True)
         if i % 25 == 0:
-            datas = dataset_eval.getitem_bybase("01bfb80e5b8fe757")
-            datas = [data.unsqueeze(0) for data in datas]
+            datas = [d_[:batchsz] for d_ in datas]
             _val_dict = modelloss.module.valid_forward(*datas, visualize=True)
             for k in _val_dict.keys():
                 if "vis_" in k and tensorboard is not None:
@@ -88,16 +87,14 @@ main({
     "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",
     "batchsz": 1,
-    "logdir": "./log/run/debug_video",
-    "savefile": "./log/checkpoint/debug_video.pth",
-    "loss_weights": {"pixel_loss_cfg": 'l1',
-                     "pixel_loss": 1,
+    # "checkpoint": "./log/MPINet/mpinet_ori.pth",
+    # "savefile": "./log/DBG_pretrain.pth",
+    "logdir": "./log/run/debug_svscratch",
+    "savefile": "./log/checkpoint/debug_svscratch.pth",
+    "loss_weights": {"pixel_loss": 1,
                      "smooth_loss": 0.5,
-                     "depth_loss": 0.1,
-                     "pixel_std_loss": 0.5,
-                     "temporal_loss": 0.5}
+                     "depth_loss": 0.1},
 })
-
 # good data list
 # 01bfb80e5b8fe757
 # 0b49ce385d8cdadc

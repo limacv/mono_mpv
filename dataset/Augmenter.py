@@ -61,21 +61,6 @@ class DataAugmenter:
             raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")
         return
 
-    def apply_img(self, img: np.array):
-        if self.mode == "none":
-            return img
-        elif self.mode == "crop":
-            img_crop = img[self.cur_crop_top:
-                           self.cur_crop_top + self.cur_crop_hei, self.cur_crop_left:
-                                                                  self.cur_crop_left + self.cur_crop_wid]
-            imgout = cv2.resize(img_crop, (self.outwid, self.outhei), interpolation=cv2.INTER_AREA)
-            return imgout
-        elif self.mode == "resize":
-            imgout = cv2.resize(img, (self.outwid, self.outhei), interpolation=cv2.INTER_AREA)
-            return imgout
-        else:
-            raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")
-
     def apply_pts(self, ptxy: np.array, ptz: np.array):
         """
         ptxy of size (numpt, 2), with axis=-1 being (x_im, y_im)
@@ -97,7 +82,7 @@ class DataAugmenter:
             ptxy = ptxy * np.array([2 / (self.cur_inwid - 1), 2 / (self.cur_inhei - 1)]).astype(ptxy.dtype) - 1.
         else:
             raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")
-        if len(ptxy) < 50:
+        if len(ptxy) < 100:
             print(f"DataAugmenter: warning! after filter the points, only {len(ptxy)} pts left")
             print(f"    If you see this warning often, please add fitering to the dataset")
         return ptxy, ptz
@@ -117,3 +102,36 @@ class DataAugmenter:
         else:
             raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")
         return intrin_calib @ intrin
+
+    def crop(self, img: np.array):
+        return img[self.cur_crop_top:
+                           self.cur_crop_top + self.cur_crop_hei, self.cur_crop_left:
+                                                                  self.cur_crop_left + self.cur_crop_wid]
+
+    def apply_img(self, img: np.array):
+        if self.mode == "none":
+            return img
+        elif self.mode == "crop":
+            img_crop = self.crop(img)
+            imgout = cv2.resize(img_crop, (self.outwid, self.outhei), interpolation=cv2.INTER_AREA)
+            return imgout
+        elif self.mode == "resize":
+            imgout = cv2.resize(img, (self.outwid, self.outhei), interpolation=cv2.INTER_AREA)
+            return imgout
+        else:
+            raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")
+
+    def apply_disparity(self, disp: np.array):
+        if self.mode == "none":
+            return disp
+        elif self.mode == "crop":
+            disp_crop = self.crop(disp)
+            dispout = cv2.resize(disp_crop, (self.outwid, self.outhei), interpolation=cv2.INTER_AREA)
+            # scale the disp value
+            dispout *= (self.outwid / self.cur_crop_wid)
+            return dispout
+        elif self.mode == "resize":
+            dispout = cv2.resize(disp, (self.outwid, self.outhei), interpolation=cv2.INTER_AREA)
+            return dispout
+        else:
+            raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")

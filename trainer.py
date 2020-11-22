@@ -17,6 +17,8 @@ from models.hourglass import Hourglass
 from models.mpv_network import MPVNet
 from models.mpi_utils import save_mpi
 from dataset.RealEstate10K import *
+from dataset.StereoBlur import *
+from dataset.WSVD import *
 
 
 def select_module(name: str) -> nn.Module:
@@ -30,16 +32,16 @@ def select_module(name: str) -> nn.Module:
         raise ValueError(f"unrecognized modelin name: {name}")
 
 
-"""
-def select_modelloss(name: str) -> Type[ModelandLossBase]:
+def select_modelloss(name: str):
     name = name.lower()
     if "single_view" in name or "sv" in name:
         return ModelandSVLoss
     elif "time" in name or "temporal" in name:
         return ModelandTimeLoss
+    elif "disp_img" in name:
+        return ModelandDispLoss
     else:
         raise ValueError(f"unrecognized modelloss name: {name}")
-"""
 
 
 def select_dataset(name: str):
@@ -47,6 +49,10 @@ def select_dataset(name: str):
         return RealEstate10K_Seq
     elif "RealEstate10K_img" in name:
         return RealEstate10K_Img
+    elif "StereoBlur_img" in name:
+        return StereoBlur_Img
+    elif "WSVD_img" in name:
+        return WSVD_Img
     else:
         return RealEstate10K_Img
 
@@ -58,7 +64,7 @@ def mkdir_ifnotexist(path):
 
 def train(cfg: dict):
     model = select_module(cfg["model_name"])
-    modelloss = ModelandTimeLoss(model, cfg)
+    modelloss = select_modelloss(cfg["modelloss_name"])(model, cfg)
 
     device_ids = cfg["device_ids"]
     # dist.init_process_group('nccl', world_size=len(device_ids))
@@ -98,22 +104,24 @@ def train(cfg: dict):
         model.initial_weights()
         print(f"initial the model weights")
 
-    save_epoch_freq = cfg["save_epoch_freq"]
+    savepth_iter_freq = cfg["savepth_iter_freq"]
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
     if "optimizer" in check_point.keys():
         check_point["optimizer"]["param_groups"][0]["lr"] = lr
         optimizer.load_state_dict(check_point["optimizer"])
 
-    evalset = RealEstate10K_Seq(is_train=False, black_list=True, seq_len=cfg["evalset_seq_length"])
+    # evalset = RealEstate10K_Seq(is_train=False, black_list=True, seq_len=cfg["evalset_seq_length"])
+    evalset = StereoBlur_Img(is_train=False)
     validate_gtnum = cfg["validate_num"] if 0 < cfg["validate_num"] < len(evalset) else len(evalset)
 
     datasubset = Subset(evalset, torch.randperm(len(evalset))[:validate_gtnum])
-    evaluatedata = DataLoader(datasubset, batch_size=batch_sz, shuffle=False,
+    evaluatedata = DataLoader(datasubset, batch_size=1, shuffle=False,
                               pin_memory=True, drop_last=True,
                               )
     validate_freq = cfg["valid_freq"]
 
-    trainset = RealEstate10K_Seq(is_train=True, black_list=True, mode="crop", seq_len=cfg["dataset_seq_length"])
+    # trainset = RealEstate10K_Seq(is_train=True, black_list=True, mode="crop", seq_len=cfg["dataset_seq_length"])
+    trainset = StereoBlur_Img(is_train=True)
     train_report_freq = cfg["train_report_freq"]
     train_num_per_epoch = cfg["sample_num_per_epoch"]
     train_set_inplacement = True
@@ -122,8 +130,7 @@ def train(cfg: dict):
         train_set_inplacement = False
     trainingdata = DataLoader(trainset, batch_sz,
                               pin_memory=True, drop_last=True,
-                              sampler=RandomSampler(trainset, train_set_inplacement, train_num_per_epoch),
-                              num_workers=6)
+                              sampler=RandomSampler(trainset, train_set_inplacement, train_num_per_epoch))
 
     tensorboard = SummaryWriter(log_dir)
     # write configure of the current training
@@ -200,7 +207,7 @@ def train(cfg: dict):
             loss.backward()
             optimizer.step()
 
-            if step % save_epoch_freq == 0:
+            if step % savepth_iter_freq == 0:
                 torch.save({
                     "epoch": epoch,
                     "step": step,

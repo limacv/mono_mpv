@@ -40,7 +40,7 @@ cfg = {
     "modelloss_name": "time",
     "batch_size": 12,
     "num_epoch": 1000,
-    "save_epoch_freq": 1000,
+    "savepth_iter_freq": 1000,
     "sample_num_per_epoch": -1,  # < 0 means randompermute
     "lr": 1e-3,
     "check_point": "no",

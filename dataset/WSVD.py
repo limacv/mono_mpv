@@ -1,4 +1,3 @@
-from pytube import YouTube
 import torch
 from torch.nn import Sequential
 import torch.nn.functional as torchf
@@ -11,14 +10,14 @@ from torch.utils.data import Dataset
 import cv2
 import os
 from glob import glob
-from . import StereoBlur_root, is_DEBUG, OutputSize
-from .colmap_wrapper import *
-from .cv2disparity import compute_disparity_uncertainty
+from . import WSVD_root
+from . import OutputSize as outSize
 from .Augmenter import DataAugmenter
+from .cv2disparity import compute_disparity_uncertainty
 
 
-class StereoBlur_Img(Dataset):
-    def __init__(self, is_train, mode='crop'):
+class WSVD_Img(Dataset):
+    def __init__(self, is_train):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         model=  'none': do noting
@@ -30,16 +29,15 @@ class StereoBlur_Img(Dataset):
             self.trainstr = "train"
         else:
             self.trainstr = "test"
-        self.root = os.path.abspath(StereoBlur_root)
+        self.root = os.path.abspath(WSVD_root)
         video_list = sorted(glob(os.path.join(self.root, self.trainstr, "*.mp4")))
         self.filebase_list = [self.getbasename(_p) for _p in video_list]
 
-        self.name = f"StereoBlur_{self.trainstr}"
+        self.name = f"WSVD_{self.trainstr}"
         print(f"{self.name}: find {len(self.filebase_list)} video files in {self.trainstr} set")
 
         self.totensor = ToTensor()
         self._cur_file_base = ""
-        self.augmenter = DataAugmenter(OutputSize, mode=mode)
 
     @staticmethod
     def getbasename(path):
@@ -79,13 +77,10 @@ class StereoBlur_Img(Dataset):
             return None
 
         framenum = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        # random variables
         if self.trainstr == "train":
             idx = np.random.randint(0, framenum)
-            retleft = (np.random.randint(2) == 0)
         else:
             idx = 1
-            retleft = True
         cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         ret, img = cap.read()
         cap.release()
@@ -93,8 +88,11 @@ class StereoBlur_Img(Dataset):
             print(f"{self.name}: cannot read frame {idx} in {filebase}, which is said to have {framenum} frames")
             return None
 
-        # read and split the left and right view
+        # split the left and right view
         hei, wid, _ = img.shape
+        if wid > hei * 4:  # might be something wrong with ratio
+            img = cv2.resize(img, None, None, 0.5, 1)
+            hei, wid, _ = img.shape
 
         wid //= 2
         imgl, imgr = img[:, :wid], img[:, wid:]
@@ -102,25 +100,4 @@ class StereoBlur_Img(Dataset):
             print(f"{self.name}: {filebase} frame {idx} left right view has different size, resizing to left")
             imgr = cv2.resize(imgr, (imgl.shape[1], imgl.shape[0]))
 
-        # augmentation
-        self.augmenter.random_generate((hei, wid))
-        disp, uncertainty = compute_disparity_uncertainty(imgl, imgr, retleft)
-        imgl = self.augmenter.apply_img(imgl)
-        imgr = self.augmenter.apply_img(imgr)
-        disp = self.augmenter.apply_disparity(disp)
-        uncertainty = self.augmenter.apply_img(uncertainty)
-
-        # if uncertainty part is too little, return None
-        if uncertainty.sum() < 0.2 * uncertainty.size:
-            print(f"{self.name}:: uncertainty map too sparse, this data not available")
-            return None
-
-        if retleft:
-            refimg = self.totensor(imgl)
-            tarimg = self.totensor(imgr)
-            isleft = torch.tensor([1.])
-        else:
-            refimg = self.totensor(imgr)
-            tarimg = self.totensor(imgl)
-            isleft = torch.tensor([-1.])
-        return refimg, tarimg, torch.tensor(disp), torch.tensor(uncertainty), isleft
+        return compute_disparity_uncertainty(imgl, imgr, resize=True)

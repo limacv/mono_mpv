@@ -267,3 +267,27 @@ def render_newview(mpi: torch.Tensor, srcextrin: torch.Tensor, tarextrin: torch.
         disparitys = estimate_disparity_torch(mpi_warp, mpi_depth)
         return overcompose(mpi_warp, ret_mask=ret_mask), disparitys
 
+
+def shift_newview(mpi: torch.Tensor, disparities: torch.Tensor, ret_mask=False, ret_dispmap=False)\
+        -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor],
+                 Tuple[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]]:
+    """
+    mpi: [B, LayerNum, 4, H, W]
+    depthes: tensor of shape [B x LayerNum], means the shift pixel number for each layer
+        when have positive value, means translate to left (usually left view as reference will have positive disp)
+    ret: ref_view_images[, mask][, disparitys]
+    """
+    batchsz, planenum, cnl, hei, wid = mpi.shape
+    bpnum = batchsz * planenum
+    affine = torch.eye(2, 3).reshape(1, 1, 2, 3).repeat(batchsz, planenum, 1, 1).type_as(disparities)
+    affine[:, :, 0, -1] = (disparities / ((wid - 1) / 2))
+
+    grid = torchf.affine_grid(affine.reshape(bpnum, 2, 3), [bpnum, cnl, hei, wid])
+    mpi_warp = torchf.grid_sample(mpi.reshape(bpnum, cnl, hei, wid), grid)
+    mpi_warp = mpi_warp.reshape(batchsz, planenum, cnl, hei, wid)
+
+    if ret_dispmap:
+        disparitys = estimate_disparity_torch(mpi_warp, torch.reciprocal(disparities))
+        return overcompose(mpi_warp, ret_mask=ret_mask), disparitys
+    else:
+        return overcompose(mpi_warp, ret_mask=ret_mask)

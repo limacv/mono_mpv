@@ -17,7 +17,7 @@ single_view_cfg = {
     "model_name": "MPINet",
     "batch_size": 2,
     "num_epoch": 1000,
-    "save_epoch_freq": 500,
+    "savepth_iter_freq": 500,
     "sample_num_per_epoch": -1,  # < 0 means randompermute
     "lr": 5e-5,
     "check_point": "MPINet/mpinet_ori.pth",  # relative to log_prefix

@@ -16,17 +16,18 @@ outframeidx = None
 
 # state_dict_path = "./log/checkpoint/DBG_scratch.pth"
 # state_dict_path = "./log/MPINet/mpinet_ori.pth"
-state_dict_path = "./log/checkpoint/seq_testrun_170116.pth"
-video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim.mp4"
+state_dict_path = "./log/checkpoint/stereoblur_img_230031.pth"
+video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\train\\HD720-01-19-14-28.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim.mp4"
 # testtmp\\ccc439d4b28c87b2 -> test_set  traintmp\\01bfb80e5b8fe757 -> used in dbg
 out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
-videoout_path = os.path.join(out_prefix, "seq_testrun_disparity.mp4")
-videoout1_path = os.path.join(out_prefix, "seq_testrun_newview.mp4")
-mpiout_path = os.path.join(out_prefix, "seq_testrun")
-# outframeidx = 27  # 6  # 27
+videoout_path = os.path.join(out_prefix, "stereoblur_disparity.mp4")
+videoout1_path = os.path.join(out_prefix, "stereoblur_newview.mp4")
+mpiout_path = os.path.join(out_prefix, "stereoblur")
+outframeidx = 27  # 6  # 27
 
-# model = MPINet(32).cuda()
-model = MPVNet(32).cuda()
+model = MPINet(32).cuda()
+# model = MPVNet(32).cuda()
 state_dict = torch.load(state_dict_path, map_location='cuda:0')
 # torch.save({"state_dict": state_dict["state_dict"]}, state_dict_path)
 if "state_dict" in state_dict:
@@ -34,6 +35,8 @@ if "state_dict" in state_dict:
 model.load_state_dict(state_dict)
 # modelloss = ModelandSVLoss(model, {"loss_weights":{},"device_ids":[0]})
 modelloss = ModelandTimeLoss(model, {"loss_weights":{},"device_ids":[0]})
+
+# ## ### #### ##### ###### ####### ######## ####### ###### ##### #### ### ## #
 
 cap = cv2.VideoCapture(video_path)
 out = cv2.VideoWriter()
@@ -44,11 +47,14 @@ if outframeidx is not None:
 frameidx = 0
 while True:
     ret, img = cap.read()
-    if not ret:
+    if not ret or frameidx > 100:
         break
 
     hei, wid, _ = img.shape
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    if wid > hei * 2:
+        img = img[:, :wid//2]
+        hei, wid, _ = img.shape
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img_tensor = ToTensor()(img).cuda()
     mpi = modelloss.infer_forward(img_tensor, mode='pad_reflect')
 

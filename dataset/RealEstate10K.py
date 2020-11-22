@@ -423,6 +423,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
                          ptnum=ptnum)
         self.name = f"RealEstate10K_Video_{self.trainstr}"
         self.sequence_length = seq_len
+        self.tar_margin = max(6 - seq_len, 1)
         self.augmenter = DataAugmenter(outSize, mode=mode)
 
     def __len__(self):
@@ -478,8 +479,8 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         if self.trainstr == "train":
             startid = np.random.randint(0, framenum - self.sequence_length)
             refidxs = np.arange(startid, startid + self.sequence_length)
-            taridxs = list(range(max(startid - 2, 0),
-                                 min(refidxs[-1] + 3, framenum)))
+            taridxs = list(range(max(startid - self.tar_margin, 0),
+                                 min(refidxs[-1] + self.tar_margin + 1, framenum)))
             # taridxs = list(range(max(startid - 2, 0), startid)) +\
             #           list(range(refidxs[-1] + 1, min(refidxs[-1] + 3, framenum)))
             taridx = taridxs[np.random.randint(len(taridxs))]
@@ -508,6 +509,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
             return None
         video.release()
 
+        tarimg = tarimg[:, :, ::-1]
         tarimg = self.totensor(self.augmenter.apply_img(tarimg))
         refimgs = torch.stack(refimgs, dim=0)
 
@@ -542,6 +544,8 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
             point2ds_depth = point2ds_depth[good_ptid]
 
             point2ds, point2ds_depth = self.augmenter.apply_pts(point2ds, point2ds_depth)
+            if len(point2ds) < 100:
+                return None
             # random sample point so that output fixed number of points
             ptnum = point2ds.shape[0]
             ptsample = np.random.choice(ptnum, self.ptnum, replace=(ptnum < self.ptnum))

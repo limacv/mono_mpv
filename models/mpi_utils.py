@@ -105,12 +105,13 @@ def netout2mpi(netout: torch.Tensor, img: torch.Tensor, bg_pct=1., ret_blendw=Fa
         return mpi
 
 
-def overcompose(mpi: torch.Tensor, blendweight=None, ret_mask=False)\
+def overcompose(mpi: torch.Tensor, blendweight=None, ret_mask=False, blend_content=None)\
         -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """
     compose mpi back to front
     mpi: [B, 32, 4, H, W]
     blendweight: [B, 32, H, W] for reduce reduntant computation
+    blendContent: [B, layernum, cnl, H, W], if not None,
     return: image of shape [B, 4, H, W]
         [optional: ] mask of shape [B, H, W], soft mask that
     """
@@ -121,7 +122,9 @@ def overcompose(mpi: torch.Tensor, blendweight=None, ret_mask=False)\
                                          torch.ones([batchsz, 1, height, width]).type_as(alpha)], dim=1)
     else:
         blendweight = alpha * blendweight
-    rgb = (mpi[:, :, :3, ...] * blendweight.unsqueeze(2)).sum(dim=1)
+
+    content = mpi[:, :, :3, ...] if blend_content is None else blend_content
+    rgb = (content * blendweight.unsqueeze(2)).sum(dim=1)
     if not ret_mask:
         return rgb
     else:
@@ -145,19 +148,6 @@ def warp_homography(homos: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
     warpped = torchf.grid_sample(images.reshape(batchsz * planenum, cnl, hei, wid),
                                  new_grid.reshape(batchsz * planenum, hei, wid, 2))
     return warpped.reshape(batchsz, planenum, cnl, hei, wid)
-
-
-def get_tardepth_homography(homosref2tar: torch.Tensor, refdepth: torch.Tensor) -> torch.Tensor:
-    """
-    given depth value in *ref space*, and a homograph that warp 3D point coord from *ref im space* to *tar im space*
-    note that here homo is actually a 3D transformation matrix that transform 3D point coordinates
-    explanation:
-        let P1 be point in ref im space [x1, y1, d1], which has constant depth in our case
-            P2 be point in tar im space [x2, y2, d2], x2, y2 is known and d2 is what we want
-        P1 = H @ P2
-        d1 = [H31, H32] @ [x2, y2]^T + H33 * d2
-    """
-    pass
 
 
 def warp_homography_withdepth(homos: torch.Tensor, images: torch.Tensor, depth: torch.Tensor) \
@@ -204,7 +194,7 @@ def compute_homography(src_extrin: torch.Tensor, src_intrin: torch.Tensor,
             so in tar space: n'^T @ P2 = d'  where:
                 n' = R^T @ n,    d' = d - n^T @ t
 
-        so P1 = R @ P2 + d'^-1 t @ n'T @ P2 = (R + t @ n'^T @ R) @ P2
+        so P1 = R @ P2 + d'^-1 t @ n'T @ P2 = (R + t @ n'^T @ R / (d - n^T @ t)) @ P2
     src_extrin/tar_extrin: [B, 3, 4] = [R | t]
     src_intrin/tar_intrin: [B, 3, 3]
     normal: [B, 3] normal of plane in *reference space*

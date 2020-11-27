@@ -17,14 +17,14 @@ outframeidx = None
 # state_dict_path = "./log/checkpoint/DBG_scratch.pth"
 # state_dict_path = "./log/MPINet/mpinet_ori.pth"
 state_dict_path = "./log/checkpoint/stereoblur_img_230031.pth"
-video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\train\\HD720-01-19-14-28.mp4"
+video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim.mp4"
 # testtmp\\ccc439d4b28c87b2 -> test_set  traintmp\\01bfb80e5b8fe757 -> used in dbg
 out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
 videoout_path = os.path.join(out_prefix, "stereoblur_disparity.mp4")
 videoout1_path = os.path.join(out_prefix, "stereoblur_newview.mp4")
 mpiout_path = os.path.join(out_prefix, "stereoblur")
-outframeidx = 27  # 6  # 27
+# outframeidx = 27  # 6  # 27
 
 model = MPINet(32).cuda()
 # model = MPVNet(32).cuda()

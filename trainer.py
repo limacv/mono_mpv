@@ -5,16 +5,19 @@ import torch.optim
 import torch.nn as nn
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader, Subset, random_split, RandomSampler
-import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
+import torch.distributed as torchdist
 import torch.multiprocessing as torchmp
 from torch.nn.parallel import DataParallel
-# from torch.nn.parallel import DistributedDataParallel as Ddp
+# from torch.nn.parallel import DistributedDataParallel
+
 from tensorboardX import SummaryWriter
 
 from models.ModelWithLoss import *
 from models.mpi_network import MPINet
 from models.hourglass import Hourglass
 from models.mpv_network import MPVNet
+from models.mpi_flow_network import *
 from models.mpi_utils import save_mpi
 from dataset.RealEstate10K import *
 from dataset.StereoBlur import *
@@ -28,6 +31,10 @@ def select_module(name: str) -> nn.Module:
         return Hourglass(32)
     elif "MPVNet" in name:
         return MPVNet(32)
+    elif "MPIMPF" in name:
+        return MPI_MPF_Net(32)
+    elif "MPISPF" in name:
+        return MPI_SPF_Net(32)
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
@@ -40,17 +47,22 @@ def select_modelloss(name: str):
         return ModelandTimeLoss
     elif "disp_img" in name:
         return ModelandDispLoss
+    elif "disp_flow" in name:
+        return ModelandDispFlowLoss
     else:
         raise ValueError(f"unrecognized modelloss name: {name}")
 
 
 def select_dataset(name: str):
-    if "RealEstate10K_seq" in name:
+    name = name.lower()
+    if "realestate10k_seq" in name:
         return RealEstate10K_Seq
-    elif "RealEstate10K_img" in name:
+    elif "realestate10k_img" in name:
         return RealEstate10K_Img
-    elif "StereoBlur_img" in name:
+    elif "stereoblur_img" in name:
         return StereoBlur_Img
+    elif "stereoblur_seq" in name:
+        return StereoBlur_Seq
     elif "WSVD_img" in name:
         return WSVD_Img
     else:
@@ -67,7 +79,7 @@ def train(cfg: dict):
     modelloss = select_modelloss(cfg["modelloss_name"])(model, cfg)
 
     device_ids = cfg["device_ids"]
-    # dist.init_process_group('nccl', world_size=len(device_ids))
+    # torchdist.init_process_group('nccl', world_size=len(device_ids))
 
     num_epoch = cfg["num_epoch"]
     batch_sz = cfg["batch_size"] * len(device_ids)
@@ -90,7 +102,7 @@ def train(cfg: dict):
     mkdir_ifnotexist(tensorboard_log_prefix)
 
     try:
-        check_point = torch.load(os.path.join(log_prefix, cfg["check_point"]))
+        check_point = torch.load(os.path.join(checkpoint_path, cfg["check_point"]))
     except FileNotFoundError:
         print(f"cannot open check point file {cfg['check_point']}")
         check_point = {}
@@ -110,8 +122,9 @@ def train(cfg: dict):
         check_point["optimizer"]["param_groups"][0]["lr"] = lr
         optimizer.load_state_dict(check_point["optimizer"])
 
-    # evalset = RealEstate10K_Seq(is_train=False, black_list=True, seq_len=cfg["evalset_seq_length"])
-    evalset = StereoBlur_Img(is_train=False)
+    # evalset = RealEstate10K_Seq(is_train=False, seq_len=cfg["evalset_seq_length"])
+    # evalset = StereoBlur_Img(is_train=False)
+    evalset = select_dataset(cfg["evalset"])(is_train=False)
     validate_gtnum = cfg["validate_num"] if 0 < cfg["validate_num"] < len(evalset) else len(evalset)
 
     datasubset = Subset(evalset, torch.randperm(len(evalset))[:validate_gtnum])
@@ -120,8 +133,8 @@ def train(cfg: dict):
                               )
     validate_freq = cfg["valid_freq"]
 
-    # trainset = RealEstate10K_Seq(is_train=True, black_list=True, mode="crop", seq_len=cfg["dataset_seq_length"])
-    trainset = StereoBlur_Img(is_train=True)
+    # trainset = RealEstate10K_Seq(is_train=True, seq_len=cfg["dataset_seq_length"])
+    trainset = select_dataset(cfg["trainset"])(is_train=True)
     train_report_freq = cfg["train_report_freq"]
     train_num_per_epoch = cfg["sample_num_per_epoch"]
     train_set_inplacement = True
@@ -169,7 +182,7 @@ def train(cfg: dict):
                 tensorboard.add_scalar(lossname, lossval, step)
 
             # output loss message
-            if iternum % train_report_freq == 0:
+            if step % train_report_freq == 0:
                 time_per_iter = (time.time() - start_time) / train_report_freq
                 # output iter infomation
                 loss_str = " | ".join([f"{k}:{v:.3f}" for k, v in loss_dict.items()])
@@ -179,7 +192,7 @@ def train(cfg: dict):
                 start_time = time.time()
 
             # perform evaluation
-            if iternum % validate_freq == 0:
+            if step % validate_freq == 0:
                 print("  eval...", end="")
 
                 val_dict, val_display = {}, None

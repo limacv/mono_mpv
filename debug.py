@@ -18,25 +18,25 @@ torch.manual_seed(666)
 def main(kwargs):
     device_ids = kwargs["device_ids"]
     batchsz = kwargs["batchsz"]
-    model = select_module("MPINet")
+    model = select_module("MPISPF")
     if "checkpoint" in kwargs:
         model.load_state_dict(torch.load(kwargs["checkpoint"])["state_dict"])
     else:
         model.initial_weights()
     model.cuda()
-    modelloss = ModelandDispLoss(model, kwargs)
+    modelloss = ModelandDispFlowLoss(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
 
-    dataset = StereoBlur_Img(True, mode='crop')
+    dataset = StereoBlur_Seq(True, mode='crop', seq_len=2)
     modelloss = DataParallel(modelloss, device_ids)
     for i in range(int(14000)):
-        datas_all = [[]] * 5
+        datas_all = [[]] * 6
         for dev in range(2):
             datas = dataset[0]
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
-
+        _val_dict = modelloss.module.valid_forward(*datas, visualize=True)
         loss_dict = modelloss(*datas, step=i)
         loss = loss_dict["loss"]
         loss = loss.mean()
@@ -71,7 +71,7 @@ def main(kwargs):
 main({
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
-    "checkpoint": "./log/MPINet/mpinet_ori.pth",
+    # "checkpoint": "./log/MPINet/mpinet_ori.pth",
     "batchsz": 1,
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",
     # "savefile": "./log/DBG_pretrain.pth",
@@ -79,7 +79,9 @@ main({
     "savefile": "./log/checkpoint/debug_svscratch.pth",
     "loss_weights": {"pixel_loss": 1,
                      "smooth_loss": 0.5,
-                     "depth_loss": 0.1},
+                     "depth_loss": 0.1,
+                     "flow_epe": 1,
+                     "flow_smth": 0.01},
 })
 # good data list
 # 01bfb80e5b8fe757

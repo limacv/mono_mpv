@@ -27,10 +27,8 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "dataset": "RealEstate10K_seq",
+    "trainset": "RealEstate10K_seq",
     "evalset": "RealEstate10K_seq",
-    "dataset_seq_length": 2,
-    "evalset_seq_length": 5,
     "model_name": "MPVNet",
     "modelloss_name": "time",
     "batch_size": 1,
@@ -52,8 +50,6 @@ cfg = {
 }
 
 # TODO:
-#   >>> prepare for the dataset
-#   >>> adjust weights
 #   >>> data distributedDataParallel
 #   >>> validation on video data
 #   >>> adjustment to current framework:

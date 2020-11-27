@@ -67,7 +67,7 @@ class RAFTNet(nn.Module):
         fmap = self.fnet(frame)
         return [fmap, frame]
 
-    def forward(self, image1, image2, iters=10):
+    def forward(self, image1, image2, iters=12):
         """ Estimate optical flow between pair of frames """
         # for compatiability
         if isinstance(image1, Sequence):

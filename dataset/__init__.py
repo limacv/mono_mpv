@@ -14,9 +14,9 @@ if 'COMPUTERNAME' in os.environ.keys() and os.environ['COMPUTERNAME'] == "MSI":
     RealEstate10K_root = "D:\\MSI_NB\\source\\data\\RealEstate10K\\"
     colmap_path = "D:\\MSI_NB\\source\\maybeUseful\\COLMAP-3.6-exe\\COLMAP.bat"
     OutputSize = (128, 256)
-
     WSVD_root = "D:\\MSI_NB\\source\\data\\WSVD_processed"
     StereoBlur_root = "D:\\MSI_NB\\source\\data\\StereoBlur_processed"
+
 
 elif 'COMPUTERNAME' in os.environ.keys() and os.environ['COMPUTERNAME'] == "DESKTOP-FCSORVT":
     RealEstate10K_root = "D:\\dataset\\RealEstate10K\\"

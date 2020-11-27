@@ -34,8 +34,7 @@ cfg = {
     # comment of current epoch, will print on config.txt
     "id": "<Please add id in experiments, by default it's the current time>",
     "comment": "<Please add comment in experiments>",
-    "dataset": "RealEstate10K_seq",
-    "dataset_seq_length": 2,
+    "trainset": "RealEstate10K_seq",
     "model_name": "MPVNet",
     "modelloss_name": "time",
     "batch_size": 12,

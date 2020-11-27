@@ -28,7 +28,7 @@ cfg = {
 
     "trainset": "StereoBlur_Seq",
     "evalset": "StereoBlur_Seq",
-    "model_name": "MPISPF",
+    "model_name": "MPIMPF",
     "modelloss_name": "disp_flow",
     "batch_size": 1,
     "num_epoch": 1000,
@@ -56,7 +56,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "addflow_spf"
+    cfg["id"] = "addflow_mpf"
     cfg["comment"] = "try the effect of flow input and flow output"
 
     # the settings for debug

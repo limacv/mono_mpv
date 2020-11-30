@@ -16,17 +16,19 @@ outframeidx = None
 
 # state_dict_path = "./log/checkpoint/DBG_scratch.pth"
 # state_dict_path = "./log/MPINet/mpinet_ori.pth"
-state_dict_path = "./log/checkpoint/stereoblur_img_230031.pth"
+state_dict_path = "./log/checkpoint/mpinet_baseline_291503_r3.pth"
 video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim.mp4"
 # testtmp\\ccc439d4b28c87b2 -> test_set  traintmp\\01bfb80e5b8fe757 -> used in dbg
+saveprefix = "test"
+
 out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
-videoout_path = os.path.join(out_prefix, "stereoblur_disparity.mp4")
-videoout1_path = os.path.join(out_prefix, "stereoblur_newview.mp4")
-mpiout_path = os.path.join(out_prefix, "stereoblur")
+videoout_path = os.path.join(out_prefix, saveprefix + "_disparity.mp4")
+videoout1_path = os.path.join(out_prefix, saveprefix + "_newview.mp4")
+mpiout_path = os.path.join(out_prefix, saveprefix)
 # outframeidx = 27  # 6  # 27
 
-model = MPINet(32).cuda()
+model = MPINet(24).cuda()
 # model = MPVNet(32).cuda()
 state_dict = torch.load(state_dict_path, map_location='cuda:0')
 # torch.save({"state_dict": state_dict["state_dict"]}, state_dict_path)

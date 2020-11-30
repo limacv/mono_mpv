@@ -2,7 +2,7 @@
 
 import torch
 from torch import nn
-from ._modules import *
+from ._modules import inception, apply_harmonic_bias
 
 
 class Channels1(nn.Module):
@@ -112,7 +112,35 @@ class Hourglass(nn.Module):
         self.num_layers = num_layers
         self.seq = nn.Sequential(
             nn.Conv2d(3, 128, 7, padding=3),
-            nn.BatchNorm2d(128),
+            nn.SyncBatchNorm(128),
+            nn.ReLU(True),
+            Channels4(),
+        )
+        self.output = nn.Conv2d(64, self.num_layers - 1 + 3, 3, padding=1)
+        self.output_bias = apply_harmonic_bias
+
+    def forward(self, x):
+        x = self.output(self.seq(x))
+        return self.output_bias(x, self.num_layers)
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.output.weight)
+        nn.init.constant_(self.output.bias, 0)
+
+
+class HourglassF(nn.Module):
+    def __init__(self, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        self.seq = nn.Sequential(
+            nn.Conv2d(3, 128, 7, padding=3),
+            nn.SyncBatchNorm(128),
             nn.ReLU(True),
             Channels4(),
         )

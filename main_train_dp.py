@@ -5,7 +5,6 @@ import time
 import torch
 import numpy as np
 import trainer
-import warnings
 
 cfg = {
     "cuda_device": 0,  # default device
@@ -19,7 +18,7 @@ cfg = {
 
     "write_validate_result": True,
     "validate_num": 32,
-    "valid_freq": 1000,
+    "valid_freq": 500,
     "train_report_freq": 10,
 
     # about training <<<<<<<<<<<<<<<<
@@ -27,10 +26,10 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "RealEstate10K_seq",
-    "evalset": "RealEstate10K_seq",
-    "model_name": "MPVNet",
-    "modelloss_name": "time",
+    "trainset": "StereoBlur_Seq",
+    "evalset": "StereoBlur_Seq",
+    "model_name": "MPISPF",
+    "modelloss_name": "disp_flow",
     "batch_size": 1,
     "num_epoch": 1000,
     "savepth_iter_freq": 2000,
@@ -40,38 +39,34 @@ cfg = {
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "smooth_loss": 0.5,
-        "depth_loss": 0.1,
-        "pixel_std_loss": 0.5,
-        "temporal_loss": 0.5
+        "smooth_loss": 0.1,
+        "depth_loss": 5,
+        # "pixel_std_loss": 0.5,
+        # "temporal_loss": 0.5
+
+        "flow_epe": 0.1,
+        "flow_smth": 0.05,
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
     },
 }
-
-# TODO:
-#   >>> data distributedDataParallel
-#   >>> validation on video data
-#   >>> adjustment to current framework:
-#       >> modify the training so that it skip the first frame
-#       >> modify the network structure so that it can accept arbitrary input size
 
 
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "mpvnet_onseq"
-    cfg["comment"] = "parallel expirment on video data"
+    cfg["id"] = "addflow_spf"
+    cfg["comment"] = "try the effect of flow input and flow output"
 
     # the settings for debug
     # please comment this
-    # cfg["id"] = "testest"
-    # cfg["comment"] = "testest"
-    # cfg["train_report_freq"] = 1
-    # cfg["batch_size"] = 1
-    # cfg["gpu_num"] = 1
-    # cfg["device_ids"] = [0]
+    if "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
+        print("Debug Mode!!!", flush=True)
+        cfg["id"] = "testest"
+        cfg["comment"] = "testest"
+        cfg["gpu_num"] = 2
+        cfg["device_ids"] = [0, 1]
 
     print("Cuda available devices:")
     devices_num = torch.cuda.device_count()

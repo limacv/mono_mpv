@@ -281,3 +281,23 @@ def shift_newview(mpi: torch.Tensor, disparities: torch.Tensor, ret_mask=False, 
         return overcompose(mpi_warp, ret_mask=ret_mask), disparitys
     else:
         return overcompose(mpi_warp, ret_mask=ret_mask)
+
+
+def warp_flow(mpi: torch.Tensor, mpf: torch.Tensor, offset=None):
+    """
+    mpi: [..., cnl, H, W]
+    mpf: [..., 2, H, W]
+    """
+    orishape = mpi.shape
+    cnl, hei, wid = mpi.shape[-3:]
+    mpi = mpi.reshape(-1, cnl, hei, wid)
+    mpf = mpf.reshape(-1, 2, hei, wid).permute(0, 2, 3, 1)
+
+    if offset is None:
+        y, x = torch.meshgrid([torch.arange(hei), torch.arange(wid)])
+        x, y = x.type_as(mpi), y.type_as(mpi)
+        offset = torch.stack([x, y], dim=-1)
+    grid = offset.reshape(1, hei, wid, 2) + mpf
+    normanator = torch.tensor([(wid - 1) / 2, (hei - 1) / 2]).reshape(1, 1, 1, 2).type_as(grid)
+    warpped = torchf.grid_sample(mpi, grid / normanator - 1.)
+    return warpped.reshape(orishape)

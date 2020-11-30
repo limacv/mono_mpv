@@ -9,7 +9,7 @@ from ._modules import *
 class MPVNet(nn.Module):
     def __init__(self, mpi_layers):
         super().__init__()
-        self.mpi_layers = mpi_layers
+        self.num_layers = mpi_layers
         self.down = nn.MaxPool2d(2)
         self.up = up
         self.down1 = conv(3, 32, 7)
@@ -47,7 +47,7 @@ class MPVNet(nn.Module):
         self.post2 = conv(64, 64, 3)
         self.up1 = conv(64, 64, 3)
         self.up1b = conv(64, 64, 3)
-        self.output = nn.Conv2d(64, self.mpi_layers - 1 + 3, 3, padding=1)
+        self.output = nn.Conv2d(64, self.num_layers - 1 + 3, 3, padding=1)
         self.output_bias = apply_harmonic_bias
 
     def forward(self, img, feat_in=None):
@@ -74,7 +74,7 @@ class MPVNet(nn.Module):
         x = self.up(self.up2b(self.up2(torch.cat([x, down2], dim=1))))
         x = self.post2(self.post1(torch.cat([x, down1], dim=1)))
         x = self.output(self.up1b(self.up1(x)))
-        x = self.output_bias(x, self.mpi_layers)
+        x = self.output_bias(x, self.num_layers)
         return x, feat_out
 
     def initial_weights(self):

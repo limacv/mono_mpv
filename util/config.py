@@ -86,9 +86,19 @@ class fakeMultiProcessing:
         pass
 
 
+class fakeSummaryWriter:
+    def add_scalar(self, *args, **kwargs):
+        pass
+
+    def close(self):
+        pass
+
+    def add_image(self, *args, **kwargs):
+        pass
+
+
 if __name__ == "__main__":
-    from main_train_MPV_sp import cfg
-    experiments = Experiments(cfg)
+    experiments = Experiments({})
     experiments.add_experiment({"check_point": 0, "occ_cfg": {"estimate_occ": False}})
     experiments.add_experiments(["loss_weights", "photo_loss"], [1, 2, 3, 4, 5])
     for newcfg in experiments:

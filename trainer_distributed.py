@@ -9,92 +9,34 @@ from torch.utils.data.distributed import DistributedSampler
 import torch.distributed as torchdist
 import torch.multiprocessing as torchmp
 from torch.nn.parallel import DataParallel
-# from torch.nn.parallel import DistributedDataParallel
+from torch.nn.parallel import DistributedDataParallel
 
 from tensorboardX import SummaryWriter
+from util.config import fakeSummaryWriter
 
 from models.ModelWithLoss import *
-from models.mpi_network import *
+from models.mpi_network import MPINet
 from models.hourglass import Hourglass
 from models.mpv_network import MPVNet
 from models.mpi_flow_network import *
 from models.mpi_utils import save_mpi
-from models.mpifuse_network import *
 from dataset.RealEstate10K import *
 from dataset.StereoBlur import *
 from dataset.WSVD import *
+from trainer import *
 
 plane_num = 24
-
-
-def select_module(name: str) -> nn.Module:
-    if "MPINet" == name:
-        return MPINet(plane_num)
-    elif "MPINetv2" == name:
-        return MPINetv2(plane_num)
-    elif "hourglass" == name:
-        return Hourglass(plane_num)
-    elif "MPVNet" == name:
-        return MPVNet(plane_num)
-    elif "MPIMPF" == name:
-        return MPI_MPF_Net(plane_num)
-    elif "MPISPF" == name:
-        return MPI_SPF_Net(plane_num)
-    elif "Full" == name:
-        return nn.ModuleDict({
-            "MPI": MPINetv2(plane_num),
-            "Fuser": MPIFuser(plane_num)
-        })
-    else:
-        raise ValueError(f"unrecognized modelin name: {name}")
-
-
-def select_modelloss(name: str):
-    name = name.lower()
-    if "single_view" in name or "sv" in name:
-        return ModelandSVLoss
-    elif "time" in name or "temporal" in name:
-        return ModelandTimeLoss
-    elif "disp_img" in name:
-        return ModelandDispLoss
-    elif "disp_flow" in name:
-        return ModelandDispFlowLoss
-    elif "full" in name:
-        return ModelandFullLoss
-    else:
-        raise ValueError(f"unrecognized modelloss name: {name}")
-
-
-def select_dataset(name: str):
-    name = name.lower()
-    if "realestate10k_seq" in name:
-        return RealEstate10K_Seq
-    elif "realestate10k_img" in name:
-        return RealEstate10K_Img
-    elif "stereoblur_img" in name:
-        return StereoBlur_Img
-    elif "stereoblur_seq" in name:
-        return StereoBlur_Seq
-    elif "WSVD_img" in name:
-        return WSVD_Img
-    else:
-        return RealEstate10K_Img
-
-
-def mkdir_ifnotexist(path):
-    if not os.path.exists(path):
-        os.makedirs(path)
 
 
 def train(cfg: dict):
     model = select_module(cfg["model_name"])
     modelloss = select_modelloss(cfg["modelloss_name"])(model, cfg)
 
-    device_ids = cfg["device_ids"]
-
     num_epoch = cfg["num_epoch"]
-    batch_sz = cfg["batch_size"] * len(device_ids)
+    batch_sz = cfg["batch_size"]
     lr = cfg["lr"]
+    world_size = cfg["world_size"]
+    local_rank = cfg["local_rank"]
 
     # figuring out all the path
     log_prefix = cfg["log_prefix"]
@@ -147,37 +89,39 @@ def train(cfg: dict):
     # trainset = RealEstate10K_Seq(is_train=True, seq_len=cfg["dataset_seq_length"])
     trainset = select_dataset(cfg["trainset"])(is_train=True)
     train_report_freq = cfg["train_report_freq"]
-    train_num_per_epoch = cfg["sample_num_per_epoch"]
-    train_set_inplacement = True
-    if train_num_per_epoch < 0:
-        train_num_per_epoch = None
-        train_set_inplacement = False
+    distributedSampler = DistributedSampler(trainset, num_replicas=world_size, rank=local_rank)
     trainingdata = DataLoader(trainset, batch_sz,
                               pin_memory=True, drop_last=True,
-                              sampler=RandomSampler(trainset, train_set_inplacement, train_num_per_epoch))
+                              sampler=distributedSampler)
 
-    tensorboard = SummaryWriter(log_dir)
-    # write configure of the current training
-    with open(cfgstr_out, 'a') as cfg_outfile:
-        loss_str = ', '.join([f'{k}:{v}' for k, v in cfg['loss_weights'].items()])
-        cfg_str = f"\n-------------------------------------------------\n" \
-                  f"|Name: {log_dir}|\n"  \
-                  f"-----------------\n" \
-                  f"Comment: {cfg['comment']}\n" \
-                  f"Dataset: train:{trainset.name}, len={len(trainset)}, eval:{evalset.name}, len={len(evalset)}\n" \
-                  f"Model: {cfg['model_name']}\n" \
-                  f"Loss: {loss_str}\n" \
-                  f"Training: checkpoint={cfg['check_point']}, bsz={batch_sz}, lr={lr}\n" \
-                  f"Validation: gtnum={validate_gtnum}, freq={validate_freq}\n" \
-                  f"\n"
-        cfg_outfile.write(cfg_str)
+    loss_str = ', '.join([f'{k}:{v}' for k, v in cfg['loss_weights'].items()])
+    cfg_str = f"\n-------------------------------------------------\n" \
+              f"|Name: {log_dir}|\n" \
+              f"-----------------\n" \
+              f"Comment: {cfg['comment']}\n" \
+              f"Dataset: train:{trainset.name}, len={len(trainset)}, eval:{evalset.name}, len={len(evalset)}\n" \
+              f"Model: {cfg['model_name']}\n" \
+              f"Loss: {loss_str}\n" \
+              f"Training: checkpoint={cfg['check_point']}, bsz={batch_sz}, lr={lr}\n" \
+              f"Validation: gtnum={validate_gtnum}, freq={validate_freq}\n" \
+              f"\n"
+
+    if local_rank == 0:
+        tensorboard = SummaryWriter(log_dir)
+        # write configure of the current training
+        with open(cfgstr_out, 'a') as cfg_outfile:
+            cfg_outfile.write(cfg_str)
+    else:
+        tensorboard = fakeSummaryWriter()
 
     # =============================================
     # kick-off training
     # =============================================
-    modelloss = DataParallel(modelloss, device_ids)
+    modelloss = DistributedDataParallel(modelloss, device_ids=[local_rank, ], output_device=local_rank,
+                                        find_unused_parameters=True)
     start_time = time.time()
     for epoch in range(begin_epoch, num_epoch):
+        distributedSampler.set_epoch(epoch)
         for iternum, datas in enumerate(trainingdata):
             step = len(trainingdata) * epoch + iternum
             # one epoch
@@ -187,6 +131,12 @@ def train(cfg: dict):
             loss_dict = loss_dict["loss_dict"]
             loss = loss.mean()
             loss_dict = {k: v.mean() for k, v in loss_dict.items()}
+
+            # first evaluate and then backward so that first evaluate is always the same
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
             # recored iter loss
             tensorboard.add_scalar("final_loss", float(loss), step)
             for lossname, lossval in loss_dict.items():
@@ -197,15 +147,13 @@ def train(cfg: dict):
                 time_per_iter = (time.time() - start_time) / train_report_freq
                 # output iter infomation
                 loss_str = " | ".join([f"{k}:{v:.3f}" for k, v in loss_dict.items()])
-                curlr = optimizer.state_dict()["param_groups"][0]["lr"]
+                print(f"    Local Rank: {local_rank}:")
                 print(f"    iter {iternum}/{len(trainingdata)}::loss:{loss:.3f} | {loss_str} "
-                      f"| lr:{curlr} | time:{time_per_iter:.3f}s", flush=True)
+                      f"| time:{time_per_iter:.1f}s", flush=True)
                 start_time = time.time()
 
             # perform evaluation
             if step % validate_freq == 0:
-                print("  eval...", end="")
-
                 val_dict, val_display = {}, None
                 for i, evaldatas in enumerate(evaluatedata):
                     _val_dict = modelloss.module.valid_forward(*evaldatas, visualize=(i == 0))
@@ -224,26 +172,22 @@ def train(cfg: dict):
                 val_dict = {k: v / len(evaluatedata) for k, v in val_dict.items()}
                 for val_name, val_value in val_dict.items():
                     tensorboard.add_scalar(val_name, val_value, step)
-                print(" eval:" + ' | '.join([f"{k}: {v:.3f}" for k, v in val_dict.items()]), flush=True)
+                print(f"EVAL{local_rank}:: " + ' | '.join([f"{k}: {v:.3f}" for k, v in val_dict.items()]), flush=True)
+                print(f"CHECKING Consistency:: {modelloss.module.parameters().__next__()[0, 0, 0]}")
 
-            # first evaluate and then backward so that first evaluate is always the same
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            if step % savepth_iter_freq == 0:
+            if (step + 1) % savepth_iter_freq == 0:
                 torch.save({
                     "epoch": epoch,
                     "step": step,
                     "cfg": cfg_str,
-                    "state_dict": model.cpu().state_dict(),
+                    "state_dict": model.state_dict(),
                     # "optimizer": optimizer.state_dict()
-                }, os.path.join(checkpoint_path, f"{unique_id}.pth"))
-                print(f"checkpoint saved {epoch}{unique_id}.pth", flush=True)
-                model.cuda()
+                }, os.path.join(checkpoint_path, f"{unique_id}_r{local_rank}.pth"))
+                print(f"checkpoint saved {epoch}{unique_id}_r{local_rank}.pth", flush=True)
 
         # output epoch info
         print(f"epoch {epoch} ================================")
 
     print("TRAINING Finished!!!!!!!!!!!!", flush=True)
-    tensorboard.close()
+    if tensorboard is not None:
+        tensorboard.close()

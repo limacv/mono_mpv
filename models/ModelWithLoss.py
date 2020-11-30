@@ -431,6 +431,7 @@ class ModelandDispLoss(nn.Module):
         self.model = model
         self.model.train()
         self.model.cuda()
+        self.layernum = self.model.num_layers
 
         self.pixel_loss_mode = self.loss_weight.pop("pixel_loss_cfg", "l1")
         self.scheduler = ParamScheduler([1e4, 2e4], [0.5, 1])
@@ -493,7 +494,7 @@ class ModelandDispLoss(nn.Module):
             mpi, blend_weight = netout2mpi(netout, refim, ret_blendw=True)
 
             # estimate depth map and sample sparse point depth
-            depth = make_depths(32).type_as(mpi).unsqueeze(0).repeat(batchsz, 1)
+            depth = make_depths(self.layernum).type_as(mpi).unsqueeze(0).repeat(batchsz, 1)
             disp_hat = estimate_disparity_torch(mpi, depth, blendweight=blend_weight)
 
             # compute scale
@@ -531,14 +532,13 @@ class ModelandDispLoss(nn.Module):
         batchsz, _, heiori, widori = refim.shape
 
         netout = self.model(refim)
-
         # compute mpi from netout
         # scheduling the s_bg
         step = kwargs["step"] if "step" in kwargs else 0
         bg_pct = self.scheduler.get_value(step)
         mpi, blend_weight = netout2mpi(netout, refim, bg_pct=bg_pct, ret_blendw=True)
         # estimate depth map and sample sparse point depth
-        depth = make_depths(32).type_as(mpi).unsqueeze(0).repeat(batchsz, 1)
+        depth = make_depths(self.layernum).type_as(mpi).unsqueeze(0).repeat(batchsz, 1)
         disp_hat = estimate_disparity_torch(mpi, depth, blendweight=blend_weight)
 
         # with torch.no_grad():  # compute scale
@@ -668,7 +668,7 @@ class ModelandDispFlowLoss(nn.Module):
             if isinstance(netout, Tuple):
                 netout = netout[0]
             # compute mpi from netout
-            layernum = self.model.mpi_layers
+            layernum = self.model.num_layers
             mpichannel = layernum - 1 + 3
             netout, mpf = torch.split(netout, [mpichannel, netout.shape[1] - mpichannel], dim=1)
             mpi, blend_weight = netout2mpi(netout, refim, ret_blendw=True)
@@ -736,7 +736,7 @@ class ModelandDispFlowLoss(nn.Module):
             certainty_norm = certainty_maps.sum(dim=[-1, -2])
         # TODO: currently just use second images
         # TODO: flow Plane+parallax decomposition
-        layernum = self.model.mpi_layers
+        layernum = self.model.num_layers
         mpichannel = layernum - 1 + 3
         netout = self.model(refims, flows)
         netout, mpf = torch.split(netout, [mpichannel, netout.shape[1] - mpichannel], dim=1)
@@ -812,3 +812,192 @@ class ModelandDispFlowLoss(nn.Module):
         loss_dict = {k: v.unsqueeze(0) for k, v in loss_dict.items()}
         return {"loss": final_loss, "loss_dict": loss_dict}
 
+
+class ModelandFullLoss(nn.Module):
+    def __init__(self, models: nn.Module, cfg: dict):
+        super().__init__()
+        assert "loss_weights" in cfg.keys(), "ModelAndLossBase: didn't find 'loss_weights' in cfg"
+        self.loss_weight = cfg["loss_weights"].copy()
+
+        torch.set_default_tensor_type(torch.FloatTensor)
+        assert(isinstance(models, nn.ModuleDict))
+        models.train()
+        models.cuda()
+        self.mpimodel = models["MPI"]
+        self.fusemodel = models["Fuser"]
+
+        self.pixel_loss_mode = self.loss_weight.pop("pixel_loss_cfg", "l1")
+        self.scheduler = ParamScheduler([1e4, 2e4], [0.5, 1])
+
+        # optical flow estimator
+        self.flow_estim = RAFTNet(False)
+        self.flow_estim.eval()
+        self.flow_estim.cuda()
+        state_dict = torch.load(RAFT_path["sintel"], map_location='cpu')
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        self.flow_estim.load_state_dict(state_dict)
+
+    def valid_forward(self, *args: torch.Tensor, **kwargs):
+        """
+        basically same as train_forward
+        only evaluate L1 loss
+        also output displacement heat map & newview image
+        """
+        args = [_t.cuda() for _t in args]
+        refim, tarim, disp_gt, certainty_map, isleft = args
+        # with torch.no_grad():
+        #     flow = self.flow_estim(refim[:, 1], refim[:, 0])
+        refim = refim[:, 1]
+        tarim = tarim[:, 1]
+        disp_gt = disp_gt[:, 1]
+        certainty_map = certainty_map[:, 1]
+        batchsz, _, heiori, widori = refim.shape
+        val_dict = {}
+        with torch.no_grad():
+            self.mpimodel.eval()
+            netout = self.mpimodel(refim)
+            self.mpimodel.train()
+
+            # compute mpi from netout
+            layernum = self.mpimodel.num_layers
+            mpi, blend_weight = netout2mpi(netout, refim, ret_blendw=True)
+
+            # estimate depth map and sample sparse point depth
+            depth = make_depths(layernum).type_as(mpi).unsqueeze(0).repeat(batchsz, 1)
+            disp_hat = estimate_disparity_torch(mpi, depth, blendweight=blend_weight)
+
+            # compute scale
+            certainty_norm = certainty_map.sum(dim=[-1, -2])
+            disp_scale = disp_hat / (torch.abs(disp_gt) + 0.0001)
+            scale = torch.exp((torch.log(disp_scale) * certainty_map).sum(dim=[-1, -2]) / certainty_norm)
+
+            depth = depth * scale.reshape(-1, 1) * isleft
+            depthloss = torch.log(disp_scale / scale.reshape(-1, 1, 1))
+            depthloss = (torch.pow(depthloss, 2) * certainty_map).mean()
+            # render target view
+            tarview, tarmask = shift_newview(mpi, torch.reciprocal(depth), ret_mask=True)
+
+            l1_map = photo_l1loss(tarview, tarim)
+            l1_loss = (l1_map * tarmask).sum() / tarmask.sum()
+            val_dict["val_l1diff"] = float(l1_loss)
+            val_dict["val_scale"] = float(scale.mean())
+            val_dict["val_depth"] = float(depthloss)
+
+        if "visualize" in kwargs.keys() and kwargs["visualize"]:
+            view0 = (tarview[0] * 255).permute(1, 2, 0).detach().cpu().type(torch.uint8).numpy()
+            # diff = (l1_map[0] * 255).detach().cpu().type(torch.uint8).numpy()
+            val_dict["vis_newv"] = view0
+            # val_dict["vis_diff"] = cv2.cvtColor(cv2.applyColorMap(diff, cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
+            # sparsedepth = draw_sparse_depth(refim, pt2ds, 1 / ptzs_gt, depth[0, -1])
+            val_dict["vis_dispgt"] = draw_dense_disp(disp_gt, 1. / disp_gt.max())
+            val_dict["vis_disp"] = draw_dense_disp(disp_hat, 1)
+
+        return val_dict
+
+    def forward(self, *args: torch.Tensor, **kwargs):
+        # tocuda and unzip
+        args = [_t.cuda() for _t in args]
+        refims, tarims, disp_gts, certainty_maps, isleft = args
+        layernum = self.mpimodel.num_layers
+        batchsz, framenum, _, heiori, widori = refims.shape
+        bfnumfull = batchsz * framenum
+        bfnum = batchsz * (framenum - 1)
+        # All are [B x Frame [x cnl] x H x W]
+        with torch.no_grad():
+            flows = self.flow_estim(refims[:, 1:].reshape(bfnum, 3, heiori, widori),
+                                    refims[:, :-1].reshape(bfnum, 3, heiori, widori))
+            certainty_norm = certainty_maps.sum(dim=[-1, -2])
+
+        netout = self.mpimodel(refims.reshape(bfnumfull, 3, heiori, widori))
+        # scheduling the s_bg
+        # step = kwargs["step"] if "step" in kwargs else 0
+        # bg_pct = self.scheduler.get_value(step)
+        mpi, blend_weight = netout2mpi(netout,
+                                       refims.reshape(bfnumfull, 3, heiori, widori),
+                                       ret_blendw=True)
+
+        mpf = flows.reshape(bfnum, 1, 2, heiori, widori).expand(-1, layernum, -1, -1, -1)
+
+        mpi = mpi.reshape(batchsz, framenum, layernum, 4, heiori, widori)
+        mpf = mpf.reshape(batchsz, framenum - 1, layernum, 2, heiori, widori)
+
+        mpifinals = [mpi[:, 0]]
+        mpilasts = []
+        for frameidx in range(1, framenum):
+            mpi_warpped = warp_flow(mpifinals[-1], mpf[:, frameidx - 1])
+            mpifinal = self.fusemodel(mpi[:, frameidx], mpi_warpped)
+            mpifinals.append(mpifinal)
+            mpilasts.append(mpi_warpped)
+
+        # estimate depth map and sample sparse point depth
+        depth = make_depths(layernum).type_as(mpi).unsqueeze(0).repeat(batchsz, 1)
+
+        disps_hats = [
+            estimate_disparity_torch(mpi_, depth)
+            for mpi_ in mpifinals
+        ]
+        disps_hats_last = [
+            estimate_disparity_torch(mpi_, depth)
+            for mpi_ in mpilasts
+        ]
+
+        # with torch.no_grad():  # compute scale
+        disp_diffs = [
+            disps_hats[i] / (torch.abs(disp_gts[:, i]) + 0.0001)
+            for i in range(framenum)
+        ]
+        # currently use first frame to compute scale
+        scale = torch.exp((torch.log(disp_diffs[0]) * certainty_maps[:, 0]).sum(dim=[-1, -2]) / certainty_norm[:, 0])
+
+        depth = depth * scale.reshape(-1, 1) * isleft
+        # render target view
+        tarviews = [
+            shift_newview(mpi_, torch.reciprocal(depth), ret_mask=False)
+            for mpi_ in mpifinals
+                    ]
+        # compute final loss
+        final_loss, loss_dict = torch.tensor(0., dtype=torch.float32).cuda(), {}
+        loss_dict["scale"] = scale.detach().mean()
+        for mpiframeidx in range(len(mpifinals)):
+            if "pixel_loss" in self.loss_weight.keys():
+                l1_loss = photometric_loss(
+                    tarviews[mpiframeidx],
+                    tarims[:, mpiframeidx],
+                    mode=self.pixel_loss_mode)
+                l1_loss = l1_loss.mean()
+                final_loss += (l1_loss * self.loss_weight["pixel_loss"])
+                loss_dict[f"pixel{mpiframeidx}"] = l1_loss.detach()
+
+            if "smooth_loss" in self.loss_weight.keys():
+                smth_loss = smooth_grad(
+                    disps_hats[mpiframeidx],
+                    refims[:, mpiframeidx])
+                smth_loss = smth_loss.mean()
+                final_loss += (smth_loss * self.loss_weight["smooth_loss"])
+                loss_dict[f"smth{mpiframeidx}"] = smth_loss.detach()
+
+            if "depth_loss" in self.loss_weight.keys():
+                diff = torch.log(disp_diffs[mpiframeidx] / scale.reshape(-1, 1, 1))
+                diff = (torch.pow(diff, 2) * certainty_maps).mean()
+                final_loss += (diff * self.loss_weight["depth_loss"])
+                loss_dict[f"depth{mpiframeidx}"] = diff.detach()
+
+        if "templ1_loss" in self.loss_weight.keys():
+            temporal = torch.tensor(0.).type_as(mpi)
+            for mpiframeidx in range(len(mpilasts)):
+                temporal += torch.abs(mpifinals[mpiframeidx+1] - mpilasts[mpiframeidx]).mean()
+            temporal /= len(mpilasts)
+            final_loss += (temporal * self.loss_weight["templ1_loss"])
+            loss_dict["templ1"] = temporal.detach()
+
+        if "tempdepth_loss" in self.loss_weight.keys():
+            temporal = torch.tensor(0.).type_as(mpi)
+            for mpiframeidx in range(len(mpilasts)):
+                temporal += torch.abs(disps_hats[mpiframeidx + 1] - disps_hats_last[mpiframeidx]).mean()
+            temporal /= len(mpilasts)
+            final_loss += (temporal * self.loss_weight["tempdepth_loss"])
+            loss_dict["tempdepth"] = temporal.detach()
+
+        final_loss = final_loss.unsqueeze(0)
+        loss_dict = {k: v.unsqueeze(0) for k, v in loss_dict.items()}
+        return {"loss": final_loss, "loss_dict": loss_dict}

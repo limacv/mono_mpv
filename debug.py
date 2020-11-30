@@ -1,15 +1,16 @@
 from dataset.StereoBlur import *
 from models.ModelWithLoss import *
-from models.mpi_network import MPINet
+from models.mpi_network import *
 from models.hourglass import *
 from models.mpi_utils import *
 from models.loss_utils import *
+from models.mpifuse_network import *
 import torch
 from torch.nn.parallel import DataParallel
 import numpy as np
 from tensorboardX import SummaryWriter
 import multiprocessing as mp
-from trainer import select_module
+from trainer import select_module, select_modelloss
 
 np.random.seed(666)
 torch.manual_seed(666)
@@ -18,13 +19,13 @@ torch.manual_seed(666)
 def main(kwargs):
     device_ids = kwargs["device_ids"]
     batchsz = kwargs["batchsz"]
-    model = select_module("MPISPF")
+    model = select_module("Full")
     if "checkpoint" in kwargs:
         model.load_state_dict(torch.load(kwargs["checkpoint"])["state_dict"])
     else:
-        model.initial_weights()
+        initial_weights(model)
     model.cuda()
-    modelloss = ModelandDispFlowLoss(model, kwargs)
+    modelloss = select_modelloss("full")(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
 
     dataset = StereoBlur_Seq(True, mode='crop', seq_len=2)
@@ -80,8 +81,8 @@ main({
     "loss_weights": {"pixel_loss": 1,
                      "smooth_loss": 0.5,
                      "depth_loss": 0.1,
-                     "flow_epe": 1,
-                     "flow_smth": 0.01},
+                     "templ1_loss": 1,
+                     "tempdepth_loss": 0.01},
 })
 # good data list
 # 01bfb80e5b8fe757

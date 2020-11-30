@@ -15,13 +15,13 @@ np.random.seed(666)
 torch.manual_seed(666)
 dataset = StereoBlur_Seq(True, mode='resize', max_skip=30)
 dataset.augmenter.outwid, dataset.augmenter.outhei = 1280, 720
-
+flowestim = FlowEstimator(False, "sintel")
 # for data in dataset:
 if True:
     data = dataset[15]
     refims, tarims, disps, uncertains, isleft = data
     _, _, imhei, imwid = refims.shape
-    flow = Global_Flow_Estimator(refims[0:1], refims[1:2])
+    flow = flowestim(refims[0:1], refims[1:2])
     roux, rouy = 10, 10
     flownp = flow[0, :, ::roux, ::rouy].permute(1, 2, 0).cpu().numpy()
     hei, wid, _ = flownp.shape

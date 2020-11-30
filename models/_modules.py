@@ -30,6 +30,14 @@ def apply_harmonic_bias(inputs: torch.Tensor, num_layers):
     return (torch.tanh(out) + 1.) / 2.0
 
 
+def apply_harmonic_bias_forfuse(inputs: torch.Tensor):
+    batchsz, cnl, num_layers, hei, wid = inputs.shape
+    alpha = torch.tensor(1.) / torch.arange(1, num_layers + 1, dtype=torch.float32)
+    shift = torch.atanh(2. * alpha - 1.).reshape(1, -1, 1, 1).type_as(inputs)
+    inputs[:, -1] += shift
+    return (torch.tanh(inputs) + 1.) / 2.0
+
+
 class inception(nn.Module):
     def __init__(self, input_size, config):
         self.config = config
@@ -39,7 +47,7 @@ class inception(nn.Module):
         # Base 1*1 conv layer
         self.convs.append(nn.Sequential(
             nn.Conv2d(input_size, config[0][0], 1),
-            nn.BatchNorm2d(config[0][0], affine=False),
+            nn.SyncBatchNorm(config[0][0], affine=False),
             nn.ReLU(True),
         ))
 
@@ -51,10 +59,10 @@ class inception(nn.Module):
             out_b = config[i][2]
             conv = nn.Sequential(
                 nn.Conv2d(input_size, out_a, 1),
-                nn.BatchNorm2d(out_a, affine=False),
+                nn.SyncBatchNorm(out_a, affine=False),
                 nn.ReLU(True),
                 nn.Conv2d(out_a, out_b, filt, padding=pad),
-                nn.BatchNorm2d(out_b, affine=False),
+                nn.SyncBatchNorm(out_b, affine=False),
                 nn.ReLU(True)
             )
             self.convs.append(conv)

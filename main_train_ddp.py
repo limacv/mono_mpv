@@ -4,12 +4,15 @@ from datetime import datetime
 import time
 import torch
 import numpy as np
-import trainer
+import torch.distributed
+import torch.backends.cudnn
+import trainer_distributed as trainer
+import argparse
+import random
 
 cfg = {
-    "cuda_device": 0,  # default device
-    "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],  # will be added by experiments, list of GPU used
-    "gpu_num": 8,
+    "local_rank": 0,  # will set later
+    "world_size": 8,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
     "tensorboard_logdir": "run/",
@@ -28,24 +31,23 @@ cfg = {
 
     "trainset": "StereoBlur_Seq",
     "evalset": "StereoBlur_Seq",
-    "model_name": "MPISPF",
-    "modelloss_name": "disp_flow",
+    "model_name": "MPINetv2",
+    "modelloss_name": "disp_img",
     "batch_size": 1,
     "num_epoch": 1000,
     "savepth_iter_freq": 2000,
-    "sample_num_per_epoch": -1,  # < 0 means randompermute
     "lr": 1e-4,
     "check_point": "no",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "smooth_loss": 0.1,
-        "depth_loss": 5,
+        "depth_loss": 2.5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5
 
-        "flow_epe": 0.1,
-        "flow_smth": 0.05,
+        # "flow_epe": 0.1,
+        # "flow_smth": 0.05,
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
     },
@@ -56,29 +58,38 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "addflow_spf"
+    cfg["id"] = "mpinetv2_baseline_nosmth"
     cfg["comment"] = "try the effect of flow input and flow output"
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--local_rank", type=int)
+    args = parser.parse_args()
+    cfg["local_rank"] = args.local_rank
 
     # the settings for debug
     # please comment this
-    if sys.gettrace() is not None:
+    if "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
         print("Debug Mode!!!", flush=True)
         cfg["id"] = "testest"
         cfg["comment"] = "testest"
-        cfg["train_report_freq"] = 1
-        cfg["batch_size"] = 1
-        cfg["gpu_num"] = 1
-        cfg["device_ids"] = [0]
+        cfg["world_size"] = 2
+    else:
+        import warnings
+        warnings.filterwarnings("ignore")
 
     print("Cuda available devices:")
     devices_num = torch.cuda.device_count()
     for device in range(devices_num):
         print(f"{device}: {torch.cuda.get_device_name(device)}")
-    print(f"------------- start running (PID: {os.getpid()})--------------", flush=True)
+    print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
+    torch.cuda.set_device(cfg["local_rank"])
 
     torch.manual_seed(0)
-    torch.cuda.set_device(cfg["cuda_device"])
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     np.random.seed(0)
+    random.seed(0)
+    torch.distributed.init_process_group('nccl', world_size=cfg["world_size"], init_method='env://')
 
     trainer.train(cfg)
 

@@ -79,7 +79,7 @@ class FlowEstimator(nn.Module):
 
 
 # Please use this
-Global_Flow_Estimator = FlowEstimator(False, 'sintel')
+# Global_Flow_Estimator = FlowEstimator(False, 'sintel')
 max_flow_thresh = 1e5
 
 # visualize the flow

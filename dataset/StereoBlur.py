@@ -1,4 +1,3 @@
-from pytube import YouTube
 import torch
 from torch.nn import Sequential
 import torch.nn.functional as torchf
@@ -17,7 +16,6 @@ from .cv2disparity import compute_disparity_uncertainty
 from .Augmenter import DataAugmenter
 import sys
 sys.path.append('..')
-from models.flow_utils import Global_Flow_Estimator
 
 
 class StereoBlur_Img(Dataset):

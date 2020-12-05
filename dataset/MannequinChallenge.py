@@ -11,13 +11,13 @@ from torch.utils.data import Dataset
 import cv2
 import os
 from glob import glob
-from . import RealEstate10K_root, is_DEBUG, RealEstate10K_skip_framenum
+from . import MannequinChallenge_root, is_DEBUG, MannequinChallenge_skip_framenum
 from . import OutputSize as outSize
 from .colmap_wrapper import *
 from .Augmenter import DataAugmenter
 
 
-class RealEstate10K_Base:
+class MannequinChallenge_Base:
     def __init__(self, is_train, black_list, ptnum):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
@@ -27,28 +27,28 @@ class RealEstate10K_Base:
                 'crop': crop to 512x512 or multiple of 128
         """
         if is_train:
-            self.root = os.path.join(RealEstate10K_root, "train")
+            self.root = os.path.join(MannequinChallenge_root, "train")
             self.trainstr = "train"
         else:
-            self.root = os.path.join(RealEstate10K_root, "test")
+            self.root = os.path.join(MannequinChallenge_root, "test")
             self.trainstr = "test"
         
-        self.valid_file_name = os.path.join(RealEstate10K_root, f"{self.trainstr}_valid.txt")
+        self.valid_file_name = os.path.join(MannequinChallenge_root, f"{self.trainstr}_valid.txt")
         with open(self.valid_file_name, 'r') as valid_file:
             lines = valid_file.readlines()
             self.filebase_list = [self.txtpath2basename(line) for line in lines]
 
         if black_list:
-            with open(os.path.join(RealEstate10K_root, "black_list.txt")) as bl_file:
+            with open(os.path.join(MannequinChallenge_root, "black_list.txt")) as bl_file:
                 lines = bl_file.readlines()
                 _black_list = {self.txtpath2basename(line) for line in lines}
-            print(f"RealEstate10K: originally {len(self.filebase_list)}")
+            print(f"MannequinChallenge: originally {len(self.filebase_list)}")
             self.filebase_list = list(set(self.filebase_list) - _black_list)
-            print(f"RealEstate10K: find {len(_black_list)} in black_list, "
+            print(f"MannequinChallenge: find {len(_black_list)} in black_list, "
                   f"after removal, got {len(self.filebase_list)} datas")
 
-        self.name = f"RealEstate10K_Base_{self.trainstr}"
-        print(f"RealEstate10K: find {len(self.filebase_list)} video files in {self.trainstr} set")
+        self.name = f"MannequinChallenge_Base_{self.trainstr}"
+        print(f"MannequinChallenge: find {len(self.filebase_list)} video files in {self.trainstr} set")
 
         self.tmp_root = os.path.join(os.path.dirname(self.root), f"{self.trainstr}tmp")
         if not os.path.exists(self.tmp_root):
@@ -106,8 +106,8 @@ class RealEstate10K_Base:
                 extrin = list(map(float, line[7:19]))
                 extrins.append(np.array(extrin, dtype=np.float32).reshape((3, 4)))
 
-        timestamps = timestamps[::RealEstate10K_skip_framenum]
-        extrins = extrins[::RealEstate10K_skip_framenum]
+        timestamps = timestamps[::MannequinChallenge_skip_framenum]
+        extrins = extrins[::MannequinChallenge_skip_framenum]
         self._curtimestamps = timestamps.copy()
         # ================================================
         # if we don't have the images, we need to fetch the video and save images
@@ -115,13 +115,13 @@ class RealEstate10K_Base:
         video_trim_path = self.video_trim_path(file_base)
         if not (os.path.exists(image_path) and len(os.listdir(image_path)) == len(timestamps)) \
                 and not os.path.exists(video_trim_path):
-            print(f"  RealEstate10K: download video from {file_base}", flush=True)
+            print(f"  MannequinChallenge: download video from {file_base}", flush=True)
             try:
                 youtube = YouTube(link)
                 stream = youtube.streams.get_highest_resolution()
                 stream.download(tmp_base_path, "video", skip_existing=True)
             except KeyError as e:
-                print(f"RealEstate10K: error when fetching link {link[:-1]} specified in {file_base}.txt"
+                print(f"MannequinChallenge: error when fetching link {link[:-1]} specified in {file_base}.txt"
                       f"with error {e}")
                 return False
             except Exception as _:
@@ -130,7 +130,7 @@ class RealEstate10K_Base:
                     stream = youtube.streams.first()
                     stream.download(tmp_base_path, "video", skip_existing=True)
                 except Exception as e:
-                    print(f"RealEstate10K: error when fetching link {link} specified in {file_base}.txt"
+                    print(f"MannequinChallenge: error when fetching link {link} specified in {file_base}.txt"
                           f"with error {e} in second try")
                 finally:
                     return False
@@ -138,13 +138,13 @@ class RealEstate10K_Base:
             video_file = glob(f"{tmp_base_path}/video*")[0]
             video = cv2.VideoCapture(video_file)
             if not video.isOpened():
-                print(f"RealEstate10K: cannot open video in {file_base}.txt")
+                print(f"MannequinChallenge: cannot open video in {file_base}.txt")
                 return False
             for i, timestamp in enumerate(timestamps):
                 video.set(cv2.CAP_PROP_POS_MSEC, timestamp)
                 ret, frame = video.read()
                 if not ret or frame.size == 0:
-                    print(f"RealEstate10K: error when reading frame {i} in {file_base}.txt")
+                    print(f"MannequinChallenge: error when reading frame {i} in {file_base}.txt")
                     return False
                 cv2.imwrite(os.path.join(image_path, f"{int(timestamp):010d}.jpg"), frame)
 
@@ -152,16 +152,16 @@ class RealEstate10K_Base:
             os.remove(video_file)
 
         # ================================================
-        # if don't have sprase model, compute from colmap
+        # if don't have sprase mpimodel, compute from colmap
         # ================================================
         col_model_root = self.colmap_model_path(file_base)
         if not os.path.exists(col_model_root) \
                 or not os.path.exists(os.path.join(col_model_root, "points3D.bin")):
-            print(f"  RealEstate10K: run rolmap on {file_base}", flush=True)
+            print(f"  MannequinChallenge: run rolmap on {file_base}", flush=True)
             # provide pose and intrinsic to colmap
             image_list = list(map(os.path.basename, glob(f"{image_path}/*.jpg")))
             if len(image_list) != len(extrins):
-                print(f"RealEstate10K: image path corrpted in {file_base}.txt")
+                print(f"MannequinChallenge: image path corrpted in {file_base}.txt")
                 return False
             frame = cv2.imread(image_path + '/' + image_list[0])
             _hei, _wid, _ = frame.shape
@@ -171,12 +171,12 @@ class RealEstate10K_Base:
             colimages = [Image(i + 1, rotmat2qvec(extr[:, :3]), extr[:, 3], camera_id, image_list[i], (), ())
                          for i, extr in enumerate(extrins)]
 
-            # run colmap with provided model
+            # run colmap with provided mpimodel
             try:
                 run_colmap(tmp_base_path, ["feature", "match", "triangulator", "bundle_adjust"],
                            camera=colcamera, images=colimages, remove_database=True)
             except BaseException as e:
-                print(f"RealEstate10K: error when doing colmap in {file_base}.txt with error {e}")
+                print(f"MannequinChallenge: error when doing colmap in {file_base}.txt with error {e}")
                 return False
 
         # ================================================
@@ -191,7 +191,7 @@ class RealEstate10K_Base:
                     videoout.open(video_trim_path, 828601953, 30,
                                   (img.shape[1], img.shape[0]), True)
                     if not videoout.isOpened():
-                        print(f"RealEstate10K: seems not support video encoder")
+                        print(f"MannequinChallenge: seems not support video encoder")
                         return False
                 videoout.write(img)
                 os.remove(image_name)
@@ -214,7 +214,7 @@ class RealEstate10K_Base:
         # -----------------------------------------------------
         if framenum < 15:
             if verbose:
-                print(f"RealEstate10K: too little frame ({framenum} frames)")
+                print(f"MannequinChallenge: too little frame ({framenum} frames)")
             return False
 
         ptnum = len(colpoints3D)
@@ -227,7 +227,7 @@ class RealEstate10K_Base:
         # ---------------------------------------------------
         if ptnum < 2500:
             if verbose:
-                print(f"RealEstate10K: too little 3d points ({ptnum} points)")
+                print(f"MannequinChallenge: too little 3d points ({ptnum} points)")
             return False
 
         campt3d = [
@@ -240,7 +240,7 @@ class RealEstate10K_Base:
         # ---------------------------------------------------
         if travel_distance < 1.3:
             if verbose:
-                print(f"RealEstate10K: too little travel distance ({travel_distance})")
+                print(f"MannequinChallenge: too little travel distance ({travel_distance})")
                 return False
 
         # condition4: a special case when points are in a common plane
@@ -251,17 +251,17 @@ class RealEstate10K_Base:
         zs_std = np.std(dist2plane)
         if zs_std < 0.7:
             if verbose:
-                print(f"RealEstate10K: z direction std: ({zs_std})")
+                print(f"MannequinChallenge: z direction std: ({zs_std})")
                 return False
 
         return True
 
 
-class RealEstate10K_Img(Dataset, RealEstate10K_Base):
+class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
     def __init__(self, is_train=True, black_list=True, mode='resize', ptnum=2000):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
-        model=  'none': do noting
+        mpimodel=  'none': do noting
                 'resize': resize to 512x512,
                 'pad': pad to multiple of 128, usually used in evaluation,
                 'crop': crop to 512x512 or multiple of 128
@@ -269,7 +269,7 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         super().__init__(is_train=is_train,
                          black_list=black_list,
                          ptnum=ptnum)
-        self.name = f"RealEstate10K_Img_{self.trainstr}"
+        self.name = f"MannequinChallenge_Img_{self.trainstr}"
 
         self.augmenter = DataAugmenter(outSize, mode=mode)
 
@@ -315,15 +315,15 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         self._curvideo_trim_path = video_trim_path
         video = cv2.VideoCapture(video_trim_path)
         if not video.isOpened():
-            print(f"RealEstate10K: cannot open video file {video_trim_path}")
+            print(f"MannequinChallenge: cannot open video file {video_trim_path}")
             return None
         framenum = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         if self.trainstr == "train":
             if framenum < 3:
-                print(f"RealEstate10K: {file_base}.txt has less than 3 image, skip")
+                print(f"MannequinChallenge: {file_base}.txt has less than 3 image, skip")
                 return None
-            stride = min(np.random.randint(3 // RealEstate10K_skip_framenum + 1,
-                                           20 // RealEstate10K_skip_framenum), framenum - 1)
+            stride = min(np.random.randint(3 // MannequinChallenge_skip_framenum + 1,
+                                           20 // MannequinChallenge_skip_framenum), framenum - 1)
             startidx = np.random.randint(framenum - stride)
             endidx = startidx + stride
             refidx, taridx = (startidx, endidx) if np.random.randint(2) else (endidx, startidx)
@@ -335,7 +335,7 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         video.set(cv2.CAP_PROP_POS_FRAMES, taridx)
         ret1, tarimg = video.read()
         if not (ret0 and len(refimg) > 0 and ret1 and len(tarimg)):
-            print(f"RealEstate10K: {file_base}.txt cannot read frame idx {refidx}, {taridx}")
+            print(f"MannequinChallenge: {file_base}.txt cannot read frame idx {refidx}, {taridx}")
             return None
         video.release()
         # refname, tarname = image_list[refidx], image_list[taridx]
@@ -354,7 +354,7 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
 
         colcameras, colimages, colpoints3D = read_model(col_model_root, ".bin")
         if len(colimages) != framenum:
-            print(f"RealEstate10K: {file_base} colmap model doesn't match images, deleting everything")
+            print(f"MannequinChallenge: {file_base} colmap model doesn't match images, deleting everything")
             os.remove(os.path.join(col_model_root, "cameras.bin"))
             os.remove(os.path.join(col_model_root, "images.bin"))
             os.remove(os.path.join(col_model_root, "points3D.bin"))
@@ -362,7 +362,7 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
             return None
         refview, tarview = colimages[refidx + 1], colimages[taridx + 1]
         # if refview.name != os.path.basename(refname) or tarview.name != os.path.basename(tarname):
-        #     print(f"RealEstate10K: error when choose ref view")
+        #     print(f"MannequinChallenge: error when choose ref view")
         #     return None
         point3ds = [colpoints3D[ptid].xyz for ptid in refview.point3D_ids if ptid >= 0]
         point3ds = np.array(point3ds, dtype=np.float32)
@@ -409,11 +409,11 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
                torch.tensor(intrin), torch.tensor(point2ds), torch.tensor(point2ds_depth)
 
 
-class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
+class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
     def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=2000, seq_len=4):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
-        mode=  'none': do noting
+        mpimodel=  'none': do noting
                 'resize': resize to 512x512,
                 'pad': pad to multiple of 128, usually used in evaluation,
                 'crop': crop to 512x512 or multiple of 128
@@ -421,7 +421,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         super().__init__(is_train=is_train,
                          black_list=black_list,
                          ptnum=ptnum)
-        self.name = f"RealEstate10K_Video_{self.trainstr}"
+        self.name = f"MannequinChallenge_Video_{self.trainstr}"
         self.sequence_length = seq_len
         self.tar_margin = max(6 - seq_len, 1)
         self.augmenter = DataAugmenter(outSize, mode=mode)
@@ -470,7 +470,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
 
         video = cv2.VideoCapture(video_trim_path)
         if not video.isOpened():
-            print(f"RealEstate10K: cannot open video file {video_trim_path}")
+            print(f"MannequinChallenge: cannot open video file {video_trim_path}")
             return None
         framenum = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         if framenum < self.sequence_length + 1:
@@ -492,7 +492,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
             video.set(cv2.CAP_PROP_POS_FRAMES, idx)
             ret0, refimg = video.read()
             if not (ret0 and len(refimg) > 0):
-                print(f"RealEstate10K: {file_base}.txt cannot read frame idx {taridx}")
+                print(f"MannequinChallenge: {file_base}.txt cannot read frame idx {taridx}")
                 return None
 
             refimg = refimg[:, :, ::-1]
@@ -505,7 +505,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         video.set(cv2.CAP_PROP_POS_FRAMES, taridx)
         ret1, tarimg = video.read()
         if not (ret1 and len(tarimg)):
-            print(f"RealEstate10K: {file_base}.txt cannot read frame idx {taridx}")
+            print(f"MannequinChallenge: {file_base}.txt cannot read frame idx {taridx}")
             return None
         video.release()
 
@@ -518,7 +518,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         # ================================================
         colcameras, colimages, colpoints3D = read_model(col_model_root, ".bin")
         if len(colimages) != framenum:
-            print(f"RealEstate10K: {file_base} colmap model doesn't match images, deleting everything")
+            print(f"MannequinChallenge: {file_base} colmap mpimodel doesn't match images, deleting everything")
             os.remove(os.path.join(col_model_root, "cameras.bin"))
             os.remove(os.path.join(col_model_root, "images.bin"))
             os.remove(os.path.join(col_model_root, "points3D.bin"))

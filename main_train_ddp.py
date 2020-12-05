@@ -21,7 +21,7 @@ cfg = {
 
     "write_validate_result": True,
     "validate_num": 32,
-    "valid_freq": 500,
+    "valid_freq": 150,
     "train_report_freq": 10,
 
     # about training <<<<<<<<<<<<<<<<
@@ -29,37 +29,56 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "StereoBlur_Seq",
-    "evalset": "StereoBlur_Seq",
-    "model_name": "MPINetv2",
-    "modelloss_name": "disp_img",
+    "trainset": "StereoBlur_seq",
+    "evalset": "StereoBlur_seq",
+    "model_name": "MPI_FlowGrad",
+    "modelloss_name": "disp_flowgrad",
     "batch_size": 1,
-    "num_epoch": 1000,
-    "savepth_iter_freq": 2000,
+    "num_epoch": 9900,
+    "savepth_iter_freq": 300,
     "lr": 1e-4,
     "check_point": "no",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "smooth_loss": 0.1,
+        "smooth_loss": 0.05,
+        "smooth_flowgrad_loss": 0.05,
         "depth_loss": 2.5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5
 
-        # "flow_epe": 0.1,
-        # "flow_smth": 0.05,
+        # "flow_epe": 1,
+        # "flow_smth": 5,
+        # "flow_smth_ord": 1,
+        # "flow_smth_bw": False
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
     },
 }
+
+# todo Current Problem:
+#   2. the mpf
+#   1. the temporal still not smooth enough
+
+
+# to be compare:
+#   1. end
+
+# TODO List:
+#   >>> refine the flow
+#   >>> try recurrent that learn residual
+#   >>> evaluate the temporal smoothness
+#   >>> [opt] think about mpimodel that decomposite the scene into static background and forground
+#   >>> [opt] aggregate more frames
+#   >>> [opt] more neat log function
 
 
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "mpinetv2_baseline_nosmth"
-    cfg["comment"] = "try the effect of flow input and flow output"
+    cfg["id"] = "flowgradin_flowin"
+    cfg["comment"] = "try to align the gradient of disparity and flow"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -70,8 +89,7 @@ def main(cfg):
     # please comment this
     if "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
         print("Debug Mode!!!", flush=True)
-        cfg["id"] = "testest"
-        cfg["comment"] = "testest"
+        cfg["comment"] = "Dont't forget to change comment" * 100
         cfg["world_size"] = 2
     else:
         import warnings

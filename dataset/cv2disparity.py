@@ -17,8 +17,8 @@ def compute_disparity_uncertainty(iml, imr, ret_left=True, resize=False, mindisp
         iml_tmp = iml
         iml = cv2.flip(imr, 1)
         imr = cv2.flip(iml_tmp, 1)
-    # figuring out parameters
-    numdisp = int(wid * 0.07)
+    # figuring dispout parameters
+    numdisp = int(wid * 0.16)
     if numdisp % 16 != 0:
         numdisp += int(16 - (numdisp % 16))
     wsize = 3

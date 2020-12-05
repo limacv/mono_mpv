@@ -13,6 +13,55 @@ RAFT_path = {
 }
 
 
+def forward_scatter(map01: torch.Tensor, content: torch.Tensor):
+    """
+    :param map01: Bx2xHxWthe target pos in im1
+    :param content: BxcxHxW the scatter content
+    :return: rangemap of im1
+    """
+    assert map01.dim() == 4 and map01.shape[1] == 2
+    coords = map01.permute(0, 2, 3, 1).cpu()
+    batchsz, _, hei, wid = map01.shape
+    coords_floor = torch.floor(coords).int()
+    coords_offset = coords - coords_floor
+
+    batch_range = torch.arange(batchsz).reshape(batchsz, 1, 1)
+    idx_batch_offset = (batch_range * hei * wid).repeat([1, hei, wid])
+    coords_floor_flat = coords_floor.reshape([-1, 2])
+    coords_offset_flat = coords_offset.reshape([-1, 2])
+    idx_batch_offset_flat = idx_batch_offset.reshape([-1])
+
+    idxs_list, weights_list = [], []
+    for di in range(2):
+        for dj in range(2):
+            idxs_i = coords_floor_flat[:, 0] + di
+            idxs_j = coords_floor_flat[:, 1] + dj
+
+            idxs = idx_batch_offset_flat + idxs_j * wid + idxs_i
+
+            mask = torch.bitwise_and(
+                torch.bitwise_and(idxs_i >= 0, idxs_i < wid),
+                torch.bitwise_and(idxs_j >= 0, idxs_j < hei)).reshape(-1)
+            valid_idxs = idxs[mask]
+            valid_offsets = coords_offset_flat[mask]
+
+            weights_i = (1. - di) - (-1) ** di * valid_offsets[:, 0]
+            weights_j = (1. - dj) - (-1) ** dj * valid_offsets[:, 1]
+            weights = weights_i * weights_j
+
+            idxs_list.append(valid_idxs)
+            weights_list.append(weights)
+
+    idxs = torch.cat(idxs_list, dim=0)
+    weights = torch.cat(weights_list, dim=0)
+
+    counts = torch.zeros(batchsz * hei * wid)
+    counts = counts.scatter_add(0, idxs, weights)
+    counts = counts.reshape(batchsz, 1, hei, wid)
+
+    return counts.type_as(map01)
+
+
 class FlowEstimator(nn.Module):
     def __init__(self, small=True, weight_name="small"):
         super().__init__()

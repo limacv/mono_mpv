@@ -1,9 +1,11 @@
 import numpy as np
 import torch
 import torch.nn.functional as torchf
+import torchvision.utils
 import cv2
 import os
 from typing import *
+from .flow_utils import flow_to_png_middlebury
 
 default_d_near = 1
 default_d_far = 1000
@@ -301,3 +303,133 @@ def warp_flow(mpi: torch.Tensor, mpf: torch.Tensor, offset=None):
     normanator = torch.tensor([(wid - 1) / 2, (hei - 1) / 2]).reshape(1, 1, 1, 2).type_as(grid)
     warpped = torchf.grid_sample(mpi, grid / normanator - 1.)
     return warpped.reshape(orishape)
+
+
+class MPVWriter:
+    def __init__(self, path):
+        self.out = cv2.VideoWriter()
+        self.outa = cv2.VideoWriter()
+        self.path = path
+        self.patha = path.split('.')[0] + "_alpha.mp4"
+        self.size = (0, 0)
+        self.planenum = 0
+
+    def write(self, mpi: torch.Tensor, post=True):
+        mpi = (mpi * 255).type(torch.uint8)
+
+        mpipad = torchvision.utils.make_grid(mpi, nrow=8, padding=0)
+        cnl, hei, wid = mpipad.shape
+        mpipad = mpipad.cpu().numpy()
+        rgb = mpipad[:3][::-1].transpose(1, 2, 0)
+        a = mpipad[3]
+
+        if not self.out.isOpened():
+            self.out.open(self.path, 828601953, 30., (wid, hei), True)
+            self.outa.open(self.patha, 828601953, 30., (wid, hei), False)
+            if not self.out.isOpened():
+                raise RuntimeError(f"MPVWriter::cannot open {self.path}")
+            if not self.outa.isOpened():
+                raise RuntimeError(f"MPVWriter:;cannot open {self.patha}")
+        self.out.write(rgb)
+        self.outa.write(a)
+
+    def __del__(self):
+        self.out.release()
+
+
+class MPFWriter:
+    def __init__(self, path, mpfout=True, spfout=True):
+        self.out = cv2.VideoWriter()
+        self.outa = cv2.VideoWriter()
+        self.path = path.split('.')[0] + "_mpf.mp4"
+        self.patha = path.split('.')[0] + "_final.mp4"
+        self.mpfout, self.finalout = mpfout, spfout
+        self.size = (0, 0)
+        self.planenum = 0
+
+    def write(self, mpi: torch.Tensor, mpf: torch.Tensor):
+        if self.mpfout:
+            mpfpad = torchvision.utils.make_grid(mpf, nrow=8, padding=0)
+            mpfvis = flow_to_png_middlebury(mpfpad.cpu().numpy())
+            hei, wid, _ = mpfvis.shape
+
+            if not self.out.isOpened():
+                self.out.open(self.path, 828601953, 30., (wid, hei), True)
+                if not self.out.isOpened():
+                    raise RuntimeError(f"MPVWriter::cannot open {self.path}")
+            self.out.write(mpfvis)
+
+        if self.finalout:
+            final = overcompose(mpi.unsqueeze(0), blend_content=mpf.unsqueeze(0))[0]
+            finalvis = flow_to_png_middlebury(final.cpu().numpy())
+            hei, wid, _ = finalvis.shape
+            if not self.outa.isOpened():
+                self.outa.open(self.patha, 828601953, 30., (wid, hei), True)
+                if not self.outa.isOpened():
+                    raise RuntimeError(f"MPVWriter:;cannot open {self.patha}")
+            self.outa.write(finalvis)
+
+    def __del__(self):
+        self.out.release()
+
+
+def visibility_mask(mpi: torch.Tensor):
+    alpha = mpi[0, :, -1]
+    blendweight = alpha * torch.cat([torch.cumprod(- torch.flip(alpha, dims=[0]) + 1, dim=0).flip(dims=[0])[1:],
+                                     torch.ones_like(alpha[0:1])], dim=0)
+    mask = alpha * blendweight
+    return mask
+
+
+def matplot_mpi(mpi: torch.Tensor, alpha=True, visibility=False):
+    import matplotlib.pyplot as plt
+    plt.figure()
+    with torch.no_grad():
+        if alpha:
+            if not visibility:
+                img = torchvision.utils.make_grid(mpi[0, :, -1:].detach(), pad_value=1)
+            else:
+                img = visibility_mask(mpi)
+                img = torchvision.utils.make_grid(img.unsqueeze(1).detach(), pad_value=1)
+            img = img[0].cpu().numpy()
+        else:
+            img = torchvision.utils.make_grid(mpi[0, :, :3].detach())
+            img = img.permute(1, 2, 0).cpu().numpy()
+    plt.imshow(img)
+    plt.show()
+
+
+def matplot_img(img: torch.Tensor):
+    import matplotlib.pyplot as plt
+    plt.figure()
+    if img.dim() == 4:
+        img = img[0]
+    if img.shape[0] == 3:
+        img = img.permute(1, 2, 0)
+    elif img.shape[0] == 1:
+        img = img[0]
+    plt.imshow(img.detach().cpu())
+    plt.show()
+
+
+def matplot_flow(flow: torch.Tensor):
+    import matplotlib.pyplot as plt
+    plt.figure()
+    vis = flow_to_png_middlebury(flow[0].detach().cpu().numpy())
+    plt.imshow(vis)
+    plt.show()
+
+
+def matplot_mpf(mpf: torch.Tensor, alphampi=None):
+    import matplotlib.pyplot as plt
+    plt.figure()
+    mpfpad = torchvision.utils.make_grid(mpf[0], nrow=8, pad_value=1)
+    mpfvis = flow_to_png_middlebury(mpfpad.cpu().numpy())
+    if alphampi is not None:
+        mask = visibility_mask(alphampi)
+        mask = torchvision.utils.make_grid(mask.unsqueeze(1).detach(), pad_value=1)
+        mpfvis = mpfvis.astype(np.float32) * mask[0].unsqueeze(-1).cpu().numpy()
+        mpfvis = mpfvis.astype(np.uint8)
+
+    plt.imshow(mpfvis)
+    plt.show()

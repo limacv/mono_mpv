@@ -21,7 +21,7 @@ cfg = {
 
     "write_validate_result": True,
     "validate_num": 32,
-    "valid_freq": 500,
+    "valid_freq": 200,
     "train_report_freq": 10,
 
     # about training <<<<<<<<<<<<<<<<
@@ -31,11 +31,11 @@ cfg = {
 
     "trainset": "StereoBlur_Seq",
     "evalset": "StereoBlur_Seq",
-    "model_name": "Full",
-    "modelloss_name": "full",
+    "model_name": "MPIReccuNet",
+    "modelloss_name": "disp_reccu",
     "batch_size": 1,
-    "num_epoch": 1000,
-    "savepth_iter_freq": 2000,
+    "num_epoch": 9900,
+    "savepth_iter_freq": 300,
     "lr": 5e-5,
     "check_point": "no",
     "loss_weights": {
@@ -46,8 +46,7 @@ cfg = {
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5
 
-        "templ1_loss": 0.01,
-        "tempdepth_loss": 0.01,
+        "templ1_loss": 2,
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
     },
@@ -58,7 +57,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "full_naiveflow"
+    cfg["id"] = "recurrentnet_2frame"
     cfg["comment"] = "warp based on image space flow"
 
     parser = argparse.ArgumentParser()
@@ -69,9 +68,9 @@ def main(cfg):
     # the settings for debug
     # please comment this
     if "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
-        print("Debug Mode!!!", flush=True)
-        cfg["id"] = "testest"
-        cfg["comment"] = "testest"
+        print("Don't forget to change id!!!", flush=True)
+        cfg["id"] = "dont' forget to chagne id"
+        cfg["comment"] = "dont' forget to chagne id"
         cfg["world_size"] = 2
     else:
         import warnings
@@ -86,7 +85,7 @@ def main(cfg):
 
     torch.manual_seed(0)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.benchmark = True
     np.random.seed(0)
     random.seed(0)
     torch.distributed.init_process_group('nccl', world_size=cfg["world_size"], init_method='env://')

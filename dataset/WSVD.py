@@ -20,7 +20,7 @@ class WSVD_Img(Dataset):
     def __init__(self, is_train):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
-        model=  'none': do noting
+        mpimodel=  'none': do noting
                 'resize': resize to 512x512,
                 'pad': pad to multiple of 128, usually used in evaluation,
                 'crop': crop to 512x512 or multiple of 128

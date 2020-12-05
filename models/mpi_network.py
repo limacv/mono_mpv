@@ -1,3 +1,6 @@
+"""
+models that only output multiplane images (may take multiple input)
+"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as torchf
@@ -155,17 +158,16 @@ class MPINetv2(nn.Module):
         nn.init.constant_(self.output.bias, 0)
 
 
-class MPINetv3(nn.Module):
+class MPI_FlowGrad(nn.Module):
     """
-    MPINet that have 3D CNN as output
+    Takes Flow gradient in (|u / dx| + |v / dx|, |u / dy| + |v / dy|)
     """
     def __init__(self, mpi_layers):
         super().__init__()
         self.num_layers = mpi_layers
         self.down = nn.MaxPool2d(2, ceil_mode=True)
         self.up = up
-        
-        self.down1 = conv(3, 32, 7)
+        self.down1 = conv(3 + 2, 32, 7)
         self.down1b = conv(32, 32, 7)
         self.down2 = conv(32, 64, 5)
         self.down2b = conv(64, 64, 5)
@@ -233,3 +235,4 @@ class MPINetv3(nn.Module):
 
         nn.init.xavier_normal_(self.output.weight)
         nn.init.constant_(self.output.bias, 0)
+

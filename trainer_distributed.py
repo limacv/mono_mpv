@@ -38,7 +38,7 @@ def train(cfg: dict):
     world_size = cfg["world_size"]
     local_rank = cfg["local_rank"]
 
-    # figuring out all the path
+    # figuring dispout all the path
     log_prefix = cfg["log_prefix"]
     if "id" in cfg.keys():
         unique_id = f"{cfg['id']}_{datetime.now().strftime('%d%H%M')}"
@@ -55,7 +55,7 @@ def train(cfg: dict):
     mkdir_ifnotexist(tensorboard_log_prefix)
 
     try:
-        check_point = torch.load(os.path.join(checkpoint_path, cfg["check_point"]))
+        check_point = torch.load(os.path.join(checkpoint_path, cfg["check_point"]), map_location=f"cuda:{local_rank}")
     except FileNotFoundError:
         print(f"cannot open check point file {cfg['check_point']}")
         check_point = {}
@@ -111,6 +111,7 @@ def train(cfg: dict):
         # write configure of the current training
         with open(cfgstr_out, 'a') as cfg_outfile:
             cfg_outfile.write(cfg_str)
+        print(cfg_str, flush=True)
     else:
         tensorboard = fakeSummaryWriter()
 
@@ -184,9 +185,6 @@ def train(cfg: dict):
                     # "optimizer": optimizer.state_dict()
                 }, os.path.join(checkpoint_path, f"{unique_id}_r{local_rank}.pth"))
                 print(f"checkpoint saved {epoch}{unique_id}_r{local_rank}.pth", flush=True)
-
-        # output epoch info
-        print(f"epoch {epoch} ================================")
 
     print("TRAINING Finished!!!!!!!!!!!!", flush=True)
     if tensorboard is not None:

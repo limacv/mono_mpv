@@ -10,15 +10,15 @@ import shutil
 from glob import glob
 
 sys.path.append("..")
-from dataset.RealEstate10K import RealEstate10K_Img, RealEstate10K_root
+from dataset.MannequinChallenge import MannequinChallenge_Img, MannequinChallenge_root
 
-np.random.seed(0)
+# np.random.seed(0)
 process_train = True
 
 train_str = "train" if process_train else "test"
-success_file = os.path.join(RealEstate10K_root, f"{train_str}_valid.txt")
-black_list_name = os.path.join(RealEstate10K_root, "black_list.txt")
-file_bases = glob(os.path.join(RealEstate10K_root, train_str, "*.txt"))
+success_file = os.path.join(MannequinChallenge_root, f"{train_str}_valid.txt")
+black_list_name = os.path.join(MannequinChallenge_root, "black_list.txt")
+file_bases = glob(os.path.join(MannequinChallenge_root, train_str, "*.txt"))
 file_bases = [os.path.basename(fb).split('.')[0] for fb in file_bases]
 
 print(f"synchonize with {success_file}")
@@ -29,7 +29,7 @@ with open(black_list_name, 'r') as file:
 lines = {line.strip('\n') for line in lines}
 black_lines = {os.path.basename(line.strip('\n')) for line in black_lines}
 
-trainset = RealEstate10K_Img(process_train)
+trainset = MannequinChallenge_Img(process_train)
 
 print(f"totally {len(file_bases)} {train_str} video")
 

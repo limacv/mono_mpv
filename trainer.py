@@ -36,31 +36,51 @@ def select_module(name: str) -> nn.Module:
         return Hourglass(plane_num)
     elif "MPVNet" == name:
         return MPVNet(plane_num)
-    elif "MPIMPF" == name:
-        return MPI_MPF_Net(plane_num)
-    elif "MPISPF" == name:
-        return MPI_SPF_Net(plane_num)
+    elif "MPI2InMPF" == name:
+        return MPINet2In(plane_num)
+    elif "MPIReccuNet" == name:
+        return MPIReccuNet(plane_num)
+    elif "MPIRecuFlowNet" == name:
+        return MPIRecuFlowNet(plane_num)
     elif "Full" == name:
         return nn.ModuleDict({
             "MPI": MPINetv2(plane_num),
             "Fuser": MPIFuser(plane_num)
         })
+    elif "MPFNet" == name:
+        return nn.ModuleDict({
+            "MPI": MPINetv2(plane_num),
+            "MPF": MPFNet(plane_num)
+        })
+    elif "MPFNetv2" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_FlowGrad(plane_num),
+            "MPF": MPFNet(plane_num)
+        })
+    elif "MPI_FlowGrad" == name:
+        return MPI_FlowGrad(plane_num)
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
 
 def select_modelloss(name: str):
     name = name.lower()
-    if "single_view" in name or "sv" in name:
+    if "sv" == name:
         return ModelandSVLoss
-    elif "time" in name or "temporal" in name:
+    elif "temporal" == name:
         return ModelandTimeLoss
-    elif "disp_img" in name:
+    elif "disp_img" == name:
         return ModelandDispLoss
-    elif "disp_flow" in name:
-        return ModelandDispFlowLoss
-    elif "full" in name:
+    elif "disp_flow" == name:
+        return ModelandFlowLoss
+    elif "disp_reccu" == name:
+        return ModelandReccuNetLoss
+    elif "full" == name:
         return ModelandFullLoss
+    elif "disp_mpf" == name:
+        return ModelandMPFLoss
+    elif "disp_flowgrad" == name:
+        return ModelandFlowGradLoss
     else:
         raise ValueError(f"unrecognized modelloss name: {name}")
 
@@ -83,7 +103,10 @@ def select_dataset(name: str):
 
 def mkdir_ifnotexist(path):
     if not os.path.exists(path):
-        os.makedirs(path)
+        try:
+            os.makedirs(path)
+        except FileExistsError:
+            pass
 
 
 def train(cfg: dict):
@@ -96,7 +119,7 @@ def train(cfg: dict):
     batch_sz = cfg["batch_size"] * len(device_ids)
     lr = cfg["lr"]
 
-    # figuring out all the path
+    # figuring dispout all the path
     log_prefix = cfg["log_prefix"]
     if "id" in cfg.keys():
         unique_id = f"{cfg['id']}_{datetime.now().strftime('%d%H%M')}"

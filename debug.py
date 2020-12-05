@@ -17,19 +17,19 @@ torch.manual_seed(666)
 
 
 def main(kwargs):
-    device_ids = kwargs["device_ids"]
     batchsz = kwargs["batchsz"]
-    model = select_module("Full")
+    model = select_module("MPI_FlowGrad")
     if "checkpoint" in kwargs:
         model.load_state_dict(torch.load(kwargs["checkpoint"])["state_dict"])
     else:
         initial_weights(model)
+        pass
+    # torch.save({"state_dict": model.state_dict(), "epoch": 0}, "./log/checkpoint/MPFNet.pth")
     model.cuda()
-    modelloss = select_modelloss("full")(model, kwargs)
+    modelloss = select_modelloss("disp_flowgrad")(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
 
     dataset = StereoBlur_Seq(True, mode='crop', seq_len=2)
-    modelloss = DataParallel(modelloss, device_ids)
     for i in range(int(14000)):
         datas_all = [[]] * 6
         for dev in range(2):
@@ -37,8 +37,8 @@ def main(kwargs):
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
-        _val_dict = modelloss.module.valid_forward(*datas, visualize=True)
         loss_dict = modelloss(*datas, step=i)
+        _val_dict = modelloss.valid_forward(*datas, visualize=True)
         loss = loss_dict["loss"]
         loss = loss.mean()
         loss_dict = loss_dict["loss_dict"]
@@ -52,7 +52,7 @@ def main(kwargs):
         print(f"loss:{loss:.3f} | {loss_str}", flush=True)
         if i % 25 == 0:
             datas = [d_[:batchsz] for d_ in datas]
-            _val_dict = modelloss.module.valid_forward(*datas, visualize=True)
+            _val_dict = modelloss.valid_forward(*datas, visualize=True)
 
         if i % 100 == 0 and "savefile" in kwargs.keys():
             torch.save(model.state_dict(), kwargs["savefile"])
@@ -72,7 +72,7 @@ def main(kwargs):
 main({
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
-    # "checkpoint": "./log/MPINet/mpinet_ori.pth",
+    # "checkpoint": "./log/checkpoint/MPFNet.pth",
     "batchsz": 1,
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",
     # "savefile": "./log/DBG_pretrain.pth",
@@ -82,7 +82,10 @@ main({
                      "smooth_loss": 0.5,
                      "depth_loss": 0.1,
                      "templ1_loss": 1,
-                     "tempdepth_loss": 0.01},
+                     "tempdepth_loss": 0.01,
+                     "flow_epe": 0.1,
+                     "flow_smth": 0.1,
+                     "smooth_flowgrad_loss": 0.1},
 })
 # good data list
 # 01bfb80e5b8fe757

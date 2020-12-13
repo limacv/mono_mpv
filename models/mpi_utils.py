@@ -107,6 +107,60 @@ def netout2mpi(netout: torch.Tensor, img: torch.Tensor, bg_pct=1., ret_blendw=Fa
         return mpi
 
 
+def netoutupdatempi_maskfree(netout: torch.Tensor, img: torch.Tensor, mpi_last, bg_pct=1., ret_blendw=False):
+    """
+    visiable_region -> img
+    invisable_region -> +- mpi_last_valid -> mpi_last
+                        └- mpi_last_invalid -> background
+    Tranfer network output to multiplane image. i.e.:
+    B x (LayerNum -1 + 3) x H x W ---> B x LayerNum x 4 x H x W
+    img: [B, 3, H, W]
+    mpi_last: [B, layernum, 4, H, W]
+    bg_pct: the pecent of background and network output should be 0 < x <= 1
+    netout: [B, 34, H, W]
+    return: [B, 32, 4, H, W] and [B, 32, H, W] blend weight
+    """
+    batchsz, layernum, _, height, width = mpi_last.shape
+    batchsz, cnl, height, width = netout.shape
+    assert cnl == layernum - 1 + 3
+    alpha = netout[:, :-3, :, :]
+    alpha = torch.cat([torch.ones([batchsz, 1, height, width]).type_as(alpha), alpha], dim=1)
+    blend = torch.cat([torch.cumprod(- torch.flip(alpha, dims=[1]) + 1, dim=1).flip(dims=[1])[:, 1:],
+                       torch.ones([batchsz, 1, height, width]).type_as(alpha)], dim=1)
+    blend = blend.unsqueeze(2)
+    blend_mpi = (-blend + 1.) * mpi_last[:, :, -1:]
+    blend_bg = (-blend + 1.) * (1 - mpi_last[:, :, -1:])
+
+    if bg_pct == 1:
+        img_bg = netout[:, -3:, :, :]
+    else:
+        img_bg = netout[:, -3:, :, :] * bg_pct + img * (1. - bg_pct)
+
+    layer_rgb = blend * img.unsqueeze(1) + \
+                blend_bg * img_bg.unsqueeze(1) + \
+                blend_mpi * mpi_last[:, :, :3]
+    mpi = torch.cat([layer_rgb, alpha.unsqueeze(2)], dim=2)
+    if ret_blendw:
+        return mpi, blend.squeeze(2)
+    else:
+        return mpi
+
+
+def netoutupdatempi_withmask(netout: torch.Tensor, img: torch.Tensor, bg_pct=1., ret_blendw=False):
+    """
+    visiable_region -> img
+    invisable_region -> +- mask==1 -> mpi_last
+                        └- mask==0 -> background
+    Tranfer network output to multiplane image. i.e.:
+    B x (LayerNum -1 + 3) x H x W ---> B x LayerNum x 4 x H x W
+    img: [B, 3, H, W]
+    bg_pct: the pecent of background and network output should be 0 < x <= 1
+    netout: [B, 34, H, W]
+    return: [B, 32, 4, H, W] and [B, 32, H, W] blend weight
+    """
+    raise NotImplementedError
+
+
 def overcompose(mpi: torch.Tensor, blendweight=None, ret_mask=False, blend_content=None)\
         -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """
@@ -381,7 +435,7 @@ def visibility_mask(mpi: torch.Tensor):
     return mask
 
 
-def matplot_mpi(mpi: torch.Tensor, alpha=True, visibility=False):
+def matplot_mpi(mpi: torch.Tensor, alpha=True, visibility=False, RGBA=False):
     import matplotlib.pyplot as plt
     plt.figure()
     with torch.no_grad():
@@ -393,7 +447,10 @@ def matplot_mpi(mpi: torch.Tensor, alpha=True, visibility=False):
                 img = torchvision.utils.make_grid(img.unsqueeze(1).detach(), pad_value=1)
             img = img[0].cpu().numpy()
         else:
-            img = torchvision.utils.make_grid(mpi[0, :, :3].detach())
+            if RGBA:
+                img = torchvision.utils.make_grid(mpi[0].detach())
+            else:
+                img = torchvision.utils.make_grid(mpi[0, :, :3].detach())
             img = img.permute(1, 2, 0).cpu().numpy()
     plt.imshow(img)
     plt.show()
@@ -404,7 +461,7 @@ def matplot_img(img: torch.Tensor):
     plt.figure()
     if img.dim() == 4:
         img = img[0]
-    if img.shape[0] == 3:
+    if img.shape[0] == 3 or img.shape[0] == 4:
         img = img.permute(1, 2, 0)
     elif img.shape[0] == 1:
         img = img[0]

@@ -38,11 +38,13 @@ class RAFTNet(nn.Module):
                 m.eval()
 
     @staticmethod
-    def initialize_flow(shapeformat):
+    def initialize_flow(shapeformat, init_flow=None):
         """ Flow is represented as difference between two coordinate grids flow = coords1 - coords0"""
         N, C, H, W = shapeformat.shape
         coords0 = coords_grid(N, H, W).to(shapeformat.device)
         coords1 = coords_grid(N, H, W).to(shapeformat.device)
+        if init_flow is not None:
+            coords1 += init_flow
 
         # optical flow computed as difference: flow = coords1 - coords0
         return coords0, coords1
@@ -67,7 +69,7 @@ class RAFTNet(nn.Module):
         fmap = self.fnet(frame)
         return [fmap, frame]
 
-    def forward(self, image1, image2, iters=12):
+    def forward(self, image1, image2, init_flow=None, iters=12):
         """ Estimate optical flow between pair of frames """
         # for compatiability
         if isinstance(image1, Sequence):
@@ -96,7 +98,7 @@ class RAFTNet(nn.Module):
         net = torch.tanh(net)
         inp = torch.relu(inp)
 
-        coords0, coords1 = self.initialize_flow(fmap1)
+        coords0, coords1 = self.initialize_flow(fmap1, init_flow)
 
         flow_predictions = []
         for itr in range(iters):

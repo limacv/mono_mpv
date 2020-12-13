@@ -27,7 +27,7 @@ args = parser.parse_args()
 videoname = args.videoname
 
 if __name__ == "__main__":
-    alphaname = videoname.split('.')[0] + "_alpha.mp4"
+    alphaname = videoname.replace(".mp4", "_alpha.mp4")
     caprgb = cv2.VideoCapture(os.path.join(videopath, videoname))
     capa = cv2.VideoCapture(os.path.join(videopath, alphaname))
     if not caprgb.isOpened() or not capa.isOpened():
@@ -73,13 +73,15 @@ if __name__ == "__main__":
 
     cv2.namedWindow("mpi")
     cv2.setMouseCallback("mpi", click_callback)
+    update = True
     with torch.no_grad():
         while True:
             for i in range(len(frames)):
-                rgba = torch.tensor(frames[i]).cuda().type(torch.float32) / 255
-                mpi = rgba.reshape(gnhei, imhei, gnwid, imwid, 4)\
-                    .permute(0, 2, 4, 1, 3)\
-                    .reshape(gnhei * gnwid, 4, imhei, imwid)
+                if update:
+                    rgba = torch.tensor(frames[i]).cuda().type(torch.float32) / 255
+                    mpi = rgba.reshape(gnhei, imhei, gnwid, imwid, 4)\
+                        .permute(0, 2, 4, 1, 3)\
+                        .reshape(gnhei * gnwid, 4, imhei, imwid)
                 if mode == "mpi":
                     cosx, sinx, cosy, siny = np.cos(currentdx), np.sin(currentdx), np.cos(currentdy), np.sin(currentdy)
                     target_pose = torch.tensor(
@@ -97,3 +99,6 @@ if __name__ == "__main__":
                 key = cv2.waitKey(1)
                 if key == 27:
                     exit(0)
+                elif key == ord(' '):
+                    update = not update
+

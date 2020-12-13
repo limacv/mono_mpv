@@ -17,6 +17,22 @@ def conv(in_planes, out_planes, kernel_size=3, stride=1, dilation=1, isReLU=True
         )
 
 
+def conv3d(in_cnls, out_cnls, kernel_size=3, stride=1, dilation=1, isReLU=True):
+    if isReLU:
+        return nn.Sequential(
+            nn.Conv3d(in_cnls, out_cnls, kernel_size, stride,
+                      padding=((kernel_size - 1) * dilation) // 2,
+                      dilation=dilation,
+                      bias=True),
+            nn.ReLU(inplace=True)
+        )
+    else:
+        return nn.Conv3d(in_cnls, out_cnls, kernel_size, stride,
+                         padding=((kernel_size - 1) * dilation) // 2,
+                         dilation=dilation,
+                         bias=True)
+
+
 def up(t: torch.Tensor):
     return torch.repeat_interleave(torch.repeat_interleave(t, 2, dim=-1), 2, dim=-2)
 
@@ -106,6 +122,11 @@ def coords_grid(batch, ht, wd):
 def upflow8(flow, mode='bilinear'):
     new_size = (8 * flow.shape[2], 8 * flow.shape[3])
     return 8 * torchf.interpolate(flow, size=new_size, mode=mode, align_corners=True)
+
+
+def downflow8(flow, mode='bilinear'):
+    new_size = (flow.shape[2] // 8, flow.shape[3] // 8)
+    return 0.125 * torchf.interpolate(flow, size=new_size, mode=mode, align_corners=True)
 
 
 # ================================================================================================================

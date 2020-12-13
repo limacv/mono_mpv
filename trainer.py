@@ -59,6 +59,11 @@ def select_module(name: str) -> nn.Module:
         })
     elif "MPI_FlowGrad" == name:
         return MPI_FlowGrad(plane_num)
+    elif "Fullv1" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_Fullv1(plane_num),
+            "MPF": MPFNet(plane_num)
+        })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
@@ -75,12 +80,12 @@ def select_modelloss(name: str):
         return ModelandFlowLoss
     elif "disp_reccu" == name:
         return ModelandReccuNetLoss
-    elif "full" == name:
-        return ModelandFullLoss
     elif "disp_mpf" == name:
         return ModelandMPFLoss
     elif "disp_flowgrad" == name:
         return ModelandFlowGradLoss
+    elif "fullv1" == name:
+        return ModelandFullv1Loss
     else:
         raise ValueError(f"unrecognized modelloss name: {name}")
 
@@ -109,6 +114,44 @@ def mkdir_ifnotexist(path):
             pass
 
 
+def smart_load_checkpoint(root, cfg, model: nn.Module):
+    """
+    root: root dir of checkpoint file
+    cfgcheckpoint: {prefix: filepath} or filepath
+    model: the loaded model
+    return: begin_epoch
+    """
+    cfgcheckpoint = cfg["check_point"]
+    if not isinstance(cfgcheckpoint, dict):
+        cfgcheckpoint = {"": cfgcheckpoint}
+
+    device = f"cuda:{cfg['local_rank']}" if "local_rank" in cfg.keys() else "cpu"
+
+    # initializing weights
+    initial_weights(model)
+    newstate_dict = model.state_dict()
+    begin_epoch = 0
+    for prefix, path in cfgcheckpoint.items():
+        try:
+            check_point = torch.load(os.path.join(root, path), map_location=device)
+        except FileNotFoundError:
+            print(f"cannot open check point file {path}, initial the model")
+            return begin_epoch
+
+        temp_state_dict = {k: v for k, v in check_point["state_dict"].items() if k.startswith(prefix)}
+        if len(temp_state_dict) == 0:
+            newstate_dict.update(
+                {f"{prefix}" + k_: v_ for k_, v_ in check_point["state_dict"].items()}
+            )
+        else:
+            newstate_dict.update(temp_state_dict)
+        if prefix == "" and "epoch" in check_point.keys():
+            begin_epoch = check_point["epoch"]
+    model.load_state_dict(newstate_dict)
+    print(f"load state dict, epoch starting from: {begin_epoch}")
+    return begin_epoch
+
+
 def train(cfg: dict):
     model = select_module(cfg["model_name"])
     modelloss = select_modelloss(cfg["modelloss_name"])(model, cfg)
@@ -135,26 +178,10 @@ def train(cfg: dict):
     mkdir_ifnotexist(checkpoint_path)
     mkdir_ifnotexist(tensorboard_log_prefix)
 
-    try:
-        check_point = torch.load(os.path.join(checkpoint_path, cfg["check_point"]))
-    except FileNotFoundError:
-        print(f"cannot open check point file {cfg['check_point']}")
-        check_point = {}
-
-    begin_epoch = 0
-    if len(check_point) > 0:
-        model.load_state_dict(check_point["state_dict"])
-        begin_epoch = check_point["epoch"]
-        print(f"load state dict of epoch:{begin_epoch}")
-    else:
-        initial_weights(model)
-        print(f"initial the model weights")
+    begin_epoch = smart_load_checkpoint(checkpoint_path, cfg, model)
 
     savepth_iter_freq = cfg["savepth_iter_freq"]
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
-    if "optimizer" in check_point.keys():
-        check_point["optimizer"]["param_groups"][0]["lr"] = lr
-        optimizer.load_state_dict(check_point["optimizer"])
 
     # evalset = RealEstate10K_Seq(is_train=False, seq_len=cfg["evalset_seq_length"])
     # evalset = StereoBlur_Img(is_train=False)
@@ -188,7 +215,7 @@ def train(cfg: dict):
                   f"-----------------\n" \
                   f"Comment: {cfg['comment']}\n" \
                   f"Dataset: train:{trainset.name}, len={len(trainset)}, eval:{evalset.name}, len={len(evalset)}\n" \
-                  f"Model: {cfg['model_name']}\n" \
+                  f"Model: {cfg['model_name']}, ModelLoss: {cfg['modelloss_name']}\n" \
                   f"Loss: {loss_str}\n" \
                   f"Training: checkpoint={cfg['check_point']}, bsz={batch_sz}, lr={lr}\n" \
                   f"Validation: gtnum={validate_gtnum}, freq={validate_freq}\n" \

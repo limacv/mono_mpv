@@ -1,29 +1,8 @@
-from datetime import datetime
-import time
-import os
 import torch.optim
-import torch.nn as nn
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader, Subset, random_split, RandomSampler
-from torch.utils.data.distributed import DistributedSampler
-import torch.distributed as torchdist
-import torch.multiprocessing as torchmp
-from torch.nn.parallel import DataParallel
 from torch.nn.parallel import DistributedDataParallel
 
-from tensorboardX import SummaryWriter
-from util.config import fakeSummaryWriter
-
-from models.ModelWithLoss import *
-from models.mpi_network import MPINet
-from models.hourglass import Hourglass
-from models.mpv_network import MPVNet
-from models.mpi_flow_network import *
-from models.mpi_utils import save_mpi
-from dataset.RealEstate10K import *
-from dataset.StereoBlur import *
-from dataset.WSVD import *
 from trainer import *
+from util.config import fakeSummaryWriter
 
 plane_num = 24
 
@@ -54,26 +33,10 @@ def train(cfg: dict):
     mkdir_ifnotexist(checkpoint_path)
     mkdir_ifnotexist(tensorboard_log_prefix)
 
-    try:
-        check_point = torch.load(os.path.join(checkpoint_path, cfg["check_point"]), map_location=f"cuda:{local_rank}")
-    except FileNotFoundError:
-        print(f"cannot open check point file {cfg['check_point']}")
-        check_point = {}
-
-    begin_epoch = 0
-    if len(check_point) > 0:
-        model.load_state_dict(check_point["state_dict"])
-        begin_epoch = check_point["epoch"]
-        print(f"load state dict of epoch:{begin_epoch}")
-    else:
-        initial_weights(model)
-        print(f"initial the model weights")
+    begin_epoch = smart_load_checkpoint(checkpoint_path, cfg, model)
 
     savepth_iter_freq = cfg["savepth_iter_freq"]
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
-    if "optimizer" in check_point.keys():
-        check_point["optimizer"]["param_groups"][0]["lr"] = lr
-        optimizer.load_state_dict(check_point["optimizer"])
 
     # evalset = RealEstate10K_Seq(is_train=False, seq_len=cfg["evalset_seq_length"])
     # evalset = StereoBlur_Img(is_train=False)
@@ -100,7 +63,7 @@ def train(cfg: dict):
               f"-----------------\n" \
               f"Comment: {cfg['comment']}\n" \
               f"Dataset: train:{trainset.name}, len={len(trainset)}, eval:{evalset.name}, len={len(evalset)}\n" \
-              f"Model: {cfg['model_name']}\n" \
+              f"Model: {cfg['model_name']}, ModelLoss: {cfg['modelloss_name']}\n" \
               f"Loss: {loss_str}\n" \
               f"Training: checkpoint={cfg['check_point']}, bsz={batch_sz}, lr={lr}\n" \
               f"Validation: gtnum={validate_gtnum}, freq={validate_freq}\n" \

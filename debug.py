@@ -10,43 +10,41 @@ from torch.nn.parallel import DataParallel
 import numpy as np
 from tensorboardX import SummaryWriter
 import multiprocessing as mp
-from trainer import select_module, select_modelloss
+from trainer import select_module, select_modelloss, smart_load_checkpoint
 
-np.random.seed(666)
-torch.manual_seed(666)
+np.random.seed(6666)
+torch.manual_seed(6666)
 
 
 def main(kwargs):
     batchsz = kwargs["batchsz"]
-    model = select_module("MPI_FlowGrad")
-    if "checkpoint" in kwargs:
-        model.load_state_dict(torch.load(kwargs["checkpoint"])["state_dict"])
-    else:
-        initial_weights(model)
-        pass
-    # torch.save({"state_dict": model.state_dict(), "epoch": 0}, "./log/checkpoint/MPFNet.pth")
+    model = select_module("Fullv1")
+
+    smart_load_checkpoint("./log/checkpoint/", kwargs, model)
+
     model.cuda()
-    modelloss = select_modelloss("disp_flowgrad")(model, kwargs)
+    modelloss = select_modelloss("fullv1")(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
 
-    dataset = StereoBlur_Seq(True, mode='crop', seq_len=2)
+    dataset = StereoBlur_Seq(True, mode='crop', seq_len=4)
     for i in range(int(14000)):
         datas_all = [[]] * 6
-        for dev in range(2):
+        for dev in range(1):
             datas = dataset[0]
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
-        loss_dict = modelloss(*datas, step=i)
+        with torch.autograd.set_detect_anomaly(True):
+            loss_dict = modelloss(*datas, step=i)
+            loss = loss_dict["loss"]
+            loss = loss.mean()
+            loss_dict = loss_dict["loss_dict"]
+            optimizer.zero_grad()
+            loss.backward()
+        optimizer.step()
         _val_dict = modelloss.valid_forward(*datas, visualize=True)
-        loss = loss_dict["loss"]
-        loss = loss.mean()
-        loss_dict = loss_dict["loss_dict"]
         loss_dict = {k: v.mean() for k, v in loss_dict.items()}
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
         # output iter infomation
         loss_str = " | ".join([f"{k}:{v:.3f}" for k, v in loss_dict.items()])
         print(f"loss:{loss:.3f} | {loss_str}", flush=True)
@@ -72,7 +70,8 @@ def main(kwargs):
 main({
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
-    # "checkpoint": "./log/checkpoint/MPFNet.pth",
+    "check_point": "no",
+    "partial_load": "MPI",
     "batchsz": 1,
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",
     # "savefile": "./log/DBG_pretrain.pth",

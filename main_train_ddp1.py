@@ -20,33 +20,40 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 32,
-    "valid_freq": 200,
-    "train_report_freq": 10,
+    "validate_num": 8,
+    "valid_freq": 300,
+    "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
     # comment of current epoch, will print on config.txt
     "id": "",
     "comment": "",
 
-    "trainset": "StereoBlur_Seq",
-    "evalset": "StereoBlur_Seq",
-    "model_name": "MPIReccuNet",
-    "modelloss_name": "disp_reccu",
+    "trainset": "StereoBlur_seq",
+    "evalset": "StereoBlur_seq",
+    "model_name": "Fullv1",
+    "modelloss_name": "fullv1",
     "batch_size": 1,
-    "num_epoch": 9900,
+    "num_epoch": 30000,
     "savepth_iter_freq": 300,
-    "lr": 5e-5,
-    "check_point": "no",
+    "lr": 1e-4,
+    "check_point": "fullv1_mpilossonly_cont_111421_r0.pth",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "smooth_loss": 0.1,
-        "depth_loss": 2.5,
-        # "pixel_std_loss": 0.5,
-        # "temporal_loss": 0.5
+        "smooth_loss": 0.05,
+        "smooth_flowgrad_loss": 0.05,
+        "depth_loss": 3,
 
-        "templ1_loss": 2,
+        # "pixel_std_loss": 0.5,
+        # "temporal_loss": 0.5,
+        # "tempdepth_loss": 0.5,
+
+        # "flow_epe": 1,
+        # "flow_smth": 0.1,
+        # "flow_smth_ord": 1,
+        # "flow_smth_bw": False
+
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
     },
@@ -57,8 +64,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "recurrentnet_2frame"
-    cfg["comment"] = "warp based on image space flow"
+    cfg["id"] = "fullv1_mpilossonly_cont"
+    cfg["comment"] = "full model, but only train mpimodel"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -68,9 +75,8 @@ def main(cfg):
     # the settings for debug
     # please comment this
     if "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
-        print("Don't forget to change id!!!", flush=True)
-        cfg["id"] = "dont' forget to chagne id"
-        cfg["comment"] = "dont' forget to chagne id"
+        print("Debug Mode!!!", flush=True)
+        cfg["comment"] = "Dont't forget to change comment" * 100
         cfg["world_size"] = 2
     else:
         import warnings

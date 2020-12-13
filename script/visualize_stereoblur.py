@@ -17,13 +17,16 @@ for videofile in videos:
     cap = cv2.VideoCapture(videofile)
     framenum = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     out = cv2.VideoWriter()
-    
+    out1 = cv2.VideoWriter()
+
     imglast = None
+    flow_last = None
     for idx in range(framenum):
         ret, img = cap.read()
         if not (ret and len(img) > 0):
             print(f"{videofile}: cannot read frame {idx}, which is said to have {framenum} frames")
-
+        if idx > 120:
+            break
         # count += 1
         # if count > 10:
         #     count = 0
@@ -36,33 +39,38 @@ for videofile in videos:
         wid //= 2
         imgl, imgr = img[:, :wid], img[:, wid:]
 
-        # disp, uncertainty = compute_disparity_uncertainty(imgl, imgr)
-        # disp = (disp * (255 / 100)).astype(np.uint8)
-        # disp = cv2.applyColorMap(disp, cv2.COLORMAP_HOT)
-        # uncertainty = (uncertainty * 255).astype(np.uint8)
-        # uncertainty = cv2.applyColorMap(uncertainty, cv2.COLORMAP_JET)
+        disp, uncertainty = compute_disparity_uncertainty(imgl, imgr)
+        disp = (disp * (255 / 100)).astype(np.uint8)
+        disp = cv2.applyColorMap(disp, cv2.COLORMAP_HOT)
+        uncertainty = (uncertainty * 255).astype(np.uint8)
+        uncertainty = cv2.applyColorMap(uncertainty, cv2.COLORMAP_JET)
         # cv2.imshow("disp", disp)
         # cv2.imshow("uncertainty", uncertainty)
-        imgl = cv2.resize(imgl, None, None, 0.5, 0.5)
-        hei, wid, cnl = imgl.shape
-        img = ToTensor()(imgl).unsqueeze(0).cuda()
-        if imglast is not None:
-            with torch.no_grad():
-                flow = flow_estim(img, imglast)
-            flowvis = flow_to_png_middlebury(flow[0].cpu().numpy())
-            # warp_last = warp_flow(imglast, flow)
-            # diff = (warp_last - img).norm(dim=1)
-            # cv2.imshow("flow", (warp_last * 255).type(torch.uint8)[0].permute(1, 2, 0).cpu().numpy())
-            # cv2.imshow("flow", (diff * 255).type(torch.uint8)[0].cpu().numpy())
-            print(f'\r{idx}', end='')
-            if out.isOpened():
-                out.write(flowvis)
+        # imgl = cv2.resize(imgl, None, None, 0.5, 0.5)
+        # hei, wid, cnl = imgl.shape
+        # img = ToTensor()(imgl).unsqueeze(0).cuda()
+        # if imglast is not None:
+        #     with torch.no_grad():
+        #         if flow_last is not None:
+        #             flow_last = downflow8(flow_last)
+        #             flow_last = forward_scatter(flow_last, flow_last)
+        #         flow = flow_estim(imglast, img, flow_last)
+        #         flow_last = flow
+        #     flowvis = flow_to_png_middlebury(flow[0].cpu().numpy())
+        # warp_last = warp_flow(imglast, flow)
+        # diff = (warp_last - img).norm(dim=1)
+        # cv2.imshow("flow", (warp_last * 255).type(torch.uint8)[0].permute(1, 2, 0).cpu().numpy())
+        # cv2.imshow("flow", (diff * 255).type(torch.uint8)[0].cpu().numpy())
+        print(f'\r{idx}', end='')
+        if out.isOpened():
+            out.write(disp)
+            out1.write(uncertainty)
+        else:
+            if os.path.exists(videofile.replace('\\test\\', '\\visdisp\\')):
+                break
             else:
-                if os.path.exists(videofile.replace('\\test\\', '\\visflow\\')):
-                    break
-                else:
-                    out.open(videofile.replace('\\test\\', '\\visflow\\'),  828601953, 30., (wid, hei), True)
-        cv2.waitKey(1)
+                out.open(videofile.replace('\\test\\', '\\visdisp\\'),  828601953, 20., (wid, hei), True)
+                out1.open(videofile.replace('\\test\\', '\\visdisp\\unce_'),  828601953, 20., (wid, hei), True)
         imglast = img
 
     out.release()

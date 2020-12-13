@@ -11,6 +11,7 @@ import cv2
 import os
 from glob import glob
 from . import StereoBlur_root, is_DEBUG, OutputSize
+from . import StereoBlur_use_saved_disparity as use_Disp_npy
 from .colmap_wrapper import *
 from .cv2disparity import compute_disparity_uncertainty
 from .Augmenter import DataAugmenter
@@ -18,7 +19,35 @@ import sys
 sys.path.append('..')
 
 
-class StereoBlur_Img(Dataset):
+def post_process_dispnpy(disp: np.ndarray):
+    return cv2.resize(disp, (1280, 720))
+
+
+class StereoBlur_Base:
+    def __init__(self):
+        self.root = os.path.abspath(StereoBlur_root)
+        self.trainstr = "not_specified"
+        self.name = f"StereoBlur_Base"
+        self.totensor = ToTensor()
+        self._cur_file_base = ""
+
+    @staticmethod
+    def getbasename(path):
+        return os.path.basename(path.strip('\n').replace('\\', '/')).split('.')[0]
+
+    def getfullvideopath(self, base_name):
+        return os.path.join(self.root, self.trainstr, f"{base_name}.mp4")
+
+    def getdisparitypath(self, base_name, isleft, frameidx):
+        # todo: now that train & test set has save content, so disparity is the same. Please modify after I've done
+        #   all the tests
+        if isleft:
+            return os.path.join(self.root, "train_disp", base_name, "left", f"{frameidx:05d}.npy")
+        else:
+            return os.path.join(self.root, "train_disp", base_name, "right", f"{frameidx:05d}.npy")
+
+
+class StereoBlur_Img(Dataset, StereoBlur_Base):
     def __init__(self, is_train, mode='crop'):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
@@ -27,27 +56,18 @@ class StereoBlur_Img(Dataset):
                 'pad': pad to multiple of 128, usually used in evaluation,
                 'crop': crop to 512x512 or multiple of 128
         """
+        super().__init__()
         if is_train:
             self.trainstr = "train"
         else:
             self.trainstr = "test"
-        self.root = os.path.abspath(StereoBlur_root)
         video_list = sorted(glob(os.path.join(self.root, self.trainstr, "*.mp4")))
         self.filebase_list = [self.getbasename(_p) for _p in video_list]
 
         self.name = f"StereoBlur_Img_{self.trainstr}"
         print(f"{self.name}: find {len(self.filebase_list)} video files in {self.trainstr} set")
 
-        self.totensor = ToTensor()
-        self._cur_file_base = ""
         self.augmenter = DataAugmenter(OutputSize, mode=mode)
-
-    @staticmethod
-    def getbasename(path):
-        return os.path.basename(path.strip('\n').replace('\\', '/')).split('.')[0]
-
-    def getfullvideopath(self, base_name):
-        return os.path.join(self.root, self.trainstr, f"{base_name}.mp4")
 
     def __len__(self):
         return len(self.filebase_list)
@@ -106,7 +126,17 @@ class StereoBlur_Img(Dataset):
 
         # augmentation
         self.augmenter.random_generate((hei, wid))
-        disp, uncertainty = compute_disparity_uncertainty(imgl, imgr, retleft)
+        disp_path = self.getdisparitypath(filebase, retleft, idx)
+
+        if os.path.exists(disp_path) and use_Disp_npy:
+            disp = post_process_dispnpy(np.load(disp_path))
+            uncertainty = np.ones_like(disp)
+        elif use_Disp_npy:
+            print(f"Warning {self.name}:: choose to use npy but doesn't find {disp_path}")
+            return None
+        else:
+            disp, uncertainty = compute_disparity_uncertainty(imgl, imgr, retleft)
+
         imgl = self.augmenter.apply_img(imgl)
         imgr = self.augmenter.apply_img(imgr)
         disp = self.augmenter.apply_disparity(disp)
@@ -128,8 +158,8 @@ class StereoBlur_Img(Dataset):
         return refimg, tarimg, torch.tensor(disp), torch.tensor(uncertainty), isleft
 
 
-class StereoBlur_Seq(Dataset):
-    def __init__(self, is_train, mode='crop', seq_len=2, max_skip=10):
+class StereoBlur_Seq(Dataset, StereoBlur_Base):
+    def __init__(self, is_train, mode='crop', seq_len=4, max_skip=10):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         model=  'none': do noting
@@ -137,29 +167,20 @@ class StereoBlur_Seq(Dataset):
                 'pad': pad to multiple of 128, usually used in evaluation,
                 'crop': crop to 512x512 or multiple of 128
         """
+        super().__init__()
         if is_train:
             self.trainstr = "train"
         else:
             self.trainstr = "test"
-        self.root = os.path.abspath(StereoBlur_root)
         video_list = sorted(glob(os.path.join(self.root, self.trainstr, "*.mp4")))
         self.filebase_list = [self.getbasename(_p) for _p in video_list]
 
         self.name = f"StereoBlur_Seq_{self.trainstr}"
         print(f"{self.name}: find {len(self.filebase_list)} video files in {self.trainstr} set")
 
-        self.totensor = ToTensor()
-        self._cur_file_base = ""
         self.augmenter = DataAugmenter(OutputSize, mode=mode)
         self.sequence_length = seq_len
         self.maxskip_framenum = max(1, max_skip)  # 1 means no skip
-
-    @staticmethod
-    def getbasename(path):
-        return os.path.basename(path.strip('\n').replace('\\', '/')).split('.')[0]
-
-    def getfullvideopath(self, base_name):
-        return os.path.join(self.root, self.trainstr, f"{base_name}.mp4")
 
     def __len__(self):
         return len(self.filebase_list)
@@ -230,7 +251,17 @@ class StereoBlur_Seq(Dataset):
                 return None
 
             # augmentation
-            disp, uncertainty = compute_disparity_uncertainty(imgl, imgr, retleft)
+            disp_path = self.getdisparitypath(filebase, retleft, idx)
+            if os.path.exists(disp_path) and use_Disp_npy:
+                disp = np.load(disp_path, allow_pickle=True)
+                disp = post_process_dispnpy(disp.astype(np.float32))
+                uncertainty = np.ones_like(disp)
+            elif use_Disp_npy:
+                print(f"Warning {self.name}:: choose to use npy but doesn't find {disp_path}")
+                return None
+            else:
+                disp, uncertainty = compute_disparity_uncertainty(imgl, imgr, retleft)
+
             imgl = self.augmenter.apply_img(imgl)
             imgr = self.augmenter.apply_img(imgr)
             disp = self.augmenter.apply_disparity(disp)

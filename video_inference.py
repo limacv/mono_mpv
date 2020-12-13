@@ -7,34 +7,39 @@ from models.mpi_utils import *
 from models.flow_utils import *
 import torch.backends.cudnn
 
-
+path = "./log/checkpoint/fullv1_pretrainmpi_100058_r0.pth"
 # Adjust configurations here ############################################
-state_dict_path = "./log/checkpoint/flowgradin_mpfnet.pth"
+state_dict_path = {
+    '': "./log/checkpoint/fullv1_pretrainmpi_100058_r0.pth",
+    # "MPF.": "./log/checkpoint/mpf_bugfix_ord1smth_052107_r0.pth"
+}
+manually_prefix = "debug"  # please change me!!!
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
-video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-05-16-38-15.mp4"
-model = select_module("MPFNetv2").cuda()
-modelloss = select_modelloss("disp_mpf")(model, {"loss_weights": {}})
+video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+model = select_module("Fullv1").cuda()
+modelloss = select_modelloss("fullv1")(model, {"loss_weights": {}})
 infer_single_frame = False
+
 save_infer_mpi = True and infer_single_frame
-infer_entire_video = not infer_single_frame
 save_newview = False
-save_mpv = True
-save_mpf = True
+save_mpv = False
+save_mpf = False
 # \Adjust configuration here ############################################
 
 out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
-saveprefix = os.path.basename(state_dict_path).split('.')[0] + os.path.basename(video_path).split('.')[0]
+saveprefix = os.path.basename(state_dict_path['']).split('.')[0] + os.path.basename(video_path).split('.')[0] + manually_prefix
 dispvideo_path = os.path.join(out_prefix, saveprefix + "_disparity.mp4")
 newviewsvideo_path = os.path.join(out_prefix, saveprefix + "_newview.mp4")
 mpiout_path = os.path.join(out_prefix, saveprefix)
 mpvout_path = os.path.join(out_prefix, saveprefix + ".mp4")
-state_dict = torch.load(state_dict_path, map_location='cuda:0')
+# state_dict = torch.load(state_dict_path[''], map_location='cuda:0')
 # torch.save({"state_dict": state_dict["state_dict"]}, state_dict_path)
-if "state_dict" in state_dict:
-    state_dict = state_dict["state_dict"]
-model.load_state_dict(state_dict)
+# if "state_dict" in state_dict:
+#     state_dict = state_dict["state_dict"]
+# model.load_state_dict(state_dict)
+smart_load_checkpoint('', {"check_point": state_dict_path}, model)
 
 # ## ### #### ##### ###### ####### ######## ####### ###### ##### #### ### ## #
 
@@ -51,7 +56,7 @@ with torch.no_grad():
     while True:
         print(f"\r{frameidx}", end='')
         ret, img = cap.read()
-        if not ret or frameidx > 20:
+        if not ret or frameidx > 50:
             break
         hei, wid, _ = img.shape
         if wid > hei * 2:
@@ -65,7 +70,6 @@ with torch.no_grad():
 
         if isinstance(mpi, tuple):
             mpi, mpf = mpi
-
         if save_mpf:
             mpfout.write(mpi[0], mpf[0])
         if save_mpv:

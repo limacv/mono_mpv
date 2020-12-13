@@ -5,6 +5,7 @@ import torch.nn as nn
 from torchvision.transforms import ToTensor
 import os
 from .RAFT_network import RAFTNet
+from ._modules import downflow8
 
 RAFT_path = {
     "small": os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/raft-small.pth"),
@@ -13,25 +14,33 @@ RAFT_path = {
 }
 
 
-def forward_scatter(map01: torch.Tensor, content: torch.Tensor):
+def forward_scatter(flow01: torch.Tensor, content: torch.Tensor):
     """
-    :param map01: Bx2xHxWthe target pos in im1
+    :param flow01: Bx2xHxWthe target pos in im1
     :param content: BxcxHxW the scatter content
     :return: rangemap of im1
     """
-    assert map01.dim() == 4 and map01.shape[1] == 2
-    coords = map01.permute(0, 2, 3, 1).cpu()
-    batchsz, _, hei, wid = map01.shape
+    batchsz, _, hei, wid = flow01.shape
+    cnl = content.shape[1]
+    offsety, offsetx = torch.meshgrid([
+        torch.linspace(0, hei - 1, hei),
+        torch.linspace(0, wid - 1, wid)
+    ])
+    offset = torch.stack([offsetx, offsety], 0).unsqueeze(0).type_as(flow01)
+    coords = (flow01 + offset).permute(0, 2, 3, 1)
     coords_floor = torch.floor(coords).int()
     coords_offset = coords - coords_floor
 
-    batch_range = torch.arange(batchsz).reshape(batchsz, 1, 1)
+    batch_range = torch.arange(batchsz).reshape(batchsz, 1, 1).to(flow01.device)
     idx_batch_offset = (batch_range * hei * wid).repeat([1, hei, wid])
+
+    content_flat = content.permute(0, 2, 3, 1).reshape([-1, cnl])
     coords_floor_flat = coords_floor.reshape([-1, 2])
     coords_offset_flat = coords_offset.reshape([-1, 2])
     idx_batch_offset_flat = idx_batch_offset.reshape([-1])
 
     idxs_list, weights_list = [], []
+    content_list = []
     for di in range(2):
         for dj in range(2):
             idxs_i = coords_floor_flat[:, 0] + di
@@ -44,6 +53,7 @@ def forward_scatter(map01: torch.Tensor, content: torch.Tensor):
                 torch.bitwise_and(idxs_j >= 0, idxs_j < hei)).reshape(-1)
             valid_idxs = idxs[mask]
             valid_offsets = coords_offset_flat[mask]
+            content_cur = content_flat[mask]
 
             weights_i = (1. - di) - (-1) ** di * valid_offsets[:, 0]
             weights_j = (1. - dj) - (-1) ** dj * valid_offsets[:, 1]
@@ -51,15 +61,137 @@ def forward_scatter(map01: torch.Tensor, content: torch.Tensor):
 
             idxs_list.append(valid_idxs)
             weights_list.append(weights)
+            content_list.append(content_cur)
 
     idxs = torch.cat(idxs_list, dim=0)
     weights = torch.cat(weights_list, dim=0)
+    content = torch.cat(content_list, dim=0)
 
-    counts = torch.zeros(batchsz * hei * wid)
-    counts = counts.scatter_add(0, idxs, weights)
-    counts = counts.reshape(batchsz, 1, hei, wid)
+    newcontent = torch.zeros(batchsz * hei * wid, cnl).to(content.device)
+    content *= weights.unsqueeze(-1)
+    newcontent = newcontent.scatter_add_(0, idxs.unsqueeze(-1).expand(-1, cnl), content)
+    denorm = torch.zeros(batchsz * hei * wid).to(content.device)
+    denorm = denorm.scatter_add_(0, idxs, weights).unsqueeze(-1) + 0.001
+    newcontent = (newcontent / denorm).reshape(batchsz, hei, wid, cnl).permute(0, 3, 1, 2)
 
-    return counts.type_as(map01)
+    return newcontent.type_as(flow01)
+
+
+def forward_scatter_mpi(flow01: torch.Tensor, mpi: torch.Tensor):
+    """
+    two modifications regarding the forward_scatter:
+        1. valid mask = alpha > epsi
+        2. final blending not only consider the bilinear weights, but also the alpha as weights
+    :param flow01: BxLx2xHxWthe target pos in im1 (or B x 2 x H x W)
+    :param mpi: BxLxcxHxW the scatter content
+    :param epsi: threshold, where alpha smaller than this is regarded to be nothing and will not be warped
+    :return: rangemap of im1
+    """
+    batchsz, layernum, _, hei, wid = mpi.shape
+    if flow01.dim() == 4:
+        flow01 = flow01.unsqueeze(1).expand(-1, layernum, -1, -1, -1)
+    mpi = mpi.reshape(batchsz * layernum, -1, hei, wid)
+    flow01 = flow01.reshape(batchsz * layernum, -1, hei, wid)
+    batchsz = batchsz * layernum
+    cnl = mpi.shape[1]
+    offsety, offsetx = torch.meshgrid([
+        torch.linspace(0, hei - 1, hei),
+        torch.linspace(0, wid - 1, wid)
+    ])
+    offset = torch.stack([offsetx, offsety], 0).unsqueeze(0).type_as(flow01)
+    coords = (flow01 + offset).permute(0, 2, 3, 1)
+    coords_floor = torch.floor(coords).int()
+    coords_offset = coords - coords_floor
+
+    batch_range = torch.arange(batchsz).reshape(batchsz, 1, 1).to(flow01.device)
+    idx_batch_offset = (batch_range * hei * wid).repeat([1, hei, wid])
+
+    mpi_flat = mpi.permute(0, 2, 3, 1).reshape([-1, cnl])
+    coords_floor_flat = coords_floor.reshape([-1, 2])
+    coords_offset_flat = coords_offset.reshape([-1, 2])
+    idx_batch_offset_flat = idx_batch_offset.reshape([-1])
+
+    idxs_list, weights_list = [], []
+    content_list = []
+    for di in range(2):
+        for dj in range(2):
+            idxs_i = coords_floor_flat[:, 0] + di
+            idxs_j = coords_floor_flat[:, 1] + dj
+
+            idxs = idx_batch_offset_flat + idxs_j * wid + idxs_i
+
+            mask = torch.bitwise_and(
+                torch.bitwise_and(idxs_i >= 0, idxs_i < wid),
+                torch.bitwise_and(idxs_j >= 0, idxs_j < hei)).reshape(-1)
+            valid_idxs = idxs[mask]
+            valid_offsets = coords_offset_flat[mask]
+            content_cur = mpi_flat[mask]
+
+            weights_i = (1. - di) - (-1) ** di * valid_offsets[:, 0]
+            weights_j = (1. - dj) - (-1) ** dj * valid_offsets[:, 1]
+            weights = weights_i * weights_j
+
+            idxs_list.append(valid_idxs)
+            weights_list.append(weights)
+            content_list.append(content_cur)
+
+    idxs = torch.cat(idxs_list, dim=0)
+    weights = torch.cat(weights_list, dim=0)
+    mpi = torch.cat(content_list, dim=0)
+    alphas = mpi[:, -1]
+    weights = alphas * weights
+
+    newmpi = torch.zeros(batchsz * hei * wid, cnl).to(mpi.device)
+    mpi = mpi * weights.unsqueeze(-1)
+    newmpi = newmpi.scatter_add_(0, idxs.unsqueeze(-1).expand(-1, cnl), mpi)
+    denorm = torch.zeros(batchsz * hei * wid).to(mpi.device)
+    denorm = denorm.scatter_add_(0, idxs, weights).unsqueeze(-1) + 0.0001
+    newmpi = (newmpi / denorm).reshape(batchsz, hei, wid, cnl).permute(0, 3, 1, 2)
+
+    return newmpi.reshape(-1, layernum, cnl, hei, wid)
+
+
+def forward_scatter_nearest(flow01: torch.Tensor, content: torch.Tensor):
+    """
+    :param flow01: Bx2xHxWthe target pos in im1
+    :param content: BxcxHxW the scatter content
+    :return: rangemap of im1
+    """
+    batchsz, _, hei, wid = flow01.shape
+    cnl = content.shape[1]
+    offsety, offsetx = torch.meshgrid([
+        torch.linspace(0, hei - 1, hei),
+        torch.linspace(0, wid - 1, wid)
+    ])
+    offset = torch.stack([offsetx, offsety], 0).unsqueeze(0).type_as(flow01)
+    coords = (flow01 + offset).permute(0, 2, 3, 1).cpu()
+    coords_floor = torch.round(coords).int()
+
+    batch_range = torch.arange(batchsz).reshape(batchsz, 1, 1)
+    idx_batch_offset = (batch_range * hei * wid).repeat([1, hei, wid])
+
+    content_flat = content.permute(0, 2, 3, 1).reshape([-1, cnl])
+    coords_floor_flat = coords_floor.reshape([-1, 2])
+    idx_batch_offset_flat = idx_batch_offset.reshape([-1])
+
+    idxs_i = coords_floor_flat[:, 0]
+    idxs_j = coords_floor_flat[:, 1]
+
+    idxs = idx_batch_offset_flat + idxs_j * wid + idxs_i
+
+    mask = torch.bitwise_and(
+        torch.bitwise_and(idxs_i >= 0, idxs_i < wid),
+        torch.bitwise_and(idxs_j >= 0, idxs_j < hei)).reshape(-1)
+    valid_idxs = idxs[mask]
+    content_cur = content_flat[mask]
+
+    newcontent = torch.zeros(batchsz * hei * wid, cnl)
+    newcontent = newcontent.scatter_add(0, valid_idxs.unsqueeze(-1), content_cur)
+    denorm = torch.zeros(batchsz * hei * wid)
+    denorm = denorm.scatter_add(0, valid_idxs, torch.ones_like(valid_idxs)).unsqueeze(-1) + 0.001
+    newcontent = (newcontent / denorm).reshape(batchsz, hei, wid, cnl).permute(0, 3, 1, 2)
+
+    return newcontent.type_as(flow01)
 
 
 class FlowEstimator(nn.Module):

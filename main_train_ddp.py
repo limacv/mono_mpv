@@ -20,9 +20,9 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 32,
-    "valid_freq": 150,
-    "train_report_freq": 10,
+    "validate_num": 8,
+    "valid_freq": 300,
+    "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
     # comment of current epoch, will print on config.txt
@@ -31,26 +31,29 @@ cfg = {
 
     "trainset": "StereoBlur_seq",
     "evalset": "StereoBlur_seq",
-    "model_name": "MPI_FlowGrad",
-    "modelloss_name": "disp_flowgrad",
+    "model_name": "Fullv1",
+    "modelloss_name": "fullv1",
     "batch_size": 1,
-    "num_epoch": 9900,
+    "num_epoch": 20000,
     "savepth_iter_freq": 300,
     "lr": 1e-4,
-    "check_point": "no",
+    "check_point": "fullv1_mpilossonly_cont_111421_r0.pth",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "smooth_loss": 0.05,
         "smooth_flowgrad_loss": 0.05,
-        "depth_loss": 2.5,
-        # "pixel_std_loss": 0.5,
-        # "temporal_loss": 0.5
+        "depth_loss": 3,
 
-        # "flow_epe": 1,
-        # "flow_smth": 5,
-        # "flow_smth_ord": 1,
+        # "pixel_std_loss": 0.5,
+        # "temporal_loss": 0.5,
+        "tempdepth_loss": 0.5,
+        
+        "flow_epe": 1,
+        "flow_smth": 0.1,
+        "flow_smth_ord": 1,
         # "flow_smth_bw": False
+
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
     },
@@ -66,7 +69,7 @@ cfg = {
 
 # TODO List:
 #   >>> refine the flow
-#   >>> try recurrent that learn residual
+#   >>> test the flow (forward map from the first image to the last frames and see the temporal effect)
 #   >>> evaluate the temporal smoothness
 #   >>> [opt] think about mpimodel that decomposite the scene into static background and forground
 #   >>> [opt] aggregate more frames
@@ -77,8 +80,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "flowgradin_flowin"
-    cfg["comment"] = "try to align the gradient of disparity and flow"
+    cfg["id"] = "fullv1_pretrainmpi"
+    cfg["comment"] = "full model, load pretrained model"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -104,7 +107,7 @@ def main(cfg):
 
     torch.manual_seed(0)
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.benchmark = True
     np.random.seed(0)
     random.seed(0)
     torch.distributed.init_process_group('nccl', world_size=cfg["world_size"], init_method='env://')

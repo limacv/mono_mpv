@@ -91,6 +91,7 @@ def photometric_loss(imref, imreconstruct, mode='l1'):
 
 
 def photo_l1loss(im, im_warp, order=1):
+    assert im.dim() == 4 and im_warp.dim() == 4
     diff = torch.abs(im - im_warp) + 0.0001
     diff = torch.sum(diff, dim=1)
     if order != 1:

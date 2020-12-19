@@ -59,7 +59,7 @@ for videofile in videos:
                     flow_last = forward_scatter(flow_last, flow_last)
                 flow = flow_estim(imglast, img, flow_last)
                 flow_last = flow
-                imgwarp = forward_scatter(flow, imgwarp)
+                imgwarp = forward_scatter_mpi_nearest(flow.unsqueeze(1), imgwarp.unsqueeze(1)).squeeze(1)
             flowvis = flow_to_png_middlebury(flow[0].cpu().numpy())
             # warp_last = warp_flow(imglast, flow)
             # diff = (warp_last - img).norm(dim=1)

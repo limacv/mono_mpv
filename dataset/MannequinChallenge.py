@@ -15,6 +15,7 @@ from . import MannequinChallenge_root, is_DEBUG, MannequinChallenge_skip_framenu
 from . import OutputSize as outSize
 from .colmap_wrapper import *
 from .Augmenter import DataAugmenter
+from .youtubedl_wrapper import run_youtubedl
 
 
 class MannequinChallenge_Base:
@@ -116,24 +117,13 @@ class MannequinChallenge_Base:
         if not (os.path.exists(image_path) and len(os.listdir(image_path)) == len(timestamps)) \
                 and not os.path.exists(video_trim_path):
             print(f"  MannequinChallenge: download video from {file_base}", flush=True)
+
             try:
-                youtube = YouTube(link)
-                stream = youtube.streams.get_highest_resolution()
-                stream.download(tmp_base_path, "video", skip_existing=True)
-            except KeyError as e:
-                print(f"MannequinChallenge: error when fetching link {link[:-1]} specified in {file_base}.txt"
-                      f"with error {e}")
-                return False
+                run_youtubedl(link, tmp_base_path)
             except Exception as _:
-                try:
-                    youtube = YouTube(link)
-                    stream = youtube.streams.first()
-                    stream.download(tmp_base_path, "video", skip_existing=True)
-                except Exception as e:
-                    print(f"MannequinChallenge: error when fetching link {link} specified in {file_base}.txt"
-                          f"with error {e} in second try")
-                finally:
-                    return False
+                print(f"MannequinChallenge: error when fetching link {link} specified in {file_base}.txt"
+                      f"with error:\n {_}")
+                return False
 
             video_file = glob(f"{tmp_base_path}/video*")[0]
             video = cv2.VideoCapture(video_file)
@@ -212,7 +202,7 @@ class MannequinChallenge_Base:
         framenum = len(colimages)
         # condition1: number of frames shouldn't be too little
         # -----------------------------------------------------
-        if framenum < 15:
+        if framenum < 6:
             if verbose:
                 print(f"MannequinChallenge: too little frame ({framenum} frames)")
             return False
@@ -225,7 +215,7 @@ class MannequinChallenge_Base:
         pt3ds = np.array(pt3ds)
         # condition2: number of points shouldn't be too little
         # ---------------------------------------------------
-        if ptnum < 2500:
+        if ptnum < 1500:
             if verbose:
                 print(f"MannequinChallenge: too little 3d points ({ptnum} points)")
             return False
@@ -258,7 +248,7 @@ class MannequinChallenge_Base:
 
 
 class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
-    def __init__(self, is_train=True, black_list=True, mode='resize', ptnum=2000):
+    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=2000):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         mpimodel=  'none': do noting
@@ -388,10 +378,10 @@ class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
         # point3ds_imgnorm = intrin @ point3ds_camnorm
         # point3ds_imgnorm /= point3ds_imgnorm[2]
 
-        # ptindex = np.argsort(point2ds_depth)
-        # ptindex = ptindex[int(0.01 * len(ptindex)):int(0.99 * len(ptindex))]
-        # point2ds = point2ds[ptindex]
-        # point2ds_depth = point2ds_depth[ptindex]
+        ptindex = np.argsort(point2ds_depth)
+        ptindex = ptindex[int(0.01 * len(ptindex)):int(0.99 * len(ptindex))]
+        point2ds = point2ds[ptindex]
+        point2ds_depth = point2ds_depth[ptindex]
         good_ptid = point2ds_depth > 0.01
         point2ds = point2ds[good_ptid]
         point2ds_depth = point2ds_depth[good_ptid]
@@ -410,7 +400,7 @@ class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
 
 
 class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
-    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=2000, seq_len=4):
+    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=2000, seq_len=4, max_skip=1):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         mpimodel=  'none': do noting
@@ -423,8 +413,9 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
                          ptnum=ptnum)
         self.name = f"MannequinChallenge_Video_{self.trainstr}"
         self.sequence_length = seq_len
-        self.tar_margin = max(6 - seq_len, 1)
+        self.tar_margin = 1
         self.augmenter = DataAugmenter(outSize, mode=mode)
+        self.maxskip_framenum = max(2, max_skip)  # 1 means no skip
 
     def __len__(self):
         return len(self.filebase_list)
@@ -459,9 +450,6 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
         # ================================================
         # select index and read images
         # ================================================
-        if not self.pre_fetch_bybase(file_base):
-            return None
-
         file_base = os.path.basename(file_base).split('.')[0]
         video_trim_path = self.video_trim_path(file_base)
         col_model_root = self.colmap_model_path(file_base)
@@ -470,19 +458,19 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
 
         video = cv2.VideoCapture(video_trim_path)
         if not video.isOpened():
-            print(f"MannequinChallenge: cannot open video file {video_trim_path}")
+            print(f"{self.name}: cannot open video file {video_trim_path}")
             return None
         framenum = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
         if framenum < self.sequence_length + 1:
             return None
 
         if self.trainstr == "train":
-            startid = np.random.randint(0, framenum - self.sequence_length)
-            refidxs = np.arange(startid, startid + self.sequence_length)
+            skipnum = np.random.randint(1, self.maxskip_framenum)
+            framenum_wid = (self.sequence_length - 1) * skipnum + 1
+            startid = np.random.randint(0, framenum - framenum_wid)
+            refidxs = np.arange(startid, startid + framenum_wid, skipnum)
             taridxs = list(range(max(startid - self.tar_margin, 0),
                                  min(refidxs[-1] + self.tar_margin + 1, framenum)))
-            # taridxs = list(range(max(startid - 2, 0), startid)) +\
-            #           list(range(refidxs[-1] + 1, min(refidxs[-1] + 3, framenum)))
             taridx = taridxs[np.random.randint(len(taridxs))]
         else:
             refidxs, taridx = np.arange(1, 1 + self.sequence_length), 0

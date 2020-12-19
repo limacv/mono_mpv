@@ -1,8 +1,13 @@
 import torch.optim
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import DataLoader, Subset, random_split, RandomSampler
 
-from trainer import *
+from datetime import datetime
+import time
+from utils import *
 from util.config import fakeSummaryWriter
+from tensorboardX import SummaryWriter
 
 plane_num = 24
 
@@ -40,7 +45,7 @@ def train(cfg: dict):
 
     # evalset = RealEstate10K_Seq(is_train=False, seq_len=cfg["evalset_seq_length"])
     # evalset = StereoBlur_Img(is_train=False)
-    evalset = select_dataset(cfg["evalset"])(is_train=False)
+    evalset = select_dataset(cfg["evalset"], False, cfg)
     validate_gtnum = cfg["validate_num"] if 0 < cfg["validate_num"] < len(evalset) else len(evalset)
 
     datasubset = Subset(evalset, torch.randperm(len(evalset))[:validate_gtnum])
@@ -50,7 +55,7 @@ def train(cfg: dict):
     validate_freq = cfg["valid_freq"]
 
     # trainset = RealEstate10K_Seq(is_train=True, seq_len=cfg["dataset_seq_length"])
-    trainset = select_dataset(cfg["trainset"])(is_train=True)
+    trainset = select_dataset(cfg["trainset"], True, cfg)
     train_report_freq = cfg["train_report_freq"]
     distributedSampler = DistributedSampler(trainset, num_replicas=world_size, rank=local_rank)
     trainingdata = DataLoader(trainset, batch_sz,

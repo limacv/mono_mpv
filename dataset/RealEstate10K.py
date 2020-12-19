@@ -15,6 +15,7 @@ from . import RealEstate10K_root, is_DEBUG, RealEstate10K_skip_framenum
 from . import OutputSize as outSize
 from .colmap_wrapper import *
 from .Augmenter import DataAugmenter
+from .youtubedl_wrapper import run_youtubedl
 
 
 class RealEstate10K_Base:
@@ -117,23 +118,11 @@ class RealEstate10K_Base:
                 and not os.path.exists(video_trim_path):
             print(f"  RealEstate10K: download video from {file_base}", flush=True)
             try:
-                youtube = YouTube(link)
-                stream = youtube.streams.get_highest_resolution()
-                stream.download(tmp_base_path, "video", skip_existing=True)
-            except KeyError as e:
-                print(f"RealEstate10K: error when fetching link {link[:-1]} specified in {file_base}.txt"
-                      f"with error {e}")
+                run_youtubedl(link, tmp_base_path)
+            except Exception as e:
+                print(f"RealEstate10K: error when fetching link {link} specified in {file_base}.txt"
+                      f"with error\n {e}")
                 return False
-            except Exception as _:
-                try:
-                    youtube = YouTube(link)
-                    stream = youtube.streams.first()
-                    stream.download(tmp_base_path, "video", skip_existing=True)
-                except Exception as e:
-                    print(f"RealEstate10K: error when fetching link {link} specified in {file_base}.txt"
-                          f"with error {e} in second try")
-                finally:
-                    return False
 
             video_file = glob(f"{tmp_base_path}/video*")[0]
             video = cv2.VideoCapture(video_file)

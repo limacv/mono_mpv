@@ -1,16 +1,4 @@
-from dataset.StereoBlur import *
-from models.ModelWithLoss import *
-from models.mpi_network import *
-from models.hourglass import *
-from models.mpi_utils import *
-from models.loss_utils import *
-from models.mpifuse_network import *
-import torch
-from torch.nn.parallel import DataParallel
-import numpy as np
-from tensorboardX import SummaryWriter
-import multiprocessing as mp
-from trainer import select_module, select_modelloss, smart_load_checkpoint
+from utils import *
 
 np.random.seed(6666)
 torch.manual_seed(6666)
@@ -18,17 +6,17 @@ torch.manual_seed(6666)
 
 def main(kwargs):
     batchsz = kwargs["batchsz"]
-    model = select_module("Fullv1")
+    model = select_module("Fullv22")
 
     smart_load_checkpoint("./log/checkpoint/", kwargs, model)
 
     model.cuda()
-    modelloss = select_modelloss("fullv1")(model, kwargs)
+    modelloss = select_modelloss("fullv2")(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
 
-    dataset = StereoBlur_Seq(True, mode='crop', seq_len=4)
+    dataset = select_dataset("stereoblur_seq", True, {})
     for i in range(int(14000)):
-        datas_all = [[]] * 6
+        datas_all = [[]] * 7
         for dev in range(1):
             datas = dataset[0]
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
@@ -41,8 +29,8 @@ def main(kwargs):
             loss_dict = loss_dict["loss_dict"]
             optimizer.zero_grad()
             loss.backward()
-        optimizer.step()
         _val_dict = modelloss.valid_forward(*datas, visualize=True)
+        optimizer.step()
         loss_dict = {k: v.mean() for k, v in loss_dict.items()}
 
         # output iter infomation
@@ -70,7 +58,9 @@ def main(kwargs):
 main({
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
-    "check_point": "no",
+    "check_point": {
+        "MPI": "no.pth"
+    },
     "partial_load": "MPI",
     "batchsz": 1,
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",
@@ -82,8 +72,11 @@ main({
                      "depth_loss": 0.1,
                      "templ1_loss": 1,
                      "tempdepth_loss": 0.01,
+                     "dilate_mpfin": False,
+                     "alpha2mpf": True,
                      "flow_epe": 0.1,
                      "flow_smth": 0.1,
+                     "sflow_loss": 0.1,
                      "smooth_flowgrad_loss": 0.1},
 })
 # good data list

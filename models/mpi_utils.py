@@ -56,7 +56,7 @@ def make_depths(num_plane, min_depth=default_d_near, max_depth=default_d_far):
     return torch.reciprocal(torch.linspace(1. / max_depth, 1. / min_depth, num_plane, dtype=torch.float32))
 
 
-def estimate_disparity_torch(mpi: torch.Tensor, depthes: torch.Tensor, blendweight=None):
+def estimate_disparity_torch(mpi: torch.Tensor, depthes: torch.Tensor, blendweight=None, retbw=False):
     """Compute disparity map from a set of MPI layers.
     mpi: tensor of shape B x LayerNum x 4 x H x W
     depthes: tensor of shape [B x LayerNum] or [B x LayerNum x H x W] (means different depth for each pixel]
@@ -71,13 +71,15 @@ def estimate_disparity_torch(mpi: torch.Tensor, depthes: torch.Tensor, blendweig
 
     alpha = mpi[:, :, -1, ...]  # alpha.shape == B x LayerNum x H x W
     if blendweight is None:
-        blendweight = alpha * torch.cat([torch.cumprod(- torch.flip(alpha, dims=[1]) + 1, dim=1).flip(dims=[1])[:, 1:],
-                                         torch.ones([batchsz, 1, height, width]).type_as(alpha)], dim=1)
-    else:
-        blendweight = alpha * blendweight
-    disparity = (blendweight * disparities).sum(dim=1)
+        blendweight = torch.cat([torch.cumprod(- torch.flip(alpha, dims=[1]) + 1, dim=1).flip(dims=[1])[:, 1:],
+                                 torch.ones([batchsz, 1, height, width]).type_as(alpha)], dim=1)
+    renderweight = alpha * blendweight
+    disparity = (renderweight * disparities).sum(dim=1)
 
-    return disparity
+    if retbw:
+        return disparity, blendweight
+    else:
+        return disparity
 
 
 def netout2mpi(netout: torch.Tensor, img: torch.Tensor, bg_pct=1., ret_blendw=False):
@@ -105,6 +107,31 @@ def netout2mpi(netout: torch.Tensor, img: torch.Tensor, bg_pct=1., ret_blendw=Fa
         return mpi, blend.squeeze(2)
     else:
         return mpi
+
+
+def alpha2mpi(alphas: torch.Tensor, fg: torch.Tensor, bg: torch.Tensor, bg_pct=1., blend_weight=None):
+    """
+    alphas: B x LayerNum x H x W
+    fg / bg: B x LayerNum x c x H x W or B x c x H x W
+    """
+    batchsz, planenum, height, width = alphas.shape
+    if blend_weight is None:
+        blend_weight = torch.cat([torch.cumprod(- torch.flip(alphas, dims=[1]) + 1, dim=1).flip(dims=[1])[:, 1:],
+                                  torch.ones([batchsz, 1, height, width]).type_as(alphas)], dim=1)
+
+    if blend_weight.dim() == 4:
+        blend_weight = blend_weight.unsqueeze(2)
+
+    if fg.dim() == 3:
+        fg = fg.unsqueeze(1)
+    if bg.dim() == 3:
+        bg = bg.unsqueeze(1)
+    if bg_pct != 1.:
+        bg = bg * bg_pct + fg * (1. - bg_pct)
+
+    rgb = blend_weight * fg.unsqueeze(1) + (-blend_weight + 1.) * bg.unsqueeze(1)
+    mpi = torch.cat([rgb, alphas.unsqueeze(2)], dim=2)
+    return mpi
 
 
 def netoutupdatempi_maskfree(netout: torch.Tensor, img: torch.Tensor, mpi_last, bg_pct=1., ret_blendw=False):
@@ -161,7 +188,7 @@ def netoutupdatempi_withmask(netout: torch.Tensor, img: torch.Tensor, bg_pct=1.,
     raise NotImplementedError
 
 
-def overcompose(mpi: torch.Tensor, blendweight=None, ret_mask=False, blend_content=None)\
+def overcompose(mpi: torch.Tensor, blendweight=None, ret_mask=False, blend_content=None) \
         -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """
     compose mpi back to front
@@ -174,17 +201,16 @@ def overcompose(mpi: torch.Tensor, blendweight=None, ret_mask=False, blend_conte
     batchsz, num_plane, _, height, width = mpi.shape
     alpha = mpi[:, :, -1, ...]  # alpha.shape == B x LayerNum x H x W
     if blendweight is None:
-        blendweight = alpha * torch.cat([torch.cumprod(- torch.flip(alpha, dims=[1]) + 1, dim=1).flip(dims=[1])[:, 1:],
-                                         torch.ones([batchsz, 1, height, width]).type_as(alpha)], dim=1)
-    else:
-        blendweight = alpha * blendweight
+        blendweight = torch.cat([torch.cumprod(- torch.flip(alpha, dims=[1]) + 1, dim=1).flip(dims=[1])[:, 1:],
+                                 torch.ones([batchsz, 1, height, width]).type_as(alpha)], dim=1)
+    renderw = alpha * blendweight
 
     content = mpi[:, :, :3, ...] if blend_content is None else blend_content
-    rgb = (content * blendweight.unsqueeze(2)).sum(dim=1)
-    if not ret_mask:
-        return rgb
+    rgb = (content * renderw.unsqueeze(2)).sum(dim=1)
+    if ret_mask:
+        return rgb, blendweight
     else:
-        return rgb, blendweight.sum(dim=-3)
+        return rgb
 
 
 def warp_homography(homos: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
@@ -281,7 +307,7 @@ def compute_homography(src_extrin: torch.Tensor, src_intrin: torch.Tensor,
 
 
 def render_newview(mpi: torch.Tensor, srcextrin: torch.Tensor, tarextrin: torch.Tensor, intrin: torch.Tensor,
-                   depths: torch.Tensor, ret_mask=False, ret_dispmap=False)\
+                   depths: torch.Tensor, ret_mask=False, ret_dispmap=False) \
         -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor],
                  Tuple[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]]:
     """
@@ -314,7 +340,7 @@ def render_newview(mpi: torch.Tensor, srcextrin: torch.Tensor, tarextrin: torch.
         return overcompose(mpi_warp, ret_mask=ret_mask), disparitys
 
 
-def shift_newview(mpi: torch.Tensor, disparities: torch.Tensor, ret_mask=False, ret_dispmap=False)\
+def shift_newview(mpi: torch.Tensor, disparities: torch.Tensor, ret_mask=False, ret_dispmap=False) \
         -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor],
                  Tuple[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]]:
     """
@@ -344,6 +370,7 @@ def warp_flow(mpi: torch.Tensor, mpf: torch.Tensor, offset=None):
     mpi: [..., cnl, H, W]
     mpf: [..., 2, H, W]
     """
+    assert mpi.dim() == mpf.dim()
     orishape = mpi.shape
     cnl, hei, wid = mpi.shape[-3:]
     mpi = mpi.reshape(-1, cnl, hei, wid)
@@ -427,12 +454,21 @@ class MPFWriter:
         self.out.release()
 
 
+def dilate(alpha: torch.Tensor):
+    """
+    alpha: B x L x H x W
+    """
+    batchsz, layernum, hei, wid = alpha.shape
+    alphaunfold = torch.nn.Unfold(3, padding=1, stride=1, dilation=1)(alpha.reshape(-1, 1, hei, wid))
+    alphaunfold = alphaunfold.max(dim=1)[0]
+    return alphaunfold.reshape_as(alpha)
+
+
 def visibility_mask(mpi: torch.Tensor):
     alpha = mpi[0, :, -1]
-    blendweight = alpha * torch.cat([torch.cumprod(- torch.flip(alpha, dims=[0]) + 1, dim=0).flip(dims=[0])[1:],
-                                     torch.ones_like(alpha[0:1])], dim=0)
-    mask = alpha * blendweight
-    return mask
+    render_weight = alpha * torch.cat([torch.cumprod(- torch.flip(alpha, dims=[0]) + 1, dim=0).flip(dims=[0])[1:],
+                                       torch.ones_like(alpha[0:1])], dim=0)
+    return render_weight
 
 
 def matplot_mpi(mpi: torch.Tensor, alpha=True, visibility=False, RGBA=False):

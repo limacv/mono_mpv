@@ -180,7 +180,7 @@ class StereoBlur_Seq(Dataset, StereoBlur_Base):
 
         self.augmenter = DataAugmenter(OutputSize, mode=mode)
         self.sequence_length = seq_len
-        self.maxskip_framenum = max(1, max_skip)  # 1 means no skip
+        self.maxskip_framenum = max(2, max_skip)  # 2 means no skip
 
     def __len__(self):
         return len(self.filebase_list)

@@ -5,151 +5,14 @@ import torch.optim
 import torch.nn as nn
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader, Subset, random_split, RandomSampler
-from torch.utils.data.distributed import DistributedSampler
+
 import torch.distributed as torchdist
 import torch.multiprocessing as torchmp
 from torch.nn.parallel import DataParallel
 # from torch.nn.parallel import DistributedDataParallel
 
 from tensorboardX import SummaryWriter
-
-from models.ModelWithLoss import *
-from models.mpi_network import *
-from models.hourglass import Hourglass
-from models.mpv_network import MPVNet
-from models.mpi_flow_network import *
-from models.mpi_utils import save_mpi
-from models.mpifuse_network import *
-from dataset.RealEstate10K import *
-from dataset.StereoBlur import *
-from dataset.WSVD import *
-
-plane_num = 24
-
-
-def select_module(name: str) -> nn.Module:
-    if "MPINet" == name:
-        return MPINet(plane_num)
-    elif "MPINetv2" == name:
-        return MPINetv2(plane_num)
-    elif "hourglass" == name:
-        return Hourglass(plane_num)
-    elif "MPVNet" == name:
-        return MPVNet(plane_num)
-    elif "MPI2InMPF" == name:
-        return MPINet2In(plane_num)
-    elif "MPIReccuNet" == name:
-        return MPIReccuNet(plane_num)
-    elif "MPIRecuFlowNet" == name:
-        return MPIRecuFlowNet(plane_num)
-    elif "Full" == name:
-        return nn.ModuleDict({
-            "MPI": MPINetv2(plane_num),
-            "Fuser": MPIFuser(plane_num)
-        })
-    elif "MPFNet" == name:
-        return nn.ModuleDict({
-            "MPI": MPINetv2(plane_num),
-            "MPF": MPFNet(plane_num)
-        })
-    elif "MPFNetv2" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_FlowGrad(plane_num),
-            "MPF": MPFNet(plane_num)
-        })
-    elif "MPI_FlowGrad" == name:
-        return MPI_FlowGrad(plane_num)
-    elif "Fullv1" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_Fullv1(plane_num),
-            "MPF": MPFNet(plane_num)
-        })
-    else:
-        raise ValueError(f"unrecognized modelin name: {name}")
-
-
-def select_modelloss(name: str):
-    name = name.lower()
-    if "sv" == name:
-        return ModelandSVLoss
-    elif "temporal" == name:
-        return ModelandTimeLoss
-    elif "disp_img" == name:
-        return ModelandDispLoss
-    elif "disp_flow" == name:
-        return ModelandFlowLoss
-    elif "disp_reccu" == name:
-        return ModelandReccuNetLoss
-    elif "disp_mpf" == name:
-        return ModelandMPFLoss
-    elif "disp_flowgrad" == name:
-        return ModelandFlowGradLoss
-    elif "fullv1" == name:
-        return ModelandFullv1Loss
-    else:
-        raise ValueError(f"unrecognized modelloss name: {name}")
-
-
-def select_dataset(name: str):
-    name = name.lower()
-    if "realestate10k_seq" in name:
-        return RealEstate10K_Seq
-    elif "realestate10k_img" in name:
-        return RealEstate10K_Img
-    elif "stereoblur_img" in name:
-        return StereoBlur_Img
-    elif "stereoblur_seq" in name:
-        return StereoBlur_Seq
-    elif "WSVD_img" in name:
-        return WSVD_Img
-    else:
-        return RealEstate10K_Img
-
-
-def mkdir_ifnotexist(path):
-    if not os.path.exists(path):
-        try:
-            os.makedirs(path)
-        except FileExistsError:
-            pass
-
-
-def smart_load_checkpoint(root, cfg, model: nn.Module):
-    """
-    root: root dir of checkpoint file
-    cfgcheckpoint: {prefix: filepath} or filepath
-    model: the loaded model
-    return: begin_epoch
-    """
-    cfgcheckpoint = cfg["check_point"]
-    if not isinstance(cfgcheckpoint, dict):
-        cfgcheckpoint = {"": cfgcheckpoint}
-
-    device = f"cuda:{cfg['local_rank']}" if "local_rank" in cfg.keys() else "cpu"
-
-    # initializing weights
-    initial_weights(model)
-    newstate_dict = model.state_dict()
-    begin_epoch = 0
-    for prefix, path in cfgcheckpoint.items():
-        try:
-            check_point = torch.load(os.path.join(root, path), map_location=device)
-        except FileNotFoundError:
-            print(f"cannot open check point file {path}, initial the model")
-            return begin_epoch
-
-        temp_state_dict = {k: v for k, v in check_point["state_dict"].items() if k.startswith(prefix)}
-        if len(temp_state_dict) == 0:
-            newstate_dict.update(
-                {f"{prefix}" + k_: v_ for k_, v_ in check_point["state_dict"].items()}
-            )
-        else:
-            newstate_dict.update(temp_state_dict)
-        if prefix == "" and "epoch" in check_point.keys():
-            begin_epoch = check_point["epoch"]
-    model.load_state_dict(newstate_dict)
-    print(f"load state dict, epoch starting from: {begin_epoch}")
-    return begin_epoch
+from utils import *
 
 
 def train(cfg: dict):
@@ -185,7 +48,7 @@ def train(cfg: dict):
 
     # evalset = RealEstate10K_Seq(is_train=False, seq_len=cfg["evalset_seq_length"])
     # evalset = StereoBlur_Img(is_train=False)
-    evalset = select_dataset(cfg["evalset"])(is_train=False)
+    evalset = select_dataset(cfg["evalset"], False, cfg)
     validate_gtnum = cfg["validate_num"] if 0 < cfg["validate_num"] < len(evalset) else len(evalset)
 
     datasubset = Subset(evalset, torch.randperm(len(evalset))[:validate_gtnum])
@@ -195,7 +58,7 @@ def train(cfg: dict):
     validate_freq = cfg["valid_freq"]
 
     # trainset = RealEstate10K_Seq(is_train=True, seq_len=cfg["dataset_seq_length"])
-    trainset = select_dataset(cfg["trainset"])(is_train=True)
+    trainset = select_dataset(cfg["trainset"], True, cfg)
     train_report_freq = cfg["train_report_freq"]
     train_num_per_epoch = cfg["sample_num_per_epoch"]
     train_set_inplacement = True

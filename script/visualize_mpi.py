@@ -78,7 +78,7 @@ if __name__ == "__main__":
         while True:
             for i in range(len(frames)):
                 if update:
-                    rgba = torch.tensor(frames[i]).cuda().type(torch.float32) / 255
+                    rgba = frames[i].type(torch.float32) / 255
                     mpi = rgba.reshape(gnhei, imhei, gnwid, imwid, 4)\
                         .permute(0, 2, 4, 1, 3)\
                         .reshape(gnhei * gnwid, 4, imhei, imwid)

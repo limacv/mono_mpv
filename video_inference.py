@@ -1,35 +1,42 @@
-from torchvision.transforms import ToTensor
-
-from trainer import *
+from utils import *
 from models.ModelWithLoss import *
 from models.loss_utils import *
 from models.mpi_utils import *
 from models.flow_utils import *
 import torch.backends.cudnn
 
-path = "./log/checkpoint/fullv1_pretrainmpi_100058_r0.pth"
+path = "./log/checkpoint/fullv22_ini_fullloss_190052_r0.pth"
 # Adjust configurations here ############################################
 state_dict_path = {
-    '': "./log/checkpoint/fullv1_pretrainmpi_100058_r0.pth",
+    '': "./log/checkpoint/fullv22_ini_fullloss_190052_r0.pth",
     # "MPF.": "./log/checkpoint/mpf_bugfix_ord1smth_052107_r0.pth"
 }
-manually_prefix = "debug"  # please change me!!!
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
 video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
-model = select_module("Fullv1").cuda()
-modelloss = select_modelloss("fullv1")(model, {"loss_weights": {}})
+# video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
+model = select_module("Fullv22").cuda()
+modelloss = select_modelloss("fullv2")(model, {"loss_weights": {"dilate_mpfin": True,
+                                                                "alpha2mpf": True,
+                                                                "splat_mode": "x4"}})
+ret_cfg = "debug"
 infer_single_frame = False
 
 save_infer_mpi = True and infer_single_frame
 save_newview = False
-save_mpv = False
+save_disparity = True
+save_mpv = True
 save_mpf = False
 # \Adjust configuration here ############################################
 
 out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
-saveprefix = os.path.basename(state_dict_path['']).split('.')[0] + os.path.basename(video_path).split('.')[0] + manually_prefix
+if "StereoBlur" in video_path:
+    saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
+                 + os.path.basename(video_path).split('.')[0] + ret_cfg
+else:
+    saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
+                 + os.path.basename(os.path.dirname(video_path)).split('.')[0] + ret_cfg
 dispvideo_path = os.path.join(out_prefix, saveprefix + "_disparity.mp4")
 newviewsvideo_path = os.path.join(out_prefix, saveprefix + "_newview.mp4")
 mpiout_path = os.path.join(out_prefix, saveprefix)
@@ -60,14 +67,17 @@ with torch.no_grad():
             break
         hei, wid, _ = img.shape
         if wid > hei * 2:
-            img = img[:, :wid//2]
+            img = img[:, :wid // 2]
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, None, None, 0.5, 0.5)
         hei, wid, _ = img.shape
         img_tensor = ToTensor()(img).cuda()
-        mpi = modelloss.infer_forward(img_tensor)
+        modelloss.last_mpi_warp = None
+        mpi = modelloss.infer_forward(img_tensor, ret_cfg=ret_cfg)
 
+        if mpi is None:
+            continue
         if isinstance(mpi, tuple):
             mpi, mpf = mpi
         if save_mpf:
@@ -106,17 +116,19 @@ with torch.no_grad():
                 cv2.imwrite(newviewsvideo_path + ".jpg", visview)
             break
 
-        if not dispout.isOpened():
-            dispout.open(dispvideo_path, 828601953, 30., (wid, hei), True)
-            if newview_out is not None:
-                newview_out.open(newviewsvideo_path, 828601953, 30., (wid, hei), True)
-        dispout.write(visdisp)
+        if save_disparity:
+            if not dispout.isOpened():
+                dispout.open(dispvideo_path, 828601953, 30., (wid, hei), True)
+                if newview_out is not None:
+                    newview_out.open(newviewsvideo_path, 828601953, 30., (wid, hei), True)
+            dispout.write(visdisp)
         if newview_out is not None:
             newview_out.write(visview)
 
         frameidx += 1
 
     print("\n")
-    dispout.release()
+    if dispout is not None:
+        dispout.release()
     if newview_out is not None:
         newview_out.release()

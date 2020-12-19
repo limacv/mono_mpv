@@ -31,13 +31,13 @@ cfg = {
 
     "trainset": "StereoBlur_seq",
     "evalset": "StereoBlur_seq",
-    "model_name": "Fullv1",
-    "modelloss_name": "fullv1",
+    "model_name": "Fullv22",
+    "modelloss_name": "fullv2",
     "batch_size": 1,
-    "num_epoch": 20000,
-    "savepth_iter_freq": 300,
+    "num_epoch": 25000,
+    "savepth_iter_freq": 500,
     "lr": 1e-4,
-    "check_point": "fullv1_mpilossonly_cont_111421_r0.pth",
+    "check_point": "no.pth",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
@@ -48,11 +48,17 @@ cfg = {
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
         "tempdepth_loss": 0.5,
-        
-        "flow_epe": 1,
-        "flow_smth": 0.1,
-        "flow_smth_ord": 1,
+
+        # "splat_mode": "bilinear",
+        # "dilate_mpfin": True,
+        # "alpha2mpf": True,
+
+        # "flow_epe": 1,
+        # "flow_smth": 0.1,
+        # "flow_smth_ord": 1,
         # "flow_smth_bw": False
+
+        "sflow_loss": 0.1
 
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
@@ -61,7 +67,6 @@ cfg = {
 
 # todo Current Problem:
 #   2. the mpf
-#   1. the temporal still not smooth enough
 
 
 # to be compare:
@@ -69,7 +74,6 @@ cfg = {
 
 # TODO List:
 #   >>> refine the flow
-#   >>> test the flow (forward map from the first image to the last frames and see the temporal effect)
 #   >>> evaluate the temporal smoothness
 #   >>> [opt] think about mpimodel that decomposite the scene into static background and forground
 #   >>> [opt] aggregate more frames
@@ -80,8 +84,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "fullv1_pretrainmpi"
-    cfg["comment"] = "full model, load pretrained model"
+    cfg["id"] = "fullv22_ini_fullloss"
+    cfg["comment"] = "full model of v2.2 pipeline"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

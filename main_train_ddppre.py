@@ -12,7 +12,7 @@ import random
 
 cfg = {
     "local_rank": 0,  # will set later
-    "world_size": 8,
+    "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
     "tensorboard_logdir": "run/",
@@ -20,24 +20,24 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 8,
-    "valid_freq": 300,
-    "train_report_freq": 5,
+    "validate_num": 24,
+    "valid_freq": 500,
+    "train_report_freq": 10,
 
     # about training <<<<<<<<<<<<<<<<
     # comment of current epoch, will print on config.txt
     "id": "",
     "comment": "",
 
-    "trainset": "StereoBlur_seq",
-    "evalset": "StereoBlur_seq",
-    "model_name": "Fullv22",
-    "modelloss_name": "fullv2",
+    "trainset": "mannequinchallenge_seq",
+    "evalset": "mannequinchallenge_seq",
+    "model_name": "Fullv1",
+    "modelloss_name": "fullsvv1",
     "batch_size": 1,
-    "num_epoch": 25000,
-    "savepth_iter_freq": 500,
+    "num_epoch": 40000,
+    "savepth_iter_freq": 300,
     "lr": 1e-4,
-    "check_point": "no.pth",
+    "check_point": "full_Manne_fullloss_160243_r0.pth",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
@@ -45,33 +45,49 @@ cfg = {
         "smooth_flowgrad_loss": 0.05,
         "depth_loss": 3,
 
-        # "pixel_std_loss": 0.5,
-        # "temporal_loss": 0.5,
+        "pixel_std_loss": 0.5,
+        "temporal_loss": 0.5,
         "tempdepth_loss": 0.5,
 
-        # "splat_mode": "bilinear",
-        # "dilate_mpfin": True,
-        # "alpha2mpf": True,
+        "splat_mode": "bilinear",
+        "dilate_mpfin": True,
+        "alpha2mpf": True,
+        # "learmpf": False
 
-        # "flow_epe": 1,
-        # "flow_smth": 0.1,
-        # "flow_smth_ord": 1,
+        "flow_epe": 0.1,
+        "flow_smth": 0.01,
+        "flow_smth_ord": 1,
         # "flow_smth_bw": False
-
-        "sflow_loss": 0.1
 
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
     },
 }
 
+# todo Current Problem:
+#   >>> Dataset: finefuning the WSVD and prepare the 3D Movies dataset from <<one-shot depth estimation>>
+#   >>> Maybe load weight from pretrained depth estimation model
+#   >>> Try:
+#   >>>     mpf: 3D scene flow
+#   >>>     divide the structure and texture
+
+
+# to be compare:
+#   1. end
+
+# TODO List:
+#   >>> evaluate the temporal smoothness
+#   >>> [opt] think about mpimodel that decomposite the scene into static background and forground
+#   >>> [opt] aggregate more frames
+#   >>> [opt] more neat log function
+
 
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "fullv22_ini_nosflowloss"
-    cfg["comment"] = "full model of v2.2 pipeline without scene flow loss"
+    cfg["id"] = "full_Manne_mpiloss_cont"
+    cfg["comment"] = "trained on Mannequin"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

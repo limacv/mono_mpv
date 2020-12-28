@@ -12,7 +12,7 @@ import random
 
 cfg = {
     "local_rank": 0,  # will set later
-    "world_size": 10,
+    "world_size": 8,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
     "tensorboard_logdir": "run/",
@@ -20,60 +20,59 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 24,
-    "valid_freq": 500,
-    "train_report_freq": 10,
+    "validate_num": 8,
+    "valid_freq": 300,
+    "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
     # comment of current epoch, will print on config.txt
     "id": "",
     "comment": "",
 
-    "trainset": "mannequinchallenge_seq",
-    "evalset": "mannequinchallenge_seq",
-    "model_name": "Fullv2",
-    "modelloss_name": "fullsvv2",
+    "trainset": "StereoBlur_seq",
+    "evalset": "StereoBlur_seq",
+    "model_name": "Fullv22",
+    "modelloss_name": "fullv2",
     "batch_size": 1,
-    "num_epoch": 250,
-    "savepth_iter_freq": 300,
+    "num_epoch": 10000,
+    "savepth_iter_freq": 500,
     "lr": 1e-4,
     "check_point": "no.pth",
     "loss_weights": {
-        "pixel_loss_cfg": 'vgg',
-        "pixel_loss": 0.2,
+        "pixel_loss_cfg": 'l1',
+        "pixel_loss": 1,
         "smooth_loss": 0.05,
         "smooth_flowgrad_loss": 0.05,
         "depth_loss": 3,
 
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
-        "tempdepth_loss": 5,
+        "tempdepth_loss": 0.5,
 
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
         # "alpha2mpf": True,
-        # "learmpf": False
 
-        # "flow_epe": 0.1,
-        # "flow_smth": 0.01,
+        # "flow_epe": 1,
+        # "flow_smth": 0.1,
         # "flow_smth_ord": 1,
         # "flow_smth_bw": False
+        "sflow_mode": "backward",
+        "aflow_residual": False,
+        "sflow_loss": 0.1
 
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
     },
 }
 
-# todo Current Problem:
-#   >>> Dataset: finefuning the WSVD dataset, and find more stereo video from youtube/flickr to form a dataset of my own
-
 
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v2_Manne_vgg_optf0"
-    cfg["comment"] = "Pipeline V2 trained on Mannequin"
+    cfg["id"] = "fullv22_aflow_unresidual"
+    cfg["comment"] = "full model of v2.2 pipeline"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

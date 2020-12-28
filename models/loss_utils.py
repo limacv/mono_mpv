@@ -1,4 +1,5 @@
 import torch
+import torchvision
 import torch.nn as nn
 import torch.nn.functional as torchf
 import numpy as np
@@ -50,6 +51,124 @@ class ParamScheduler:
                 return val0 + (val1 - val0) * pct
 
 
+class VGGPerceptualLoss(nn.Module):
+    def __init__(self):
+        super(VGGPerceptualLoss, self).__init__()
+        self.blocks = torch.nn.ModuleList([
+            torchvision.models.vgg16(pretrained=True).features[:4].eval(),
+            torchvision.models.vgg16(pretrained=True).features[4:9].eval(),
+            torchvision.models.vgg16(pretrained=True).features[9:16].eval(),
+            torchvision.models.vgg16(pretrained=True).features[16:23].eval()
+        ])
+        self.mean = torch.nn.Parameter(torch.tensor([0.485, 0.456, 0.406]).view(1,3,1,1), requires_grad=False)
+        self.std = torch.nn.Parameter(torch.tensor([0.229, 0.224, 0.225]).view(1,3,1,1), requires_grad=False)
+        for param in self.parameters():
+            param.requires_grad = False
+
+    def forward(self, im, target):
+        batchsz, cnl, hei, wid = im.shape
+        im = (im - self.mean) / self.std
+        target = (target-self.mean) / self.std
+        loss = torch.tensor([0]).type_as(im)
+        x = torch.stack([im, target], dim=0).reshape(-1, cnl, hei, wid)  # alone batch dim
+        for block in self.blocks:
+            x = block(x)
+            batchsz, cnl, hei, wid = x.shape
+            loss += torchf.l1_loss(x.reshape(2, -1, cnl, hei, wid)[0],
+                                   x.reshape(2, -1, cnl, hei, wid)[1])
+        return loss
+
+
+class SSIMLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.patchsz = 2 * 1 + 1
+        self.filter_func = nn.AvgPool2d(self.patchsz, 1, 0)
+
+    def compute_mean(self, _x):
+        return self.filter_func(torchf.pad(_x, [1, 1, 1, 1], 'replicate'))
+
+    def forward(self, x, y):
+        c1 = 0.01 ** 2
+        c2 = 0.03 ** 2
+        u_x = self.compute_mean(x)
+        u_y = self.compute_mean(y)
+        u_x_u_y = u_x * u_y
+        u_x_u_x = u_x.pow(2)
+        u_y_u_y = u_y.pow(2)
+
+        sigma_x = self.compute_mean(x * x) - u_x_u_x
+        sigma_y = self.compute_mean(y * y) - u_y_u_y
+        sigma_xy = self.compute_mean(x * y) - u_x_u_y
+
+        ssim_n = (2 * u_x_u_y + c1) * (2 * sigma_xy + c2)
+        ssim_d = (u_x_u_x + u_y_u_y + c1) * (sigma_x + sigma_y + c2)
+        ssim = ssim_n / ssim_d
+        ssim = torch.mean(ssim, dim=1)
+        dist = torch.clamp((- ssim + 1.) / 2, 0, 1).mean()
+        return dist
+
+
+class PhotoL1Loss(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, im, im_warp, order=1):
+        assert im.dim() == 4 and im_warp.dim() == 4
+        diff = torch.abs(im - im_warp) + 0.0001
+        diff = torch.sum(diff, dim=1)
+        if order != 1:
+            diff = torch.pow(diff, order)
+        return diff  # * scale
+
+
+# Crecit: https://github.com/simonmeister/UnFlow/blob/master/src/e2eflow/core/losses.py
+class TernaryLoss(nn.Module):
+    def __init__(self, max_distance=1):
+        super().__init__()
+        self.patchsz = 2 * max_distance + 1
+        self.max_dist = max_distance
+
+    def forward(self, im, im_warp):
+        t1 = self._ternary_transform(im)
+        t2 = self._ternary_transform(im_warp)
+        dist = self._hamming_distance(t1, t2)
+        mask = self._valid_mask(im, self.max_dist)
+
+        return dist * mask
+
+    def _ternary_transform(self, image):
+        intensities = self._rgb_to_grayscale(image) * 255
+        out_channels = self.patchsz * self.patchsz
+        w = torch.eye(out_channels).view((out_channels, 1, self.patchsz, self.patchsz))
+        weights = w.type_as(image)
+        patches = torchf.conv2d(intensities, weights, padding=self.max_dist)
+        transf = patches - intensities
+        transf_norm = transf / torch.sqrt(0.81 + torch.pow(transf, 2))
+        return transf_norm
+
+    @staticmethod
+    def _rgb_to_grayscale(image):
+        grayscale = image[:, 0, :, :] * 0.2989 + \
+                    image[:, 1, :, :] * 0.5870 + \
+                    image[:, 2, :, :] * 0.1140
+        return grayscale.unsqueeze(1)
+
+    @staticmethod
+    def _hamming_distance(_t1, _t2):
+        _dist = torch.pow(_t1 - _t2, 2)
+        dist_norm = _dist / (0.1 + _dist)
+        dist_mean = torch.mean(dist_norm, 1)  # instead of sum
+        return dist_mean
+
+    @staticmethod
+    def _valid_mask(t, padding):
+        n, _, h, w = t.size()
+        inner = torch.ones(n, h - 2 * padding, w - 2 * padding).type_as(t)
+        _mask = torchf.pad(inner, [padding] * 4)
+        return _mask
+
+
 def draw_dense_disp(disp: torch.Tensor, scale) -> np.ndarray:
     display = (disp[0].detach() * 255 * scale).type(torch.uint8).cpu().numpy()
     display = cv2.cvtColor(cv2.applyColorMap(display, cv2.COLORMAP_HOT), cv2.COLOR_BGR2RGB)
@@ -79,24 +198,17 @@ def draw_sparse_depth(im: torch.Tensor, poses: torch.Tensor, depth: torch.Tensor
     return cv2.UMat.get(im_np)
 
 
-def photometric_loss(imref, imreconstruct, mode='l1'):
+def select_photo_loss(mode: str) -> nn.Module:
     if mode in ["L1", "l1", "l1_loss", "L1_loss"]:
-        return photo_l1loss(imref, imreconstruct)
+        return PhotoL1Loss()
     elif mode in ["ssim", "SSIM", "ssim_loss", "SSIM_loss"]:
-        return ssim_loss(imref, imreconstruct)
+        return SSIMLoss()
     elif mode in ["ternary", "ternary_loss"]:
-        return ternary_loss(imref, imreconstruct)
+        return TernaryLoss()
+    elif mode in ["vgg", "VGG"]:
+        return VGGPerceptualLoss()
     else:
         raise NotImplementedError(f"loss_utils::{mode} not recognized")
-
-
-def photo_l1loss(im, im_warp, order=1):
-    assert im.dim() == 4 and im_warp.dim() == 4
-    diff = torch.abs(im - im_warp) + 0.0001
-    diff = torch.sum(diff, dim=1)
-    if order != 1:
-        diff = torch.pow(diff, order)
-    return diff  # * scale
 
 
 # from ARFlow
@@ -106,85 +218,6 @@ gaussian_kernel = \
         (0.118095,	0.146293,	0.118095),
         (0.095332,	0.118095,	0.095332),
     )).reshape((1, 1, 3, 3)).type(torch.float32)
-
-
-def ssim_loss(im, im_warp):
-    x, y = im, im_warp
-    # data_cnl = x.shape[1]
-    # global gaussian_kernel
-    # gaussian_kernel = gaussian_kernel.type_as(x).repeat((data_cnl, 1, 1, 1))
-    #
-    # def filter_func(_x):
-    #     return torchf.conv2d(torchf.pad(_x, [1, 1, 1, 1], 'replicate'), gaussian_kernel, groups=data_cnl)
-    patch_size = 2 * 1 + 1
-    filter_func = nn.AvgPool2d(patch_size, 1, 0)
-
-    def compute_mean(_x):
-        return filter_func(torchf.pad(_x, [1, 1, 1, 1], 'replicate'))
-
-    c1 = 0.01 ** 2
-    c2 = 0.03 ** 2
-    u_x = compute_mean(x)
-    u_y = compute_mean(y)
-    u_x_u_y = u_x * u_y
-    u_x_u_x = u_x.pow(2)
-    u_y_u_y = u_y.pow(2)
-
-    sigma_x = compute_mean(x * x) - u_x_u_x
-    sigma_y = compute_mean(y * y) - u_y_u_y
-    sigma_xy = compute_mean(x * y) - u_x_u_y
-
-    ssim_n = (2 * u_x_u_y + c1) * (2 * sigma_xy + c2)
-    ssim_d = (u_x_u_x + u_y_u_y + c1) * (sigma_x + sigma_y + c2)
-    ssim = ssim_n / ssim_d
-    ssim = torch.mean(ssim, dim=1)
-    dist = torch.clamp((- ssim + 1.) / 2, 0, 1)
-    return dist
-
-
-# Crecit: https://github.com/simonmeister/UnFlow/blob/master/src/e2eflow/core/losses.py
-def ternary_loss(im, im_warp, max_distance=1):
-    """
-    measure similarity of im and im_warp
-    :param im: Bx3xHxW
-    :param max_distance:
-    """
-    patch_size = 2 * max_distance + 1
-
-    def _rgb_to_grayscale(image):
-        grayscale = image[:, 0, :, :] * 0.2989 + \
-                    image[:, 1, :, :] * 0.5870 + \
-                    image[:, 2, :, :] * 0.1140
-        return grayscale.unsqueeze(1)
-
-    def _ternary_transform(image):
-        intensities = _rgb_to_grayscale(image) * 255
-        out_channels = patch_size * patch_size
-        w = torch.eye(out_channels).view((out_channels, 1, patch_size, patch_size))
-        weights = w.type_as(im)
-        patches = torchf.conv2d(intensities, weights, padding=max_distance)
-        transf = patches - intensities
-        transf_norm = transf / torch.sqrt(0.81 + torch.pow(transf, 2))
-        return transf_norm
-
-    def _hamming_distance(_t1, _t2):
-        _dist = torch.pow(_t1 - _t2, 2)
-        dist_norm = _dist / (0.1 + _dist)
-        dist_mean = torch.mean(dist_norm, 1)  # instead of sum
-        return dist_mean
-
-    def _valid_mask(t, padding):
-        n, _, h, w = t.size()
-        inner = torch.ones(n, h - 2 * padding, w - 2 * padding).type_as(t)
-        _mask = torchf.pad(inner, [padding] * 4)
-        return _mask
-
-    t1 = _ternary_transform(im)
-    t2 = _ternary_transform(im_warp)
-    dist = _hamming_distance(t1, t2)
-    mask = _valid_mask(im, max_distance)
-
-    return dist * mask
 
 
 def gradient(data, order=1):

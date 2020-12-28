@@ -6,15 +6,15 @@ torch.manual_seed(6666)
 
 def main(kwargs):
     batchsz = kwargs["batchsz"]
-    model = select_module("Fullv22")
+    model = select_module("Fullv2")
 
     smart_load_checkpoint("./log/checkpoint/", kwargs, model)
 
     model.cuda()
-    modelloss = select_modelloss("fullv2")(model, kwargs)
+    modelloss = select_modelloss("fullsvv2")(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
 
-    dataset = select_dataset("stereoblur_seq", True, {})
+    dataset = select_dataset("mannequinchallenge_seq", True, {})
     for i in range(int(14000)):
         datas_all = [[]] * 7
         for dev in range(1):
@@ -59,7 +59,7 @@ main({
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
     "check_point": {
-        "MPI": "no.pth"
+        "": "no.pth"
     },
     "partial_load": "MPI",
     "batchsz": 1,
@@ -68,12 +68,17 @@ main({
     "logdir": "./log/run/debug_svscratch",
     "savefile": "./log/checkpoint/debug_svscratch.pth",
     "loss_weights": {"pixel_loss": 1,
+                     "pixel_loss_cfg": "vgg",
                      "smooth_loss": 0.5,
                      "depth_loss": 0.1,
                      "templ1_loss": 1,
                      "tempdepth_loss": 0.01,
                      "dilate_mpfin": False,
                      "alpha2mpf": True,
+                     "sflow_mode": "backward",
+                     "pipe_optim_frame0": True,
+                     "aflow_residual": True,
+                     "aflow_includeself": False,
                      "flow_epe": 0.1,
                      "flow_smth": 0.1,
                      "sflow_loss": 0.1,

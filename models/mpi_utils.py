@@ -122,14 +122,14 @@ def alpha2mpi(alphas: torch.Tensor, fg: torch.Tensor, bg: torch.Tensor, bg_pct=1
     if blend_weight.dim() == 4:
         blend_weight = blend_weight.unsqueeze(2)
 
-    if fg.dim() == 3:
+    if fg.dim() == 4:  # layer dim
         fg = fg.unsqueeze(1)
-    if bg.dim() == 3:
+    if bg.dim() == 4:  # layer dim
         bg = bg.unsqueeze(1)
     if bg_pct != 1.:
         bg = bg * bg_pct + fg * (1. - bg_pct)
 
-    rgb = blend_weight * fg.unsqueeze(1) + (-blend_weight + 1.) * bg.unsqueeze(1)
+    rgb = blend_weight * fg + (-blend_weight + 1.) * bg
     mpi = torch.cat([rgb, alphas.unsqueeze(2)], dim=2)
     return mpi
 
@@ -365,22 +365,22 @@ def shift_newview(mpi: torch.Tensor, disparities: torch.Tensor, ret_mask=False, 
         return overcompose(mpi_warp, ret_mask=ret_mask)
 
 
-def warp_flow(mpi: torch.Tensor, mpf: torch.Tensor, offset=None):
+def warp_flow(content: torch.Tensor, flow: torch.Tensor, offset=None):
     """
-    mpi: [..., cnl, H, W]
-    mpf: [..., 2, H, W]
+    content: [..., cnl, H, W]
+    flow: [..., 2, H, W]
     """
-    assert mpi.dim() == mpf.dim()
-    orishape = mpi.shape
-    cnl, hei, wid = mpi.shape[-3:]
-    mpi = mpi.reshape(-1, cnl, hei, wid)
-    mpf = mpf.reshape(-1, 2, hei, wid).permute(0, 2, 3, 1)
+    assert content.dim() == flow.dim()
+    orishape = content.shape
+    cnl, hei, wid = content.shape[-3:]
+    mpi = content.reshape(-1, cnl, hei, wid)
+    flow = flow.reshape(-1, 2, hei, wid).permute(0, 2, 3, 1)
 
     if offset is None:
         y, x = torch.meshgrid([torch.arange(hei), torch.arange(wid)])
         x, y = x.type_as(mpi), y.type_as(mpi)
         offset = torch.stack([x, y], dim=-1)
-    grid = offset.reshape(1, hei, wid, 2) + mpf
+    grid = offset.reshape(1, hei, wid, 2) + flow
     normanator = torch.tensor([(wid - 1) / 2, (hei - 1) / 2]).reshape(1, 1, 1, 2).type_as(grid)
     warpped = torchf.grid_sample(mpi, grid / normanator - 1.)
     return warpped.reshape(orishape)
@@ -492,23 +492,27 @@ def matplot_mpi(mpi: torch.Tensor, alpha=True, visibility=False, RGBA=False):
     plt.show()
 
 
-def matplot_img(img: torch.Tensor):
+def matplot_img(img):
     import matplotlib.pyplot as plt
     plt.figure()
-    if img.dim() == 4:
-        img = img[0]
-    if img.shape[0] == 3 or img.shape[0] == 4:
-        img = img.permute(1, 2, 0)
-    elif img.shape[0] == 1:
-        img = img[0]
-    plt.imshow(img.detach().cpu())
+    if isinstance(img, torch.Tensor):
+        if img.dim() == 4:
+            img = img[0]
+        if img.shape[0] == 3 or img.shape[0] == 4:
+            img = img.permute(1, 2, 0)
+        elif img.shape[0] == 1:
+            img = img[0]
+        img = img.detach().cpu()
+    elif isinstance(img, np.ndarray):
+        pass
+    plt.imshow(img)
     plt.show()
 
 
-def matplot_flow(flow: torch.Tensor):
+def matplot_flow(flow: torch.Tensor, maxflow=None):
     import matplotlib.pyplot as plt
     plt.figure()
-    vis = flow_to_png_middlebury(flow[0].detach().cpu().numpy())
+    vis = flow_to_png_middlebury(flow[0].detach().cpu().numpy(), maxflow=maxflow)
     plt.imshow(vis)
     plt.show()
 

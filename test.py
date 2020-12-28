@@ -1,4 +1,3 @@
-from dataset.WSVD import WSVD_Img
 from dataset.StereoBlur import *
 from dataset.MannequinChallenge import *
 from models.flow_utils import *

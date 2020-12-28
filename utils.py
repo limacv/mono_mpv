@@ -9,7 +9,6 @@ from models.hourglass import *
 from dataset.MannequinChallenge import *
 from dataset.RealEstate10K import *
 from dataset.StereoBlur import *
-from dataset.WSVD import *
 
 from models.ModelWithLoss import *
 
@@ -57,7 +56,7 @@ def select_module(name: str) -> nn.Module:
         return nn.ModuleDict({
             "MPI": MPI_alpha(plane_num),
             "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": AMPFNetAIn(plane_num)
+            "AppearanceFlow": AMPFNetAIn2D(plane_num)
         })
     elif "Fullv21" == name:
         return nn.ModuleDict({
@@ -71,6 +70,24 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": SceneFlowNet(),
             "AppearanceFlow": ASPFNetDIn()
         })
+    elif "Fullv220" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_alpha(plane_num),
+            "SceneFlow": SceneFlowNet(),
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
+    elif "Fullv221" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_alpha(plane_num),
+            "SceneFlow": SceneFlowNet(),
+            "AppearanceFlow": ASPFNetWithMaskInOut()
+        })
+    elif "Fullv2" == name:  # the ultimate model
+        return nn.ModuleDict({
+            "MPI": MPI_alpha(plane_num),
+            "SceneFlow": SceneFlowNet(),
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
@@ -81,16 +98,14 @@ def select_modelloss(name: str):
         return ModelandSVLoss
     elif "disp_img" == name:
         return ModelandDispLoss
-    elif "disp_mpf" == name:
-        return ModelandMPFLoss
-    elif "disp_flowgrad" == name:
-        return ModelandFlowGradLoss
     elif "fullv1" == name:
         return ModelandFullv1Loss
     elif "fullsvv1" == name:
         return ModelandFullSVv1Loss
     elif "fullv2" == name:
         return PipelineV2
+    elif "fullsvv2" == name:
+        return PipelineV2SV
     else:
         raise ValueError(f"unrecognized modelloss name: {name}")
 
@@ -162,6 +177,8 @@ def smart_load_checkpoint(root, cfg, model: nn.Module):
             newstate_dict.update(temp_state_dict)
         if prefix == "" and "epoch" in check_point.keys():
             begin_epoch = check_point["epoch"]
+        if "cfg" in check_point.keys():
+            print(f"load checkpoint {path} with config: \n{check_point['cfg']}\n")
     model.load_state_dict(newstate_dict)
     print(f"load state dict, epoch starting from: {begin_epoch}")
     return begin_epoch

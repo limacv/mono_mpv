@@ -152,59 +152,57 @@ class MPFNet(nn.Module):
         nn.init.constant_(self.output.bias, 0)
 
 
-class AMPFNetAIn(nn.Module):
+class AMPFNetAIn2D(nn.Module):
     """
     Appearance Multiplane flow with alpha input
     alpha input
     Multi plane flow input, output multiplane flow
     """
+
     def __init__(self, mpi_layers):
         self.num_layers = mpi_layers
         super().__init__()
         self.down = nn.MaxPool2d(2, ceil_mode=True)
         self.up = up
         self.down1 = conv(self.num_layers + 2, 64, 5)
-        self.down1a = conv(64, 64, 3)
-        self.down1b = conv(64, 64, 3, stride=2)
-        self.down2 = conv(64, 64, 3)
-        self.down2b = conv(64, 64, 3, stride=2)
-        self.down3 = conv(64, 64, 3)
-        self.down3b = conv(64, 128, 3, stride=2)
-        self.down4 = conv(128, 128, 3)
-        self.down4b = conv(128, 256, 3, stride=2)
-        self.down5 = conv(256, 256, 3)
-        self.down5b = conv(256, 256, 3, stride=2)
-        self.mid = conv(256, 256, 3)
-        self.up4 = conv(256, 128, 3)
-        self.up4b = conv(128, 64, 3)
-        self.up3 = conv(64, 64, 3)
-        self.up3b = conv(64, 64, 3)
-        self.up2 = conv(64, 64, 3)
+        self.down1b = conv(64, 64, 5)
+        self.down2 = conv(64, 64, 5)
+        self.down2b = conv(64, 64, 5)
+        self.down3 = conv(64, 128, 3)
+        self.down3b = conv(128, 128, 3)
+        self.down4 = conv(128, 256, 3)
+        self.down4b = conv(256, 384, 3)
+        self.mid1 = conv(384, 384, 3)
+        self.mid2 = conv(384, 384, 3)
+        self.up4 = conv(384 + 384, 256, 3)
+        self.up4b = conv(256, 256, 3)
+        self.up3 = conv(256 + 128, 128, 3)
+        self.up3b = conv(128, 128, 3)
+        self.up2 = conv(128 + 64, 64, 3)
         self.up2b = conv(64, 64, 3)
-        self.up1 = conv(64, 64, 3)
-        self.output = nn.Conv2d(64, self.num_layers * 2, 3, padding=1)
+        self.up1 = conv(64 + 64, 64, 3)
+        self.up1b = conv(64, 64, 3)
+        self.output = nn.Conv2d(64, 2 * self.num_layers, 3, padding=1)
 
     @staticmethod
     def shapeto(x, tar):
         return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
 
-    def forward(self, flow, disp):
-        if disp.dim() == 3:
-            disp = disp.unsqueeze(1)
-        x = torch.cat([flow, disp], dim=1)
-        down1 = self.down1b(self.down1a(self.down1(x)))
-        down2 = self.down2b(self.down2(down1))
-        down3 = self.down3b(self.down3(down2))
-        down4 = self.down4b(self.down4(down3))
-        down5 = self.down5b(self.down5(down4))
-        down6 = self.up(self.mid(down5))
-        x = self.up(self.up4b(self.up4(down6)))
-        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down5), dim=1))))
-        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down4), dim=1))))
-        x = self.up(self.up1(torch.cat(self.shapeto(x, down3), dim=1)))
-        x = self.post1(torch.cat(self.shapeto(x, down1), dim=1))
-        x = self.output(x)
-        return x
+    def forward(self, flow, alphas):
+        batchsz, _, hei, wid = flow.shape
+        if alphas.dim() == 5:
+            alphas = alphas.squeeze(2)
+        x = torch.cat([flow, alphas], dim=1)
+        down1 = self.down1b(self.down1(x))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        down4 = self.down4b(self.down4(self.down(down3)))
+        x = self.up(self.mid2(self.mid1(self.down(down4))))
+        x = self.up(self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.output(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
+        return x.reshape(batchsz, self.num_layers, 2, hei, wid)
 
     def initial_weights(self):
         for layer in self.modules():
@@ -229,47 +227,43 @@ class ASPFNetAIn(nn.Module):
         super().__init__()
         self.down = nn.MaxPool2d(2, ceil_mode=True)
         self.up = up
-        self.down1 = conv(2 + 1, 32, 5)
-        self.down1a = conv(32, 32, 3)
-        self.down1b = conv(32, 64, 3, stride=2)
-        self.down2 = conv(64, 64, 3)
-        self.down2b = conv(64, 64, 3, stride=2)
-        self.down3 = conv(64, 64, 3)
-        self.down3b = conv(64, 128, 3, stride=2)
-        self.down4 = conv(128, 128, 3)
-        self.down4b = conv(128, 256, 3, stride=2)
-        self.down5 = conv(256, 256, 3)
-        self.down5b = conv(256, 256, 3, stride=2)
-        self.mid = conv(256, 256, 3)
-        self.up4 = conv(256, 128, 3)
-        self.up4b = conv(128, 64, 3)
-        self.up3 = conv(64, 64, 3)
-        self.up3b = conv(64, 32, 3)
-        self.up2 = conv(32, 32, 3)
-        self.up2b = conv(32, 32, 3)
-        self.up1 = conv(32, 32, 3)
+        self.down1 = conv(self.num_layers + 2, 32, 5)
+        self.down1b = conv(32, 32, 5)
+        self.down2 = conv(32, 64, 5)
+        self.down2b = conv(64, 64, 5)
+        self.down3 = conv(64, 128, 3)
+        self.down3b = conv(128, 128, 3)
+        self.down4 = conv(128, 256, 3)
+        self.down4b = conv(256, 384, 3)
+        self.mid1 = conv(384, 384, 3)
+        self.mid2 = conv(384, 384, 3)
+        self.up4 = conv(384 + 384, 256, 3)
+        self.up4b = conv(256, 256, 3)
+        self.up3 = conv(256 + 128, 128, 3)
+        self.up3b = conv(128, 128, 3)
+        self.up2 = conv(128 + 64, 64, 3)
+        self.up2b = conv(64, 64, 3)
+        self.up1 = conv(64 + 32, 64, 3)
+        self.up1b = conv(64, 32, 3)
         self.output = nn.Conv2d(32, 2, 3, padding=1)
 
     @staticmethod
     def shapeto(x, tar):
         return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
 
-    def forward(self, flow, disp):
-        if disp.dim() == 3:
-            disp = disp.unsqueeze(1)
-        x = torch.cat([flow, disp], dim=1)
-        down1 = self.down1b(self.down1a(self.down1(x)))
-        down2 = self.down2b(self.down2(down1))
-        down3 = self.down3b(self.down3(down2))
-        down4 = self.down4b(self.down4(down3))
-        down5 = self.down5b(self.down5(down4))
-        down6 = self.up(self.mid(down5))
-        x = self.up(self.up4b(self.up4(down6)))
-        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down5), dim=1))))
-        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down4), dim=1))))
-        x = self.up(self.up1(torch.cat(self.shapeto(x, down3), dim=1)))
-        x = self.post1(torch.cat(self.shapeto(x, down1), dim=1))
-        x = self.output(x)
+    def forward(self, flow, alphas):
+        if alphas.dim() == 5:
+            alphas = alphas.squeeze(2)
+        x = torch.cat([flow, alphas], dim=1)
+        down1 = self.down1b(self.down1(x))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        down4 = self.down4b(self.down4(self.down(down3)))
+        x = self.up(self.mid2(self.mid1(self.down(down4))))
+        x = self.up(self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.output(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
         return x
 
     def initial_weights(self):
@@ -342,6 +336,144 @@ class ASPFNetDIn(nn.Module):
 
         nn.init.xavier_normal_(self.output.weight)
         nn.init.constant_(self.output.bias, 0)
+
+
+class ASPFNetWithMaskInOut(nn.Module):
+    """
+    Appearance Multiplane flow with disparity input
+    alpha input
+    Multi plane flow input, output single plane appearance flow
+    in: B x 3 (dx, dy, alpha) x H x W
+    """
+    def __init__(self):
+        super().__init__()
+        self.down = nn.MaxPool2d(2, ceil_mode=True)
+        self.up = up
+        self.down1 = conv(2 + 1 + 1, 32, 5)
+        self.down1b = conv(32, 64, 5)
+        self.down2 = conv(64, 64, 5)
+        self.down2b = conv(64, 64, 5)
+        self.down3 = conv(64, 128, 3)
+        self.down3b = conv(128, 128, 3)
+        self.down4 = conv(128, 256, 3)
+        self.down4b = conv(256, 384, 3)
+        self.mid1 = conv(384, 384, 3)
+        self.mid2 = conv(384, 384, 3)
+        self.up4 = conv(384 + 384, 256, 3)
+        self.up4b = conv(256, 256, 3)
+        self.up3 = conv(256 + 128, 128, 3)
+        self.up3b = conv(128, 128, 3)
+        self.up2 = conv(128 + 64, 64, 3)
+        self.up2b = conv(64, 64, 3)
+        self.up1 = conv(64 + 64, 32, 3)
+        self.up1b = conv(32, 32, 3)
+        self.output = nn.Conv2d(32, 2, 3, padding=1)
+        self.outputma = nn.Sequential(
+            nn.Conv2d(32, 1, 3, padding=1),
+            nn.Sigmoid()
+        )
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, flow, disp, mask=None):
+        if disp.dim() == 3:
+            disp = disp.unsqueeze(1)
+        if mask is None:
+            mask = torch.zeros_like(disp)
+        elif mask.dim() == 3:
+            mask = mask.unsqueeze(1)
+        x = torch.cat([flow, disp, mask], dim=1)
+        down1 = self.down1b(self.down1(x))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        down4 = self.down4b(self.down4(self.down(down3)))
+        x = self.up(self.mid2(self.mid1(self.down(down4))))
+        x = self.up(self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1)))
+        return self.output(x), self.outputma(x)
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.output.weight)
+        nn.init.constant_(self.output.bias, 0)
+        nn.init.xavier_normal_(self.outputma[0].weight)
+        nn.init.constant_(self.outputma[0].bias, 0)
+
+
+class ASPFNetWithMaskOut(nn.Module):
+    """
+    Appearance Multiplane flow with disparity input
+    alpha input
+    Multi plane flow input, output single plane appearance flow
+    in: B x 3 (dx, dy, alpha) x H x W
+    """
+    def __init__(self):
+        super().__init__()
+        self.down = nn.MaxPool2d(2, ceil_mode=True)
+        self.up = up
+        self.down1 = conv(2 + 1, 32, 5)
+        self.down1b = conv(32, 64, 5)
+        self.down2 = conv(64, 64, 5)
+        self.down2b = conv(64, 64, 5)
+        self.down3 = conv(64, 128, 3)
+        self.down3b = conv(128, 128, 3)
+        self.down4 = conv(128, 256, 3)
+        self.down4b = conv(256, 384, 3)
+        self.mid1 = conv(384, 384, 3)
+        self.mid2 = conv(384, 384, 3)
+        self.up4 = conv(384 + 384, 256, 3)
+        self.up4b = conv(256, 256, 3)
+        self.up3 = conv(256 + 128, 128, 3)
+        self.up3b = conv(128, 128, 3)
+        self.up2 = conv(128 + 64, 64, 3)
+        self.up2b = conv(64, 64, 3)
+        self.up1 = conv(64 + 64, 32, 3)
+        self.up1b = conv(32, 32, 3)
+        self.output = nn.Conv2d(32, 2, 3, padding=1)
+        self.outputma = nn.Sequential(
+            nn.Conv2d(32, 1, 3, padding=1),
+            nn.Sigmoid()
+        )
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, flow, disp):
+        if disp.dim() == 3:
+            disp = disp.unsqueeze(1)
+        x = torch.cat([flow, disp], dim=1)
+        down1 = self.down1b(self.down1(x))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        down4 = self.down4b(self.down4(self.down(down3)))
+        x = self.up(self.mid2(self.mid1(self.down(down4))))
+        x = self.up(self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1)))
+        return self.output(x), self.outputma(x)
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.output.weight)
+        nn.init.constant_(self.output.bias, 0)
+        nn.init.xavier_normal_(self.outputma[0].weight)
+        nn.init.constant_(self.outputma[0].bias, 0)
 
 
 class SceneFlowNet(nn.Module):

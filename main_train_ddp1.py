@@ -31,10 +31,10 @@ cfg = {
 
     "trainset": "StereoBlur_seq",
     "evalset": "StereoBlur_seq",
-    "model_name": "Fullv22",
+    "model_name": "Fullv221",
     "modelloss_name": "fullv2",
     "batch_size": 1,
-    "num_epoch": 25000,
+    "num_epoch": 10000,
     "savepth_iter_freq": 500,
     "lr": 1e-4,
     "check_point": "no.pth",
@@ -57,7 +57,6 @@ cfg = {
         # "flow_smth": 0.1,
         # "flow_smth_ord": 1,
         # "flow_smth_bw": False
-
         "sflow_loss": 0.1
 
         # "sparse_loss": 0.1,
@@ -70,8 +69,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "fullv22_ini_nosflowloss"
-    cfg["comment"] = "full model of v2.2 pipeline without scene flow loss"
+    cfg["id"] = "fullv221_aflow_maskInOut"
+    cfg["comment"] = "full model of v2.2 pipeline"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

@@ -519,7 +519,7 @@ def compute_color(u, v):
     return img
 
 
-def flow_to_png_middlebury(flow: np.ndarray):
+def flow_to_png_middlebury(flow: np.ndarray, maxflow=None):
     """
     Convert flow into middlebury color code image
     :param flow: optical flow map
@@ -540,6 +540,8 @@ def flow_to_png_middlebury(flow: np.ndarray):
 
     rad = np.sqrt(u ** 2 + v ** 2)
     maxrad = max(-1, np.max(rad))
+    if maxflow is not None:
+        maxrad = maxflow
 
     u = u / (maxrad + np.finfo(float).eps)
     v = v / (maxrad + np.finfo(float).eps)

@@ -5,22 +5,44 @@ from models.mpi_utils import *
 from models.flow_utils import *
 import torch.backends.cudnn
 
-path = "./log/checkpoint/fullv22_ini_fullloss_190052_r0.pth"
+
+def str2bool(s_):
+    try:
+        s_ = int(s_)
+    except ValueError:
+        try:
+            s_ = float(s_)
+        except ValueError:
+            if s_ == 'True':
+                s_ = True
+            elif s_ == 'False':
+                s_ = False
+    return s_
+
+
+path = "./log/checkpoint/v2_Manne_vggfull_232334_r0.pth"
 # Adjust configurations here ############################################
 state_dict_path = {
-    '': "./log/checkpoint/fullv22_ini_fullloss_190052_r0.pth",
+    '': "./log/checkpoint/v2_Manne_vggfull_232334_r0.pth",
     # "MPF.": "./log/checkpoint/mpf_bugfix_ord1smth_052107_r0.pth"
 }
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
-video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
-model = select_module("Fullv22").cuda()
-modelloss = select_modelloss("fullv2")(model, {"loss_weights": {"dilate_mpfin": True,
-                                                                "alpha2mpf": True,
-                                                                "splat_mode": "x4"}})
-ret_cfg = "debug"
+video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
+
+# read config from state_dict
+cfg_str = torch.load(state_dict_path[''])["cfg"]
+loss_weights = [i for i in cfg_str.split('\n') if i.startswith("Loss: ")][0][6:].split(', ')
+loss_weights = {i.split(':')[0]: str2bool(i.split(':')[1]) for i in loss_weights}
+modelname = [i for i in cfg_str.split('\n') if i.startswith("Model: ")][0].split(', ')[0][7:]
+modellossname = [i for i in cfg_str.split('\n') if i.startswith("Model: ")][0].split(', ')[1][11:]
+
+model = select_module(modelname).cuda()
+modelloss = select_modelloss(modellossname)(model, {"loss_weights": loss_weights})
+ret_cfg = "aflow_includeself"
 infer_single_frame = False
 
 save_infer_mpi = True and infer_single_frame
@@ -30,7 +52,9 @@ save_mpv = True
 save_mpf = False
 # \Adjust configuration here ############################################
 
-out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
+out_prefix = "Z:\\tmp\\Visual"
+if not os.path.exists(out_prefix):
+    out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
 if "StereoBlur" in video_path:
     saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
                  + os.path.basename(video_path).split('.')[0] + ret_cfg
@@ -63,6 +87,10 @@ with torch.no_grad():
     while True:
         print(f"\r{frameidx}", end='')
         ret, img = cap.read()
+        # if frameidx % 10 != 0:
+        #     frameidx += 1
+        #     continue
+
         if not ret or frameidx > 50:
             break
         hei, wid, _ = img.shape
@@ -73,7 +101,7 @@ with torch.no_grad():
         img = cv2.resize(img, None, None, 0.5, 0.5)
         hei, wid, _ = img.shape
         img_tensor = ToTensor()(img).cuda()
-        modelloss.last_mpi_warp = None
+
         mpi = modelloss.infer_forward(img_tensor, ret_cfg=ret_cfg)
 
         if mpi is None:

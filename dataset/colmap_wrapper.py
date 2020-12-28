@@ -6,6 +6,7 @@ import sys
 from .colmap_io_model import *
 from .colmap_database import *
 from . import colmap_path, is_DEBUG
+import sqlite3
 
 colmap_match_type = "exhaustive_matcher"
 
@@ -27,6 +28,28 @@ def run_colmap(basedir, pipeline=("feature", "match", "mapper"), **kwargs):
     tmp_model_path = os.path.join(basedir, "sparse", "tmp")
     out_model_path = os.path.join(basedir, "sparse", "0")
 
+    env_withdll = os.environ.copy()
+    dllpath = os.path.dirname(colmap_path)
+    if "LD_LIBRARY_PATH" in env_withdll:
+        env_withdll["LD_LIBRARY_PATH"] += (':' + dllpath)
+    else:
+        env_withdll["LD_LIBRARY_PATH"] = dllpath
+
+    if "camera" in kwargs.keys() and "images" in kwargs.keys():
+        db = COLMAPDatabase.connect(database_filename)
+        db.create_tables()
+
+        thecamera = kwargs["camera"]
+        modelid = CAMERA_MODEL_NAMES[thecamera.model].model_id
+        cid = db.add_camera(modelid, thecamera.width, thecamera.height, np.array(thecamera.params))
+        assert cid == thecamera.id, "COLMAP camera id error when creating database"
+
+        for img_ in kwargs["images"]:
+            iid = db.add_image(img_.name, cid)
+            assert iid == img_.id, "COLMAP image id error when creating database"
+        db.commit()
+        db.close()
+
     if "feature" in pipeline:
         feature_extractor_args = [
             colmap_path, 'feature_extractor',
@@ -34,9 +57,9 @@ def run_colmap(basedir, pipeline=("feature", "match", "mapper"), **kwargs):
             '--image_path', image_path,
             '--ImageReader.camera_model', 'PINHOLE',
             '--ImageReader.single_camera', '1',
-            # '--SiftExtraction.use_gpu', '0',
+            '--SiftExtraction.use_gpu', '0',
         ]
-        feat_output = (subprocess.check_output(feature_extractor_args, universal_newlines=True))
+        feat_output = (subprocess.check_output(feature_extractor_args, universal_newlines=True, env=env_withdll))
 
         printdbg(feat_output)
         printdbg('Features extracted')
@@ -45,9 +68,10 @@ def run_colmap(basedir, pipeline=("feature", "match", "mapper"), **kwargs):
         exhaustive_matcher_args = [
             colmap_path, colmap_match_type,
             '--database_path', database_filename,
+            "--SiftMatching.use_gpu", '0'
         ]
 
-        match_output = (subprocess.check_output(exhaustive_matcher_args, universal_newlines=True))
+        match_output = (subprocess.check_output(exhaustive_matcher_args, universal_newlines=True, env=env_withdll))
 
         printdbg(match_output)
         printdbg('Features matched')
@@ -57,6 +81,7 @@ def run_colmap(basedir, pipeline=("feature", "match", "mapper"), **kwargs):
             os.makedirs(tmp_model_path)
         if not os.path.exists(out_model_path):
             os.makedirs(out_model_path)
+
         write_cameras_text([kwargs["camera"]], os.path.join(tmp_model_path, "cameras.txt"))
         write_images_text(kwargs["images"], os.path.join(tmp_model_path, "images.txt"))
         write_points3D_text((), os.path.join(tmp_model_path, "points3D.txt"))
@@ -70,7 +95,7 @@ def run_colmap(basedir, pipeline=("feature", "match", "mapper"), **kwargs):
                 '--output_path', out_model_path,
                 '--Mapper.extract_colors', '0',
             ]
-            trian_output = (subprocess.check_output(triangulator_args, universal_newlines=True))
+            trian_output = (subprocess.check_output(triangulator_args, universal_newlines=True, env=env_withdll))
 
             printdbg(trian_output)
             printdbg('Triangulartor succeed')
@@ -88,7 +113,7 @@ def run_colmap(basedir, pipeline=("feature", "match", "mapper"), **kwargs):
                 '--BundleAdjustment.refine_principal_point', '1',
             ]
 
-            ba_output = (subprocess.check_output(ba_args, universal_newlines=True))
+            ba_output = (subprocess.check_output(ba_args, universal_newlines=True, env=env_withdll))
 
             printdbg(ba_output)
 
@@ -108,7 +133,7 @@ def run_colmap(basedir, pipeline=("feature", "match", "mapper"), **kwargs):
             '--Mapper.extract_colors', '0',
         ]
 
-        map_output = (subprocess.check_output(mapper_args, universal_newlines=True))
+        map_output = (subprocess.check_output(mapper_args, universal_newlines=True, env=env_withdll))
 
         printdbg(map_output)
 
@@ -120,7 +145,7 @@ def run_colmap(basedir, pipeline=("feature", "match", "mapper"), **kwargs):
             '--output_type', 'TXT',
         ]
 
-        converter_output = (subprocess.check_output(converter_args, universal_newlines=True))
+        converter_output = (subprocess.check_output(converter_args, universal_newlines=True, env=env_withdll))
 
         printdbg('Txt model converted')
         printdbg(converter_output)
@@ -128,5 +153,3 @@ def run_colmap(basedir, pipeline=("feature", "match", "mapper"), **kwargs):
     printdbg('Sparse map created')
     if "remove_database" in kwargs.keys() and kwargs["remove_database"]:
         os.remove(database_filename)
-
-

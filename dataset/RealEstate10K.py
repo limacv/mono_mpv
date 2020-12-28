@@ -177,7 +177,8 @@ class RealEstate10K_Base:
             for image_name in image_list:
                 img = cv2.imread(image_name)
                 if not videoout.isOpened():
-                    videoout.open(video_trim_path, 828601953, 30,
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    videoout.open(video_trim_path, fourcc, 30,
                                   (img.shape[1], img.shape[0]), True)
                     if not videoout.isOpened():
                         print(f"RealEstate10K: seems not support video encoder")
@@ -197,11 +198,14 @@ class RealEstate10K_Base:
         col_model_root = self.colmap_model_path(file_base)
 
         colcameras, colimages, colpoints3D = read_model(col_model_root, ".bin")
-
+        timestamps = [colimages[i].name for i in range(1, len(colimages) + 1)]
+        if sorted(timestamps) != timestamps:
+            print(f"RealEstate10K: {file_base} has incorrect image order in colmodel")
+            return False
         framenum = len(colimages)
         # condition1: number of frames shouldn't be too little
         # -----------------------------------------------------
-        if framenum < 15:
+        if framenum < 12:
             if verbose:
                 print(f"RealEstate10K: too little frame ({framenum} frames)")
             return False
@@ -214,7 +218,7 @@ class RealEstate10K_Base:
         pt3ds = np.array(pt3ds)
         # condition2: number of points shouldn't be too little
         # ---------------------------------------------------
-        if ptnum < 2500:
+        if ptnum < 2100:
             if verbose:
                 print(f"RealEstate10K: too little 3d points ({ptnum} points)")
             return False
@@ -227,7 +231,7 @@ class RealEstate10K_Base:
         travel_distance = np.linalg.norm(campt3d[1:] - campt3d[:-1], axis=-1).sum()
         # condition3: camera position should be large enough
         # ---------------------------------------------------
-        if travel_distance < 1.3:
+        if travel_distance < 1.2:
             if verbose:
                 print(f"RealEstate10K: too little travel distance ({travel_distance})")
                 return False
@@ -238,7 +242,7 @@ class RealEstate10K_Base:
         abc /= np.linalg.norm(abc)
         dist2plane = pt3ds @ abc
         zs_std = np.std(dist2plane)
-        if zs_std < 0.7:
+        if zs_std < 0.6:
             if verbose:
                 print(f"RealEstate10K: z direction std: ({zs_std})")
                 return False

@@ -31,10 +31,10 @@ cfg = {
 
     "trainset": "StereoBlur_seq",
     "evalset": "StereoBlur_seq",
-    "model_name": "Fullv22",
+    "model_name": "Fullv2",
     "modelloss_name": "fullv2",
     "batch_size": 1,
-    "num_epoch": 25000,
+    "num_epoch": 10000,
     "savepth_iter_freq": 500,
     "lr": 1e-4,
     "check_point": "no.pth",
@@ -57,7 +57,7 @@ cfg = {
         # "flow_smth": 0.1,
         # "flow_smth_ord": 1,
         # "flow_smth_bw": False
-
+        # "aflow_includeself": True,
         "sflow_loss": 0.1
 
         # "sparse_loss": 0.1,
@@ -65,26 +65,27 @@ cfg = {
     },
 }
 
-# todo Current Problem:
-#   2. the mpf
 
+# TODO Problems:
+#   1. temporal consistency when training in large dataset
+#   2. inpainting performance (pending to be test)
 
-# to be compare:
-#   1. end
-
-# TODO List:
-#   >>> refine the flow
-#   >>> evaluate the temporal smoothness
-#   >>> [opt] think about mpimodel that decomposite the scene into static background and forground
-#   >>> [opt] aggregate more frames
-#   >>> [opt] more neat log function
+# TODO
+#   \code
+#   >>> Toward more than 2 neighbor frames (think one way to select best neighbors)
+#   >>> handle the repeative texture in the boundary
+#   >>> Different settings that have tried in small dataset
+#   >>> ready for the evaluating metric!!!!!
+#   \paper
+#   >>> prepare evaluation dataset that can be compared, as well as different evaluating metric
+#   >>> read papers and find works that can be compared and reproduce those
 
 
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "fullv22_ini_fullloss"
+    cfg["id"] = "fullv220_aflow_maskOut"
     cfg["comment"] = "full model of v2.2 pipeline"
 
     parser = argparse.ArgumentParser()

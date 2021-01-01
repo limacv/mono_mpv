@@ -1318,12 +1318,13 @@ class PipelineV2(nn.Module):
             )
             intermediates["disp_warp"].append(disp_warp)
 
+        # scale and shift invariant
         # with torch.no_grad():  # compute scale
         disp_diffs = [
             disp_out[i] / (torch.abs(disp_gts[:, i]) + 0.0001)
             for i in range(framenum - 2)
         ]
-        # currently use first frame to compute scale
+        # currently use first frame to compute scale and shift
         scale = torch.exp((torch.log(disp_diffs[0]) * certainty_maps[:, 0]).sum(dim=[-1, -2]) / certainty_norm[:, 0])
 
         depth = depth * scale.reshape(-1, 1) * isleft

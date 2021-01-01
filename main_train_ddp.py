@@ -72,9 +72,10 @@ cfg = {
 
 # TODO
 #   \code
-#   >>> Toward more than 2 neighbor frames (think one way to select best neighbors)
-#   >>> handle the repeative texture in the boundary
+#   >>> scale and shift-invariant depth loss
+#   >>> Check what's the problem of the large scale of ManneDataset
 #   >>> Different settings that have tried in small dataset
+#   >>> Toward more than 2 neighbor frames (think one way to select best neighbors)
 #   >>> ready for the evaluating metric!!!!!
 #   \paper
 #   >>> prepare evaluation dataset that can be compared, as well as different evaluating metric

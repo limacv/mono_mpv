@@ -29,13 +29,13 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "mannequinchallenge_seq",
-    "evalset": "mannequinchallenge_seq",
-    "model_name": "Fullv2",
+    "trainset": "mannequin+realestate_seq",
+    "evalset": "mannequin+realestate_seq",
+    "model_name": "Fullv221",
     "modelloss_name": "fullsvv2",
     "batch_size": 1,
-    "num_epoch": 250,
-    "savepth_iter_freq": 300,
+    "num_epoch": 100,
+    "savepth_iter_freq": 500,
     "lr": 1e-4,
     "check_point": "no.pth",
     "loss_weights": {
@@ -47,8 +47,9 @@ cfg = {
 
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
-        "tempdepth_loss": 5,
+        "tempdepth_loss": 1,
 
+        # "pipe_optim_frame0": False,
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
         # "alpha2mpf": True,
@@ -72,8 +73,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v2_Manne_vgg_optf0"
-    cfg["comment"] = "Pipeline V2 trained on Mannequin"
+    cfg["id"] = "v221_M+R_vgg"
+    cfg["comment"] = "Pipeline V221 trained on Mannequin + RealEstate10K"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -84,7 +85,7 @@ def main(cfg):
     # please comment this
     if "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
         print("Debug Mode!!!", flush=True)
-        cfg["comment"] = "Dont't forget to change comment" * 100
+        cfg["comment"] = "Dont't forget to change comment" * 50
         cfg["world_size"] = 2
     else:
         import warnings

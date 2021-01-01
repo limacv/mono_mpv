@@ -1,3 +1,9 @@
+"""
+Stage1 of processing StereVideo
+    Split Scene, pre-filter, and visualize the Scene
+    Source folder: <Dataset_path>/StereVideoGood
+    Destination folder: <Dataset_path>/StereVideo_stage1  &  <Dataset_path>/StereVideo_stage1_vis
+"""
 import sys
 sys.path.append('../')
 from models.LEAStereo_network import LEAStereo
@@ -29,16 +35,16 @@ stereo_blur_videos = glob(os.path.join(StereoVideo_root, "StereoBlur", "*.mp4"))
 wsvd_videos = glob(os.path.join(StereoVideo_root, "WSVD", "*.mp4"))
 youtube_videos = glob(os.path.join(StereoVideo_root, "Youtube", "*.mp4"))
 scene_least_frame_num = 15
-black_frame_threshold = 0.10
+black_frame_threshold = 0.05
 flow_bidirect_thresh = 2
-occ_pct_max = 0.6  # bigger than this is outlier
-vertical_disparity_torl = 2
-vertical_disparity_pct_max = 0.5  # bigger than this is outlier
+nocc_pct_min = 0.5  # smaller than this is outlier
+vertical_disparity_torl = 1.5
+vflow_inlier_pct_min = 0.6  # smaller than this is outlier
 disparity_std_min = 2
 
 
 def print_(*args, **kwargs):
-    print(*args, **kwargs)
+    # print(*args, **kwargs)
     pass
 
 
@@ -60,7 +66,7 @@ def processvideo(videofile, cudaid):
 
     def isnewscene(img_last, img_now):
         # scene detection, always try to promote new scene easily
-        if len(scene_img_list) > 900:
+        if len(scene_img_list) > 1000:
             return True
         if img_now.mean() < black_frame_threshold:
             print(f"New Scene detected due to black frame", end=' ', flush=True)
@@ -78,7 +84,7 @@ def processvideo(videofile, cudaid):
             warp = warp_flow(img_now, flowlastnow, offset=offset)
             l1 = torch.sum((warp - img_last).abs().sum(dim=1) * occlast) / occlast.sum()
             print_(f"l1_value={float(l1):.3f}")
-            if l1 > 0.25:
+            if l1 > 0.3:
                 print(f"New Scene detected due to large l1 value", end=' ', flush=True)
                 return True
             return False
@@ -169,25 +175,27 @@ def processvideo(videofile, cudaid):
         # check whether a bad frame.
         with torch.no_grad():
             flowlr = model(imglt, imgrt)
-            vflowl = (flowlr[:, 1].abs() < vertical_disparity_torl).type(torch.float)
-            vflow_pct = 1 - vflowl.sum() / vflowl.nelement()
-            # condition1: vflow_pct should be relatively low
-            print_(f"vertical_disparity_pct={vflow_pct}")
-            if vflow_pct > vertical_disparity_pct_max:  # bad frame detect
-                print(f"    bad frame due to lots of vertical flow detected")
+            flowrl = model(imgrt, imglt)
+
+            occl = warp_flow(flowrl, flowlr, offset=offset) + flowlr
+            occl = (torch.norm(occl, dim=1) < flow_bidirect_thresh).type(torch.float)
+            noccl_pct = occl.sum() / occl.nelement()
+            # condition1: occl_pct should not be too high
+            print_(f"noccl_pct={noccl_pct}")
+            if noccl_pct < nocc_pct_min:
+                print(f"    bad frame due to large occlusion pct")
                 img_last = None
                 scene_img_list.clear()
                 scene_dispvis_list.clear()
                 continue
 
-            flowrl = model(imgrt, imglt)
-            occl = warp_flow(flowrl, flowlr, offset=offset) + flowlr
-            occl = (torch.norm(occl, dim=1) < flow_bidirect_thresh).type(torch.float)
-            occl_pct = 1 - occl.sum() / occl.nelement()
-            # condition2: occl_pct should not be too high
-            print_(f"occl_pct={occl_pct}")
-            if occl_pct > occ_pct_max:
-                print(f"    bad frame due to large occlusion pct")
+            vflowl = (flowlr[:, 1].abs() < vertical_disparity_torl).type(torch.float)
+            vflow_occ_l = vflowl * occl
+            vflow_pct = vflow_occ_l.sum() / occl.sum()
+            # condition2: vflow_pct should be relatively low
+            print_(f"vertical_disparity_pct={vflow_pct}")
+            if vflow_pct < vflow_inlier_pct_min:  # bad frame detect
+                print(f"    bad frame due to lots of vertical flow detected")
                 img_last = None
                 scene_img_list.clear()
                 scene_dispvis_list.clear()
@@ -219,7 +227,7 @@ def processvideo(videofile, cudaid):
 
 
 if __name__ == "__main__":
-    process_list = wsvd_videos[0::4]
+    process_list = youtube_videos
 
     po = multiprocessing.Pool(10)
     for i, video_file in enumerate(process_list):

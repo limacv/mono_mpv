@@ -11,14 +11,14 @@ def main(kwargs):
     smart_load_checkpoint("./log/checkpoint/", kwargs, model)
 
     model.cuda()
-    modelloss = select_modelloss("fullsvv2")(model, kwargs)
+    modelloss = select_modelloss("fullv2")(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
 
-    dataset = select_dataset("mannequinchallenge_seq", True, {})
+    dataset = select_dataset("stereovideo_seq", True, {})
     for i in range(int(14000)):
         datas_all = [[]] * 7
         for dev in range(1):
-            datas = dataset[0]
+            datas = dataset[-1]
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
@@ -59,9 +59,8 @@ main({
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
     "check_point": {
-        "": "no.pth"
+        "": "v2_Manne_vggfull_232334_r0.pth"
     },
-    "partial_load": "MPI",
     "batchsz": 1,
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",
     # "savefile": "./log/DBG_pretrain.pth",

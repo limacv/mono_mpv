@@ -504,7 +504,12 @@ def matplot_img(img):
             img = img[0]
         img = img.detach().cpu()
     elif isinstance(img, np.ndarray):
-        pass
+        if img.ndim == 4:
+            img = img[0]
+        if img.shape[0] == 3:
+            img = img.transpose(1, 2, 0)
+        elif img.shape[0] == 1:
+            img = img[0]
     plt.imshow(img)
     plt.show()
 

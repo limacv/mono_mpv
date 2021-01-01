@@ -9,6 +9,7 @@ from models.hourglass import *
 from dataset.MannequinChallenge import *
 from dataset.RealEstate10K import *
 from dataset.StereoBlur import *
+from dataset.StereoVideo import *
 
 from models.ModelWithLoss import *
 
@@ -121,17 +122,23 @@ def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
         return StereoBlur_Img(istrain)
     elif "stereoblur_seq" in name:
         return StereoBlur_Seq(istrain, seq_len=seq_len)
+    elif "stereovideo_img" in name:
+        return StereoVideo_Img(istrain)
+    elif "stereovideo_seq" in name:
+        return StereoVideo_Seq(istrain, seq_len=seq_len)
     elif "mannequinchallenge_img" in name:
         return MannequinChallenge_Img(istrain)
     elif "mannequinchallenge_seq" in name:
         return MannequinChallenge_Seq(istrain, seq_len=seq_len)
-    elif "WSVD_img" in name:
-        return WSVD_Img(istrain)
     elif "mannequin+realestate_img" in name:
-        return ConcatDataset([RealEstate10K_Img(istrain), MannequinChallenge_Img(istrain)])
+        dataset = ConcatDataset([RealEstate10K_Img(istrain), MannequinChallenge_Img(istrain)])
+        dataset.name = "mannequin+realestate_img"
+        return dataset
     elif "mannequin+realestate_seq" in name:
-        return ConcatDataset([RealEstate10K_Seq(istrain, seq_len=seq_len),
-                              MannequinChallenge_Seq(istrain, seq_len=seq_len)])
+        dataset = ConcatDataset([RealEstate10K_Seq(istrain, seq_len=seq_len),
+                                 MannequinChallenge_Seq(istrain, seq_len=seq_len)])
+        dataset.name = "mannequin+realestate_seq"
+        return dataset
     else:
         raise NotImplementedError(f"dataset name {name} not recognized")
 

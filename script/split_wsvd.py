@@ -1,3 +1,6 @@
+"""
+Depricated: This script will never be used again
+"""
 import os
 import cv2
 from glob import glob

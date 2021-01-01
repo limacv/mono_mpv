@@ -44,7 +44,8 @@ class RAFTNet(nn.Module):
         coords0 = coords_grid(N, H, W).to(shapeformat.device)
         coords1 = coords_grid(N, H, W).to(shapeformat.device)
         if init_flow is not None:
-            coords1 += init_flow
+            batchsz, cnl, hei, wid = init_flow.shape
+            coords1[:, :, :hei, :wid] += init_flow
 
         # optical flow computed as difference: flow = coords1 - coords0
         return coords0, coords1

@@ -19,7 +19,7 @@ sys.path.append('..')
 
 
 class StereoVideo_Base:
-    def __init__(self, is_train):
+    def __init__(self, is_train, is_test=False):
         self.root = os.path.abspath(StereoVideo_root)
         self.trainstr = "not_specified"
         self.name = "StereoVideo3_Base"
@@ -49,6 +49,8 @@ class StereoVideo_Base:
             self.trainstr = "test"
             self.filebase_list = test_base
 
+        if is_test:
+            self.filebase_list = [n_ for n_ in self.filebase_list if "StereoBlur" in n_]
         self.filebase_list.sort()
 
     @staticmethod
@@ -78,7 +80,7 @@ class StereoVideo_Img(Dataset, StereoVideo_Base):
                 'crop': crop to 512x512 or multiple of 128
         """
         super().__init__(is_train=is_train)
-        self.name = f"StereoBlur_Img_{self.trainstr}"
+        self.name = f"StereoVideo_Img_{self.trainstr}"
 
         print(f"{self.name}: find {len(self.filebase_list)} video files in {self.trainstr} set")
 
@@ -160,11 +162,12 @@ class StereoVideo_Img(Dataset, StereoVideo_Base):
         else:
             refimg = self.totensor(imgr)
             tarimg = self.totensor(imgl)
+            isleft = -isleft
         return refimg, tarimg, torch.tensor(disp), torch.tensor(uncertainty), isleft
 
 
 class StereoVideo_Seq(Dataset, StereoVideo_Base):
-    def __init__(self, is_train, mode='crop', seq_len=4, max_skip=10):
+    def __init__(self, is_train, mode='crop', seq_len=4, max_skip=7, test=False):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         model=  'none': do noting
@@ -172,8 +175,8 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
                 'pad': pad to multiple of 128, usually used in evaluation,
                 'crop': crop to 512x512 or multiple of 128
         """
-        super().__init__(is_train=is_train)
-        self.name = f"StereoBlur_Seq_{self.trainstr}"
+        super().__init__(is_train=is_train, is_test=test)
+        self.name = f"StereoVideo_Seq_{self.trainstr}"
 
         print(f"{self.name}: find {len(self.filebase_list)} video files in {self.trainstr} set")
 
@@ -198,6 +201,14 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
 
         # if still not working, randomly pick another idx untill success
         print(f"{self.name}: cannot load {self.filebase_list[item]} after 3 tries")
+        while datas is None:
+            print(f"{self.name}: try fetch another data", flush=True)
+            try:
+                item = np.random.randint(len(self))
+                datas = self.getitem(item)
+            except Exception as e:
+                print(e)
+                datas = None
         return datas
 
     def getitem(self, idx):
@@ -216,17 +227,17 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
             return None
 
         # random variables
-        if self.trainstr == "train":
-            max_skip = min(self.maxskip_framenum, 1 + (framenum - 1) // (self.sequence_length - 1))
-            skipnum = np.random.randint(1, max_skip)
-            framenum_wid = (self.sequence_length - 1) * skipnum + 1
-            startid = np.random.randint(0, framenum - framenum_wid)
-            retleft = (np.random.randint(2) == 0)
-        else:
-            skipnum = 1
-            framenum_wid = self.sequence_length
-            startid = 1
-            retleft = False
+        # if self.trainstr == "train":
+        max_skip = min(self.maxskip_framenum, 1 + (framenum - 1) // (self.sequence_length - 1))
+        skipnum = np.random.randint(1, max_skip)
+        framenum_wid = (self.sequence_length - 1) * skipnum + 1
+        startid = np.random.randint(0, framenum - framenum_wid + 1)
+        retleft = (np.random.randint(2) == 0)
+        # else:
+        #     skipnum = 1
+        #     framenum_wid = self.sequence_length
+        #     startid = 1
+        #     retleft = False
         idxs = np.arange(startid, startid + framenum_wid, skipnum)
         hei = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         wid = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) // 2
@@ -281,6 +292,7 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
         else:
             refimg = torch.stack(imgrs, dim=0)
             tarimg = torch.stack(imgls, dim=0)
+            isleft = -isleft
         disps = torch.stack(disps, dim=0)
         uncertainty_maps = torch.stack(uncertainty_maps, dim=0)
 

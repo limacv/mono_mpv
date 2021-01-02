@@ -126,6 +126,8 @@ def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
         return StereoVideo_Img(istrain)
     elif "stereovideo_seq" in name:
         return StereoVideo_Seq(istrain, seq_len=seq_len)
+    elif "stereovideo_test" in name:
+        return StereoVideo_Seq(istrain, seq_len=seq_len, test=True)
     elif "mannequinchallenge_img" in name:
         return MannequinChallenge_Img(istrain)
     elif "mannequinchallenge_seq" in name:
@@ -188,5 +190,5 @@ def smart_load_checkpoint(root, cfg, model: nn.Module):
             print(f"load checkpoint {path} with config: \n{check_point['cfg']}\n")
     model.load_state_dict(newstate_dict)
     print(f"load state dict, epoch starting from: {begin_epoch}")
-    return begin_epoch
+    return 0  # begin_epoch
 

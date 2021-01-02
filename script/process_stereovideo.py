@@ -36,6 +36,16 @@ width_0_5_list = [
     "Q4nn6AflK54",
 ]
 
+swap_list = [
+    "DQDfm_1wfPk",
+    "6Zn1JJOdbRg",
+    "FDm66P63tkY",
+    "fqi0U1NlfwY",
+    "GpZK3WWu71I",
+    "Q4nn6AflK54",
+    "SIIhKaNh7Qg",
+    "WSAcvmGZkY8",
+]
 
 """
 =======Requirement=======
@@ -105,7 +115,7 @@ def detect_black_border(img: np.ndarray):
     return left, right, top, bottom
 
 
-def process_clip(videofile, model, scale_func: Callable, fpsx2=False):
+def process_clip(videofile, model, scale_func: Callable, fpsx2=False, needswarp=False):
     totensor = ToTensor()
     basename = os.path.basename(videofile).split('.')[0]
     classname = videofile.split(os.sep)[-2]
@@ -143,7 +153,10 @@ def process_clip(videofile, model, scale_func: Callable, fpsx2=False):
                 continue
         hei, wid = img.shape[:2]
         wid = wid // 2
-        imgl, imgr = img[:, :wid], img[:, wid:]
+        if not needswarp:
+            imgl, imgr = img[:, :wid], img[:, wid:]
+        else:
+            imgr, imgl = img[:, :wid], img[:, wid:]
         # correct scale
         hei, wid = scale_func(hei, wid)
         if wid > 1280:
@@ -254,34 +267,49 @@ def processvideos(video_list, cudaid):
             print(f"||{cudaid}||::process {base_name}", flush=True)
             base_name = base_name.rsplit('_', 1)[0]
 
+            scale_func = (lambda h, w: (h, w))
+            fpsx2 = False
+            need_swap = False
             if "StereoBlur" in video_path:
                 # for stereoblur, need to turn 60fps to 30fps
-                process_clip(video_path, model,
-                             scale_func=(lambda h, w: (h, w)),
-                             fpsx2=True)
-            elif base_name in width_2_list:
-                process_clip(video_path, model,
-                             scale_func=(lambda h, w: (h, w * 2)),
-                             fpsx2=False)
+                fpsx2 = True
+            if base_name in width_2_list:
+                scale_func = (lambda h, w: (h, w * 2))
             elif base_name in width_0_5_list:
-                process_clip(video_path, model,
-                             scale_func=(lambda h, w: (h, w // 2)),
-                             fpsx2=False)
-            else:
-                process_clip(video_path, model,
-                             scale_func=(lambda h, w: (h, w)))
+                scale_func = (lambda h, w: (h, w // 2))
+
+            if base_name in swap_list:
+                need_swap = True
+
+            process_clip(video_path, model,
+                         scale_func=scale_func,
+                         fpsx2=fpsx2,
+                         needswarp=need_swap)
     except Exception as e:
         print(f"Error occur!!! {e}", flush=True)
 
 
 if __name__ == "__main__":
+    # processvideos(["Z:\\dataset\\StereoVideo_stage1\\StereoBlur\\HD720-01-17-02-47.mp4"], 0)
+    video_list0 = [
+        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/DQDfm_1wfPk*.mp4",
+        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/6Zn1JJOdbRg*.mp4",
+        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/FDm66P63tkY*.mp4",
+        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/fqi0U1NlfwY*.mp4",
+        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/GpZK3WWu71I*.mp4",
+        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/Q4nn6AflK54*.mp4",
+        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/SIIhKaNh7Qg*.mp4",
+        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/Youtube/WSAcvmGZkY8*.mp4",
+    ]
+    video_list = []
+    for video in video_list0:
+        video_list += glob(video)
     datasetroot = "/home/lmaag/xgpu-scratch/mali_data"
     num_process = 10
     Source_midfix = "StereoVideo_stage1"
     Dest_midfix = "StereoVideoFinal"
     Source_prefix = os.path.join(datasetroot, Source_midfix)
     Output_prefix = os.path.join(datasetroot, Dest_midfix)
-    processvideos(["Z:\\dataset\\StereoVideo_stage1\\StereoBlur\\HD720-01-17-02-47.mp4"], 0)
 
     stereo_blur_videos = glob(os.path.join(Source_prefix, "StereoBlur", "*.mp4"))
     # wsvd_videos = glob(os.path.join(Source_prefix, "WSVD", "*.mp4"))
@@ -296,7 +324,7 @@ if __name__ == "__main__":
     all_videos = stereo_blur_videos + wsvd_videos + youtube_videos
     po = multiprocessing.Pool(num_process)
     for i in range(num_process):
-        po.apply_async(processvideos, [all_videos[i::num_process], i])
+        po.apply_async(processvideos, [video_list[i::num_process], i])
 
     po.close()
     po.join()

@@ -20,7 +20,7 @@ def str2bool(s_):
     return s_
 
 
-path = "./log/checkpoint/v2_Manne_vggfull_232334_r0.pth"
+path = "./log/checkpoint/v2_M+R_vgg_300010_r0.pth"
 # Adjust configurations here ############################################
 state_dict_path = {
     '': "./log/checkpoint/v2_Manne_vggfull_232334_r0.pth",
@@ -30,8 +30,9 @@ state_dict_path = {
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+video_path = "Z:\\dataset\\StereoVideo_stage1\\StereoBlur\\HD720-05-17-18-55.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
-video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
 
 # read config from state_dict
 cfg_str = torch.load(state_dict_path[''])["cfg"]

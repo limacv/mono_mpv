@@ -45,5 +45,5 @@ elif "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
     MannequinChallenge_root = "/home/jrchan/MALi/dataset/MannequinChallenge"
     StereoBlur_root = "/home/jrchan/MALi/dataset/StereoBlur_test"
     StereoBlur_use_saved_disparity = True
-    StereoVideo_root = "./Warning/StereoVideo/Path/Not/Specified"
+    StereoVideo_root = "/home/jrchan/MALi/dataset/StereoVideoFinal"
 

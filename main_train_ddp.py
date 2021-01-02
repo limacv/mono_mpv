@@ -12,7 +12,7 @@ import random
 
 cfg = {
     "local_rank": 0,  # will set later
-    "world_size": 8,
+    "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
     "tensorboard_logdir": "run/",
@@ -20,7 +20,7 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 8,
+    "validate_num": 10,
     "valid_freq": 300,
     "train_report_freq": 5,
 
@@ -29,25 +29,24 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "StereoBlur_seq",
-    "evalset": "StereoBlur_seq",
+    "trainset": "stereovideo_test",
+    "evalset": "stereovideo_test",
     "model_name": "Fullv2",
     "modelloss_name": "fullv2",
     "batch_size": 1,
-    "num_epoch": 10000,
+    "num_epoch": 4000,
     "savepth_iter_freq": 500,
-    "lr": 1e-4,
-    "check_point": "no.pth",
+    "lr": 2e-5,
+    "check_point": "v2_M+R_vgg_300010_r0.pth",
     "loss_weights": {
-        "pixel_loss_cfg": 'l1',
-        "pixel_loss": 1,
+        "pixel_loss_cfg": 'vgg',
+        "pixel_loss": 0.2,
         "smooth_loss": 0.05,
         "smooth_flowgrad_loss": 0.05,
-        "depth_loss": 3,
-
+        "depth_loss": 5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
-        "tempdepth_loss": 0.5,
+        "tempdepth_loss": 0,
 
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
@@ -58,7 +57,7 @@ cfg = {
         # "flow_smth_ord": 1,
         # "flow_smth_bw": False
         # "aflow_includeself": True,
-        "sflow_loss": 0.1
+        # "sflow_loss": 0.1
 
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
@@ -72,7 +71,6 @@ cfg = {
 
 # TODO
 #   \code
-#   >>> scale and shift-invariant depth loss
 #   >>> Check what's the problem of the large scale of ManneDataset
 #   >>> Different settings that have tried in small dataset
 #   >>> Toward more than 2 neighbor frames (think one way to select best neighbors)
@@ -86,8 +84,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "fullv220_aflow_maskOut"
-    cfg["comment"] = "full model of v2.2 pipeline"
+    cfg["id"] = "v2_sblurtest"
+    cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -100,6 +98,7 @@ def main(cfg):
         print("Debug Mode!!!", flush=True)
         cfg["comment"] = "Dont't forget to change comment" * 100
         cfg["world_size"] = 2
+        cfg["train_report_freq"] = 1
     else:
         import warnings
         warnings.filterwarnings("ignore")

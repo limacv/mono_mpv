@@ -31,18 +31,6 @@ def mkdir_ifnotexist(path):
             pass
 
 
-stereo_blur_videos = glob(os.path.join(StereoVideo_root, "StereoBlur", "*.mp4"))
-wsvd_videos = glob(os.path.join(StereoVideo_root, "WSVD", "*.mp4"))
-youtube_videos = glob(os.path.join(StereoVideo_root, "Youtube", "*.mp4"))
-scene_least_frame_num = 15
-black_frame_threshold = 0.05
-flow_bidirect_thresh = 2
-nocc_pct_min = 0.5  # smaller than this is outlier
-vertical_disparity_torl = 1.5
-vflow_inlier_pct_min = 0.6  # smaller than this is outlier
-disparity_std_min = 2
-
-
 def print_(*args, **kwargs):
     # print(*args, **kwargs)
     pass
@@ -58,7 +46,7 @@ def prepareoffset(wid, hei):
 
 
 def processvideo(videofile, cudaid):
-    outprefix = videofile.replace("StereoVideoGood", "StereoVideo_stage1").split('.')[0]
+    outprefix = videofile.replace(Source_midfix, Target_midfix).split('.')[0]
     if os.path.exists(f"{outprefix}_0.mp4"):
         print(f"GoodNews!!! {videofile} has already be processed!")
         return
@@ -84,7 +72,7 @@ def processvideo(videofile, cudaid):
             warp = warp_flow(img_now, flowlastnow, offset=offset)
             l1 = torch.sum((warp - img_last).abs().sum(dim=1) * occlast) / occlast.sum()
             print_(f"l1_value={float(l1):.3f}")
-            if l1 > 0.3:
+            if l1 > scene_max_l1diff:
                 print(f"New Scene detected due to large l1 value", end=' ', flush=True)
                 return True
             return False
@@ -97,8 +85,8 @@ def processvideo(videofile, cudaid):
 
     totensor = ToTensor()
 
-    outprefix = videofile.replace("StereoVideoGood", "StereoVideo_stage1").split('.')[0]
-    visprefix = videofile.replace("StereoVideoGood", "StereoVideo_stage1_vis").split('.')[0]
+    outprefix = videofile.replace(Source_midfix, Target_midfix).split('.')[0]
+    visprefix = videofile.replace(Source_midfix, f"{Target_midfix}_vis").split('.')[0]
     mkdir_ifnotexist(os.path.dirname(outprefix))
     mkdir_ifnotexist(os.path.dirname(visprefix))
 
@@ -113,7 +101,7 @@ def processvideo(videofile, cudaid):
     scene_dispvis_list = []
     vis_disp_min, vis_disp_max = None, None
     for frameidx in range(1, framecount):
-        print(f"{frameidx}...", end='', flush=True)
+        print(f"{frameidx}.", end='', flush=True)
         ret, img = cap.read()
         if not ret:
             print(f"{videofile} is not normal regarding frame count, ending at frame {frameidx}")
@@ -125,10 +113,11 @@ def processvideo(videofile, cudaid):
             imgr = cv2.resize(imgr, (wid, hei))
         else:
             wid = wid // 2
-        if wid >= 1920:
-            imglt = cv2.resize(imgl, None, None, 0.5, 0.5)
-            imgrt = cv2.resize(imgr, None, None, 0.5, 0.5)
-            hei, wid = imglt.shape[:2]
+        if wid >= 960:
+            hei = int(hei / wid * 960)
+            wid = 960
+            imglt = cv2.resize(imgl, (wid, hei), None, 0.5, 0.5)
+            imgrt = cv2.resize(imgr, (wid, hei), None, 0.5, 0.5)
         else:
             imglt, imgrt = imgl, imgr
         img_vis = imglt
@@ -137,6 +126,16 @@ def processvideo(videofile, cudaid):
         offset = prepareoffset(wid, hei) if offset is None else offset
         if img_last is None:
             img_last = imglt
+            continue
+
+        # ====================================================================
+        # Start main logic
+        # ===================================================================
+        print_(f'black_frame_value={imglt.mean():.2f}')
+        if imglt.mean() < black_frame_threshold:  # black frame
+            scene_img_list.clear()
+            scene_dispvis_list.clear()
+            img_last = None
             continue
 
         if isnewscene(img_last, imglt):
@@ -164,13 +163,6 @@ def processvideo(videofile, cudaid):
                 scene_img_list.clear()
                 scene_dispvis_list.clear()
                 scene_idx += 1
-
-        print_(f'black_frame_value={imglt.mean():.2f}')
-        if imglt.mean() < black_frame_threshold:  # black frame
-            scene_img_list.clear()
-            scene_dispvis_list.clear()
-            img_last = None
-            continue
 
         # check whether a bad frame.
         with torch.no_grad():
@@ -203,7 +195,9 @@ def processvideo(videofile, cudaid):
 
             # condition3: disparity shouldn't be too flat
             displ = flowlr[:, 0]
-            disp_std = torch.std(displ)
+            vmax = torch.kthvalue(displ.reshape(-1), int(displ.nelement() * 0.98))[0]
+            vmin = torch.kthvalue(displ.reshape(-1), int(displ.nelement() * 0.02))[0]
+            disp_std = vmax - vmin
             # condition3: disparity std should not be too low
             print_(f"disparity_std={disp_std}")
             if disp_std < disparity_std_min:
@@ -224,9 +218,31 @@ def processvideo(videofile, cudaid):
         vis_disp = cv2.applyColorMap(vis_disp.cpu().numpy()[0], cv2.COLORMAP_HOT)
         scene_img_list.append(np.hstack([imgl, imgr]))
         scene_dispvis_list.append(np.hstack([vis_disp, img_vis]))
+        img_last = imglt
 
 
 if __name__ == "__main__":
+    dataset_root = "/home/lmaag/xgpu-scratch/mali_data"
+
+    Source_midfix = "StereoVideoGood"
+    Target_midfix = "StereoVideo_stage1v2"
+
+    Source_root = os.path.join(dataset_root, Source_midfix)
+    stereo_blur_videos = glob(os.path.join(Source_root, "StereoBlur", "*.mp4"))
+    wsvd_videos = glob(os.path.join(Source_root, "WSVD", "*.mp4"))
+    youtube_videos = glob(os.path.join(Source_root, "Youtube", "*.mp4"))
+    scene_least_frame_num = 30
+    scene_max_frame_num = 300
+    scene_max_l1diff = 0.25
+    black_frame_threshold = 0.1
+    flow_bidirect_thresh = 1.5
+    nocc_pct_min = 0.5  # smaller than this is outlier
+    vertical_disparity_torl = 1.5
+    vflow_inlier_pct_min = 0.7  # smaller than this is outlier
+    disparity_std_min = 10
+
+    # process_list = sorted(wsvd_videos + youtube_videos)
+    # process_list = process_list[2::3]
     process_list = youtube_videos
 
     po = multiprocessing.Pool(10)

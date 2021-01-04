@@ -21,7 +21,7 @@ cfg = {
 
     "write_validate_result": True,
     "validate_num": 10,
-    "valid_freq": 300,
+    "valid_freq": 200,
     "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
@@ -29,14 +29,14 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "stereovideo_test",
-    "evalset": "stereovideo_test",
+    "trainset": "stereovideo_seq",
+    "evalset": "stereovideo_seq",
     "model_name": "Fullv2",
     "modelloss_name": "fullv2",
     "batch_size": 1,
-    "num_epoch": 4000,
+    "num_epoch": 5000,
     "savepth_iter_freq": 500,
-    "lr": 2e-5,
+    "lr": 1e-4,
     "check_point": "v2_M+R_vgg_300010_r0.pth",
     "loss_weights": {
         "pixel_loss_cfg": 'vgg',
@@ -46,7 +46,7 @@ cfg = {
         "depth_loss": 5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
-        "tempdepth_loss": 0,
+        "tempdepth_loss": 0.2,
 
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
@@ -65,12 +65,13 @@ cfg = {
 }
 
 
-# TODO Problems:
-#   1. temporal consistency when training in large dataset
-#   2. inpainting performance (pending to be test)
-
 # TODO
+#   \problems
+#   >>> temporal consistency when training in large dataset
+#   >>> inpainting performance (pending to be test)
 #   \code
+#   >>> keep tuning the dataset
+#   >>> evaulate while training
 #   >>> Check what's the problem of the large scale of ManneDataset
 #   >>> Different settings that have tried in small dataset
 #   >>> Toward more than 2 neighbor frames (think one way to select best neighbors)
@@ -84,7 +85,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v2_sblurtest"
+    cfg["id"] = "v2_inpaintdepthwarp"
     cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
 
     parser = argparse.ArgumentParser()

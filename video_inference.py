@@ -20,17 +20,17 @@ def str2bool(s_):
     return s_
 
 
-path = "./log/checkpoint/v2_M+R_vgg_300010_r0.pth"
+path = "./log/checkpoint/v2_inpaintdepthwarp_040020_r0.pth"
 # Adjust configurations here ############################################
 state_dict_path = {
-    '': "./log/checkpoint/v2_Manne_vggfull_232334_r0.pth",
+    '': "./log/checkpoint/v2_inpaintdepthwarp_040020_r0.pth",
     # "MPF.": "./log/checkpoint/mpf_bugfix_ord1smth_052107_r0.pth"
 }
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
-# video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
-video_path = "Z:\\dataset\\StereoVideo_stage1\\StereoBlur\\HD720-05-17-18-55.mp4"
+video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+# video_path = "Z:\\dataset\\StereoBlur_processed\\30fps\\HD720-02-15-49-26.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
 
@@ -43,7 +43,7 @@ modellossname = [i for i in cfg_str.split('\n') if i.startswith("Model: ")][0].s
 
 model = select_module(modelname).cuda()
 modelloss = select_modelloss(modellossname)(model, {"loss_weights": loss_weights})
-ret_cfg = "aflow_includeself"
+ret_cfg = "debug"
 infer_single_frame = False
 
 save_infer_mpi = True and infer_single_frame

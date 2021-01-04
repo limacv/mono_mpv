@@ -365,7 +365,7 @@ def shift_newview(mpi: torch.Tensor, disparities: torch.Tensor, ret_mask=False, 
         return overcompose(mpi_warp, ret_mask=ret_mask)
 
 
-def warp_flow(content: torch.Tensor, flow: torch.Tensor, offset=None):
+def warp_flow(content: torch.Tensor, flow: torch.Tensor, offset=None, pad_mode="zeros"):
     """
     content: [..., cnl, H, W]
     flow: [..., 2, H, W]
@@ -382,7 +382,7 @@ def warp_flow(content: torch.Tensor, flow: torch.Tensor, offset=None):
         offset = torch.stack([x, y], dim=-1)
     grid = offset.reshape(1, hei, wid, 2) + flow
     normanator = torch.tensor([(wid - 1) / 2, (hei - 1) / 2]).reshape(1, 1, 1, 2).type_as(grid)
-    warpped = torchf.grid_sample(mpi, grid / normanator - 1.)
+    warpped = torchf.grid_sample(mpi, grid / normanator - 1., padding_mode=pad_mode)
     return warpped.reshape(orishape)
 
 

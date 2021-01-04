@@ -108,30 +108,46 @@ class DataAugmenter:
                            self.cur_crop_top + self.cur_crop_hei, self.cur_crop_left:
                                                                   self.cur_crop_left + self.cur_crop_wid]
 
-    def apply_img(self, img: np.array):
+    def apply_img(self, img: np.array, interpolation="area"):
+        if interpolation == "area":
+            interpolation = cv2.INTER_AREA
+        elif interpolation == "nearest":
+            interpolation = cv2.INTER_NEAREST
+        else:
+            raise NotImplementedError(f"DataAugmenter::{interpolation} not recognized")
+
         if self.mode == "none":
             return img
         elif self.mode == "crop":
             img_crop = self.crop(img)
-            imgout = cv2.resize(img_crop, (self.outwid, self.outhei), interpolation=cv2.INTER_AREA)
+            imgout = cv2.resize(img_crop, (self.outwid, self.outhei), interpolation=interpolation)
             return imgout
         elif self.mode == "resize":
-            imgout = cv2.resize(img, (self.outwid, self.outhei), interpolation=cv2.INTER_AREA)
+            imgout = cv2.resize(img, (self.outwid, self.outhei), interpolation=interpolation)
             return imgout
         else:
             raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")
 
-    def apply_disparity(self, disp: np.array):
+    def apply_disparity(self, disp: np.array, interpolation="area"):
+        if interpolation == "area":
+            interpolation = cv2.INTER_AREA
+        elif interpolation == "nearest":
+            interpolation = cv2.INTER_NEAREST
+        else:
+            raise NotImplementedError(f"DataAugmenter::{interpolation} not recognized")
         if self.mode == "none":
             return disp
         elif self.mode == "crop":
             disp_crop = self.crop(disp)
-            dispout = cv2.resize(disp_crop, (self.outwid, self.outhei), interpolation=cv2.INTER_AREA)
+            dispout = cv2.resize(disp_crop, (self.outwid, self.outhei), interpolation=interpolation)
             # scale the disp value
             dispout *= (self.outwid / self.cur_crop_wid)
             return dispout
         elif self.mode == "resize":
-            dispout = cv2.resize(disp, (self.outwid, self.outhei), interpolation=cv2.INTER_AREA)
+            dispout = cv2.resize(disp, (self.outwid, self.outhei), interpolation=interpolation)
             return dispout
         else:
             raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")
+
+    def apply_disparity_scale(self, disp):
+        return disp * np.array(self.outwid / self.cur_crop_wid, dtype=np.float32)

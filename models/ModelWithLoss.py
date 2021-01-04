@@ -1052,12 +1052,20 @@ class PipelineV2(nn.Module):
         batchsz, framenum, _, heiori, widori = refims.shape
         self.prepareoffset(widori, heiori)
         layernum = self.mpimodel.num_layers
+        bfnum_1 = batchsz * (framenum - 1)
+        bfnum_2 = batchsz * (framenum - 2)
         with torch.no_grad():
-            flows_f = self.flow_estim(refims[:, :2].reshape(batchsz * 2, 3, heiori, widori),
-                                      refims[:, 1:3].reshape(batchsz * 2, 3, heiori, widori))
-            flows_b = self.flow_estim(refims[:, 1], refims[:, 0])
-            flows_f = flows_f.reshape(batchsz, 2, 2, heiori, widori)
+            flows_f = self.flow_estim(refims[:, :-1].reshape(bfnum_1, 3, heiori, widori),
+                                      refims[:, 1:].reshape(bfnum_1, 3, heiori, widori))
+            flows_b = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
+                                      refims[:, :-2].reshape(bfnum_2, 3, heiori, widori))
+            certainty_norm = certainty_maps.sum(dim=[-1, -2])
+            flows_f = flows_f.reshape(batchsz, framenum - 1, 2, heiori, widori)
+            flows_b = flows_b.reshape(batchsz, framenum - 2, 2, heiori, widori)
             depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
+
+            disp_list = []
+
             alpha0 = self.forwardmpi(
                 None,
                 refims[:, 0],
@@ -1065,7 +1073,7 @@ class PipelineV2(nn.Module):
                 None
             )
             disp0 = estimate_disparity_torch(alpha0.unsqueeze(2), depth)
-            disp_warp = self.forwardsf(flows_f[:, 0], flows_b, disp0)
+            disp_warp = self.forwardsf(flows_f[:, 0], flows_b[:, 0], disp0)
             alpha1 = self.forwardmpi(
                 None,
                 refims[:, 1],
@@ -1152,18 +1160,27 @@ class PipelineV2(nn.Module):
 
         elif self.sceneflow_mode == "backward":
             sflow = self.sfmodel(flowf, disparity)
-            occ_b = warp_flow(flowf, flowb, offset=self.offset_bhw2) + flowb
-            occ_b = torch.sum(torch.abs(occ_b), dim=1, keepdim=True)
-            occ_mask = (occ_b > 2)
+            flowf_warp = warp_flow(flowf, flowb, offset=self.offset_bhw2, pad_mode="border")
+            # scheme1: warp using flowb and remove occmask
+            # occ_b = flowf_warp + flowb
+            # occ_b = torch.sum(torch.abs(occ_b), dim=1, keepdim=True)
+            # occ_mask = (occ_b > 2)
+            # disp_warp = warp_flow(
+            #     content=disparity.unsqueeze(1) + sflow,
+            #     flow=flowb,
+            #     offset=self.offset_bhw2
+            # )
+            # disp_warp[occ_mask] = 0
+            # scheme2: warp using -flowf_warp
             disp_warp = warp_flow(
                 content=disparity.unsqueeze(1) + sflow,
-                flow=flowb,
-                offset=self.offset_bhw2
+                flow=-flowf_warp,
+                offset=self.offset_bhw2,
+                pad_mode="border"
             )
-            disp_warp[occ_mask] = 0
             if intcfg is not None:
                 intcfg["sflow"].append(sflow)
-                intcfg["occ_mask"].append(occ_mask)
+                # intcfg["occ_mask"].append(occ_mask)
 
         elif self.sceneflow_mode == "no":
             if self.sfmodel is not None:
@@ -1250,6 +1267,8 @@ class PipelineV2(nn.Module):
         # remove first frame's gt
         tarims = tarims[:, 1:]
         disp_gts = disp_gts[:, 1:]
+        shift_gt = isleft[:, 1]
+        isleft = isleft[:, 0]
         certainty_maps = certainty_maps[:, 1:]
 
         batchsz, framenum, _, heiori, widori = refims.shape
@@ -1262,6 +1281,7 @@ class PipelineV2(nn.Module):
                                       refims[:, 1:].reshape(bfnum_1, 3, heiori, widori))
             flows_b = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
                                       refims[:, :-2].reshape(bfnum_2, 3, heiori, widori))
+            certainty_norm = certainty_maps.sum(dim=[-1, -2])
             flows_f = flows_f.reshape(batchsz, framenum - 1, 2, heiori, widori)
             flows_b = flows_b.reshape(batchsz, framenum - 2, 2, heiori, widori)
         disp_out = []
@@ -1331,40 +1351,19 @@ class PipelineV2(nn.Module):
             intermediates["disp_warp"].append(disp_warp)
 
         # scale and shift invariant
-        # compute shift by median
-        shifts_out = [torch.median(disp_out[0][i].reshape(-1)[certainty_maps[i, 0].reshape(-1) > 0.5])
-                      for i in range(batchsz)]
-        shifts_gt = [torch.median(disp_gts[i, 0].reshape(-1)[certainty_maps[i, 0].reshape(-1) > 0.5])
-                     for i in range(batchsz)]
-        shifts_out = torch.stack(shifts_out, dim=0).reshape(batchsz, 1, 1)
-        shifts_gt = torch.stack(shifts_gt, dim=0).reshape(batchsz, 1, 1)
+        # with torch.no_grad():  # compute scale
+        disp_diffs = [
+            disp_out[i] / (torch.abs(disp_gts[:, i] - shift_gt.reshape(batchsz, 1, 1)) + 0.0001)
+            for i in range(framenum - 2)
+        ]
+        # currently use first frame to compute scale and shift
+        scale = torch.exp((torch.log(disp_diffs[0]) * certainty_maps[:, 0]).sum(dim=[-1, -2]) / certainty_norm[:, 0])
 
-        certainty_maps_norm = certainty_maps[:, 0].sum(dim=[-1, -2], keepdim=True)
-
-        scale_out = ((disp_out[0] - shifts_out).abs() * certainty_maps[:, 0]).sum(dim=[-1, -2], keepdim=True) \
-                    / certainty_maps_norm
-        # prevent naive solution
-        scale_out = torch.max(scale_out, torch.ones_like(scale_out) * 0.001)
-        scale_gt = ((disp_gts[:, 0] - shifts_gt).abs() * certainty_maps[:, 0]).sum(dim=[-1, -2], keepdim=True) \
-                   / certainty_maps_norm
-        scale = scale_out / scale_gt * -isleft
-        # with torch.no_grad():
-        #     disp_gts_shifted = disp_gts[:, 0] - shifts_gt
-        #     mask = (disp_gts_shifted.abs() < 0.01)
-        #     disp_gts_shifted[mask] = 0.01
-        #     mask = torch.logical_and(torch.logical_not(mask), certainty_maps[:, 0] > 0.5)
-        # compute scale by median of scale
-        # scale = (disp_out[0] - shifts_out) / disp_gts_shifted
-        # scale = [
-        #     torch.median(scale[i][mask[i]]) for i in range(batchsz)
-        # ]
-        # scale = torch.stack(scale, dim=0).reshape(batchsz, 1, 1)
-
-        # align the depth to gt
-        disparities = (torch.reciprocal(depth) - shifts_out.squeeze(-1)) / scale.squeeze(-1) + shifts_gt.squeeze(-1)
+        # disparity in ground truth space
+        disparities = torch.reciprocal(depth * scale.reshape(-1, 1) * -isleft.reshape(-1, 1)) + shift_gt.reshape(-1, 1)
         # render target view
         tarviews = [
-            shift_newview(mpi_, -disparities, ret_mask=False)  # the shift_newview has a bug for negative disparity
+            shift_newview(mpi_, -disparities, ret_mask=False)
             for mpi_ in mpi_out
         ]
         # compute final loss
@@ -1411,27 +1410,8 @@ class PipelineV2(nn.Module):
                     loss_dict["flowgrad"] += smth_loss.detach()
 
             if "depth_loss" in self.loss_weight.keys():
-                if self.depth_loss_mode == "gt":  # diff in gt space
-                    dispout = (disp_out[mpiframeidx] - shifts_out) / scale + shifts_gt
-                    dispgt = disp_gts[:, mpiframeidx]
-                elif self.depth_loss_mode == "hat":  # diff in estimated space
-                    dispout = disp_out[mpiframeidx]
-                    dispgt = (disp_gts[:, mpiframeidx] - shifts_gt) * scale + shifts_out
-                elif self.depth_loss_mode == "norm":
-                    dispout = (disp_out[mpiframeidx] - shifts_out) / (scale_out * -isleft)
-                    dispgt = (disp_gts[:, mpiframeidx] - shifts_gt) / scale_gt
-                else:
-                    raise NotImplementedError(f"depth_loss_mode:{self.depth_loss_mode} not specified")
-                diff = ((dispout - dispgt) * certainty_maps[:, mpiframeidx]).abs()
-                # remove topk residual
-                if self.depth_loss_rmresidual:
-                    valid_num = (certainty_maps[:, mpiframeidx] > 0).type(torch.float).sum(dim=[-1, -2])
-                    k = valid_num * 0.9 + (diff[0].nelement() - valid_num)
-                    thresh = torch.kthvalue(diff.reshape(batchsz, -1), int(k))[0]
-                    diff = diff * (diff < thresh).type(torch.float)
-                if self.depth_loss_ord != 1:
-                    diff = torch.pow(diff, self.depth_loss_ord)
-                diff = diff.mean()
+                diff = torch.log(disp_diffs[mpiframeidx] / scale.reshape(-1, 1, 1))
+                diff = (torch.pow(diff, 2) * certainty_maps[:, mpiframeidx]).mean()
                 final_loss += (diff * self.loss_weight["depth_loss"])
                 if "depth" not in loss_dict.keys():
                     loss_dict["depth"] = diff.detach()
@@ -1446,20 +1426,21 @@ class PipelineV2(nn.Module):
                 if self.sceneflow_mode == "forward":
                     dispgt_warp = self.splat_func(
                         flow01=flows_f[:, sflow_idx + 1],
-                        content=disp_gts[:, sflow_idx] * scale.unsqueeze(-1) + sflow,
+                        content=(disp_gts[:, sflow_idx] - shift_gt) * scale.unsqueeze(-1) + sflow,
                         softmask=occ_mask,
                         offset=self.offset
                     )
                 elif self.sceneflow_mode == "backward":
                     dispgt_warp = warp_flow(
-                        content=disp_gts[:, sflow_idx] * scale.reshape(batchsz, 1, 1, 1) + sflow,
+                        content=(disp_gts[:, sflow_idx] - shift_gt) * scale.reshape(batchsz, 1, 1, 1) + sflow,
                         flow=flows_b[:, sflow_idx + 1],
                         offset=self.offset_bhw2
                     )
                     dispgt_warp[occ_mask] = 0
                 else:
                     raise NotImplementedError
-                diff = torch.abs(dispgt_warp - disp_gts[:, sflow_idx + 1] * scale.reshape(batchsz, 1, 1, 1)).mean()
+                diff = torch.abs(dispgt_warp -
+                                 (disp_gts[:, sflow_idx + 1] - shift_gt) * scale.reshape(batchsz, 1, 1, 1)).mean()
                 diffs += diff
             diffs /= len(intermediates["sflow"])
             final_loss += (diffs * self.loss_weight["sflow_loss"])

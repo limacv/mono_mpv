@@ -16,6 +16,7 @@ from .cv2disparity import compute_disparity_uncertainty
 from .Augmenter import DataAugmenter
 import sys
 sys.path.append('..')
+from models.mpi_utils import *
 
 
 class StereoVideo_Base:
@@ -244,6 +245,8 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
         self.augmenter.random_generate((hei, wid))
 
         imgls, imgrs, disps, uncertainty_maps = [], [], [], []
+
+        shift = np.finfo(np.float32).min if retleft else np.finfo(np.float32).max
         for idx in idxs:
             cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
             ret, img = cap.read()
@@ -265,13 +268,19 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
                 return None
             disp = np.load(disp_path, allow_pickle=True)
             mask = disp > np.finfo(np.half).min
+            if retleft:
+                disp = np.where(mask, disp, np.finfo(np.float32).min).astype(np.float32)
+                shift = max(self.augmenter.apply_disparity_scale(disp.max()), shift)
+            else:
+                disp = np.where(mask, disp, np.finfo(np.float32).max).astype(np.float32)
+                shift = min(self.augmenter.apply_disparity_scale(disp.min()), shift)
             disp = np.where(mask, disp, 0).astype(np.float32)
             uncertainty = mask.astype(np.float32)
 
             imgl = self.augmenter.apply_img(imgl)
             imgr = self.augmenter.apply_img(imgr)
-            disp = self.augmenter.apply_disparity(disp)
-            uncertainty = self.augmenter.apply_img(uncertainty)
+            disp = self.augmenter.apply_disparity(disp, interpolation='nearest')
+            uncertainty = self.augmenter.apply_img(uncertainty, interpolation='nearest')
 
             # if uncertainty part is too little, return None
             if uncertainty.sum() < 0.2 * uncertainty.size:
@@ -296,5 +305,5 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
         disps = torch.stack(disps, dim=0)
         uncertainty_maps = torch.stack(uncertainty_maps, dim=0)
 
-        return refimg, tarimg, disps, uncertainty_maps, isleft
+        return refimg, tarimg, disps, uncertainty_maps, torch.cat([isleft, torch.tensor([shift])])
 

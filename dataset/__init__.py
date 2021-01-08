@@ -11,11 +11,12 @@ MannequinChallenge_skip_framenum = 1
 StereoBlur_root = "/home/lmaag/xgpu-scratch/mali_data/StereoBlur_test/"
 StereoBlur_use_saved_disparity = True
 
-StereoVideo_root = "/home/lmaag/xgpu-scratch/mali_data/StereoVideoFinal/"
+StereoVideo_root = "/home/lmaag/xgpu-scratch/mali_data/StereoVideoFinalv2/"
 StereoVideo_test_pct = 0.1
 
 # OutputSize = (512j, 512 + 128 * 2)  # (h, w)
-OutputSize = (384, 512)  # (h, w)
+OutputSize = (384, 448)  # (h, w)
+OutputSize_test = (360, 640)
 colmap_path = "/home/lmaag/xgpu-scratch/mali_data/Programs/colmap_exec/colmap"
 youtubedl_path = "youtube-dl"
 
@@ -31,12 +32,12 @@ if 'COMPUTERNAME' in os.environ.keys() and os.environ['COMPUTERNAME'] == "MSI":
 
     StereoBlur_root = "D:\\MSI_NB\\source\\data\\StereoBlur_test"
     StereoBlur_use_saved_disparity = True
-    StereoVideo_root = "Z:\\dataset\\StereoVideoFinal\\"
+    StereoVideo_root = "Z:\\dataset\\StereoVideoFinalv2\\"
 
     if not os.path.exists(RealEstate10K_root):  # not pluged
         RealEstate10K_root = "D:\\MSI_NB\\source\\data\\RealEstate10K\\"
         MannequinChallenge_root = "D:\\MSI_NB\\source\\data\\MannequinChallenge"
-        StereoVideo_root = "D:\\MSI_NB\\source\\data\\StereoVideoFinal"
+        StereoVideo_root = "D:\\MSI_NB\\source\\data\\StereoVideoFinalv2"
 
     is_DEBUG = True
 
@@ -45,5 +46,5 @@ elif "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
     MannequinChallenge_root = "/home/jrchan/MALi/dataset/MannequinChallenge"
     StereoBlur_root = "/home/jrchan/MALi/dataset/StereoBlur_test"
     StereoBlur_use_saved_disparity = True
-    StereoVideo_root = "/home/jrchan/MALi/dataset/StereoVideoFinal"
+    StereoVideo_root = "/home/jrchan/MALi/dataset/StereoVideoFinalv2"
 

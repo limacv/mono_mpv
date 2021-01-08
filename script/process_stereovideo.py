@@ -18,17 +18,20 @@ from collections import namedtuple
 from torchvision.transforms import ToTensor
 import numpy as np
 import multiprocessing
+import argparse
 
 
 width_2_list = [
-    "0LDAAXTmCnU",
     "1j1-9-CWPAk",
-    "5J53betZS-Q",
+    "VAp_zbH2mMo",
     "YQgufPXF31g",
-    "KjdFoJI3Bbw",
     "9izczuHy5I8",
     "lN1iEttFjbg",
     "OvuEZMQptLI",
+    "0LDAAXTmCnU",
+
+    "5J53betZS-Q",
+    "KjdFoJI3Bbw",
 ]
 
 width_0_5_list = [
@@ -37,15 +40,41 @@ width_0_5_list = [
 ]
 
 swap_list = [
-    "DQDfm_1wfPk",
-    "6Zn1JJOdbRg",
-    "FDm66P63tkY",
     "fqi0U1NlfwY",
     "GpZK3WWu71I",
     "Q4nn6AflK54",
     "SIIhKaNh7Qg",
+    "V62bt7y49D8",
     "WSAcvmGZkY8",
+    "6Zn1JJOdbRg",
+    "FDm66P63tkY",
+    "DQDfm_1wfPk",
 ]
+
+unintentional_scene_change_list = [
+    # "hau6A7j-z4M_0 -> 1",
+    # "bfTuSLFzh2M_3 -> 0",
+    # "fjTpY5ZanGE_8 -> 11,12",
+    # "fjTpY5ZanGE_3 -> 13,14",
+    # "3b11LgJpWSQ_0/2/4/5 -> 6/7/8/9",
+    # "adFfSYM5J7M_7 -> 20,21",
+    # "adFfSYM5J7M_8 -> 22,23",
+    # "adFfSYM5J7M_12 -> 24,25",
+    # "BZ-WNxyPE-4_8/9/10 -> 11/12/13",
+    # "IG6VsR61P3A_2/3/4/5 -> 20/21,22/23/24",
+    # "cZJhMUPPWnE_1/2 -> 40/41",
+    # "J6-girGi-HM_0 -> 5",
+    # "ka3RqjPZLSA_7 -> 12",
+    # "lyUhAUjw-PU_15 -> 30",
+    # "NOxoJPhj8Hk_1 -> 10"
+]
+
+fpsx2_list = [
+    "_yB7Q_2rGJo",
+    "sh7RPf7YuEE",
+    "M2cmtzyYIbc"
+]
+
 
 """
 =======Requirement=======
@@ -74,8 +103,8 @@ StereoVideoFinal/
         
 """
 
-flow_bidirect_thresh = 2
-vertical_disparity_torl = 2
+flow_bidirect_thresh = 1.5
+vertical_disparity_torl = 1.5
 
 
 def mkdir_ifnotexist(path):
@@ -270,9 +299,11 @@ def processvideos(video_list, cudaid):
             scale_func = (lambda h, w: (h, w))
             fpsx2 = False
             need_swap = False
-            if "StereoBlur" in video_path:
+
+            if base_name in fpsx2_list:
                 # for stereoblur, need to turn 60fps to 30fps
                 fpsx2 = True
+
             if base_name in width_2_list:
                 scale_func = (lambda h, w: (h, w * 2))
             elif base_name in width_0_5_list:
@@ -290,30 +321,24 @@ def processvideos(video_list, cudaid):
 
 
 if __name__ == "__main__":
-    # processvideos(["Z:\\dataset\\StereoVideo_stage1\\StereoBlur\\HD720-01-17-02-47.mp4"], 0)
-    video_list0 = [
-        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/DQDfm_1wfPk*.mp4",
-        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/6Zn1JJOdbRg*.mp4",
-        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/FDm66P63tkY*.mp4",
-        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/fqi0U1NlfwY*.mp4",
-        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/GpZK3WWu71I*.mp4",
-        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/Q4nn6AflK54*.mp4",
-        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/WSVD/SIIhKaNh7Qg*.mp4",
-        "/home/lmaag/xgpu-scratch/mali_data/StereoVideo_stage1/Youtube/WSAcvmGZkY8*.mp4",
-    ]
-    video_list = []
-    for video in video_list0:
-        video_list += glob(video)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--work_id', dest='work_id', type=int, help="index of num_worker")
+    parser.add_argument('--num_worker', dest='num_worker', type=int, default=3, help="total number of Nodes used")
+    args = parser.parse_args()
+
     datasetroot = "/home/lmaag/xgpu-scratch/mali_data"
     num_process = 10
-    Source_midfix = "StereoVideo_stage1"
-    Dest_midfix = "StereoVideoFinal"
+    Source_midfix = "StereoVideo_stage1v2"
+    Dest_midfix = "StereoVideoFinalv2"
     Source_prefix = os.path.join(datasetroot, Source_midfix)
     Output_prefix = os.path.join(datasetroot, Dest_midfix)
 
-    stereo_blur_videos = glob(os.path.join(Source_prefix, "StereoBlur", "*.mp4"))
+    # stereo_blur_videos = glob(os.path.join(Source_prefix, "StereoBlur", "*.mp4"))
     # wsvd_videos = glob(os.path.join(Source_prefix, "WSVD", "*.mp4"))
     # youtube_videos = glob(os.path.join(Source_prefix, "Youtube", "*.mp4"))
+    with open(os.path.join(Source_prefix, "StereoBlur_list.txt"), 'r') as f:
+        lines = f.readlines()
+        stereo_blur_videos = [os.path.join(Source_prefix, "StereoBlur", l_.strip('\n')) for l_ in lines]
     with open(os.path.join(Source_prefix, "WSVD_list.txt"), 'r') as f:
         lines = f.readlines()
         wsvd_videos = [os.path.join(Source_prefix, "WSVD", l_.strip('\n')) for l_ in lines]
@@ -321,10 +346,12 @@ if __name__ == "__main__":
         lines = f.readlines()
         youtube_videos = [os.path.join(Source_prefix, "Youtube", l_.strip('\n')) for l_ in lines]
 
-    all_videos = stereo_blur_videos + wsvd_videos + youtube_videos
+    all_videos = sorted(stereo_blur_videos + wsvd_videos + youtube_videos)
+    all_videos = all_videos[args.work_id::args.num_worker]
+
     po = multiprocessing.Pool(num_process)
     for i in range(num_process):
-        po.apply_async(processvideos, [video_list[i::num_process], i])
+        po.apply_async(processvideos, [all_videos[i::num_process], i])
 
     po.close()
     po.join()

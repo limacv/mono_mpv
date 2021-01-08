@@ -18,6 +18,7 @@ from collections import namedtuple
 from torchvision.transforms import ToTensor
 import numpy as np
 import multiprocessing
+import argparse
 
 
 print(f"Process the StereoVideo dataset")
@@ -45,7 +46,7 @@ def prepareoffset(wid, hei):
     return offset.permute(0, 2, 3, 1)
 
 
-def processvideo(videofile, cudaid):
+def processvideo(videofile, model):
     outprefix = videofile.replace(Source_midfix, Target_midfix).split('.')[0]
     if os.path.exists(f"{outprefix}_0.mp4"):
         print(f"GoodNews!!! {videofile} has already be processed!")
@@ -54,7 +55,7 @@ def processvideo(videofile, cudaid):
 
     def isnewscene(img_last, img_now):
         # scene detection, always try to promote new scene easily
-        if len(scene_img_list) > 1000:
+        if len(scene_img_list) > scene_max_frame_num:
             return True
         if img_now.mean() < black_frame_threshold:
             print(f"New Scene detected due to black frame", end=' ', flush=True)
@@ -76,12 +77,6 @@ def processvideo(videofile, cudaid):
                 print(f"New Scene detected due to large l1 value", end=' ', flush=True)
                 return True
             return False
-    torch.cuda.set_device(cudaid)
-    model = RAFTNet().eval().cuda()
-
-    state_dict = torch.load(RAFT_path["sintel"], map_location=f'cuda:{cudaid}')
-    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    model.load_state_dict(state_dict)
 
     totensor = ToTensor()
 
@@ -116,8 +111,8 @@ def processvideo(videofile, cudaid):
         if wid >= 960:
             hei = int(hei / wid * 960)
             wid = 960
-            imglt = cv2.resize(imgl, (wid, hei), None, 0.5, 0.5)
-            imgrt = cv2.resize(imgr, (wid, hei), None, 0.5, 0.5)
+            imglt = cv2.resize(imgl, (wid, hei))
+            imgrt = cv2.resize(imgr, (wid, hei))
         else:
             imglt, imgrt = imgl, imgr
         img_vis = imglt
@@ -220,8 +215,29 @@ def processvideo(videofile, cudaid):
         scene_dispvis_list.append(np.hstack([vis_disp, img_vis]))
         img_last = imglt
 
+    print(f"------------{videofile} finishes!!-----------------")
+
+
+def process_list(video_list, cudaid):
+    torch.cuda.set_device(cudaid)
+    model = RAFTNet().eval().cuda()
+
+    state_dict = torch.load(RAFT_path["sintel"], map_location=f'cuda:{cudaid}')
+    state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict)
+
+    for video_path in video_list:
+        # decide special config based on name
+        print(f"||{cudaid}||::process {video_path}", flush=True)
+        processvideo(video_path, model)
+
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--work_id', dest='work_id', type=int, help="index of num_worker")
+    parser.add_argument('--num_worker', dest='num_worker', type=int, default=3, help="total number of Nodes used")
+    args = parser.parse_args()
+
     dataset_root = "/home/lmaag/xgpu-scratch/mali_data"
 
     Source_midfix = "StereoVideoGood"
@@ -232,22 +248,22 @@ if __name__ == "__main__":
     wsvd_videos = glob(os.path.join(Source_root, "WSVD", "*.mp4"))
     youtube_videos = glob(os.path.join(Source_root, "Youtube", "*.mp4"))
     scene_least_frame_num = 30
-    scene_max_frame_num = 300
+    scene_max_frame_num = 330
     scene_max_l1diff = 0.25
-    black_frame_threshold = 0.1
+    black_frame_threshold = 0.15
     flow_bidirect_thresh = 1.5
-    nocc_pct_min = 0.5  # smaller than this is outlier
+    nocc_pct_min = 0.65  # smaller than this is outlier
     vertical_disparity_torl = 1.5
     vflow_inlier_pct_min = 0.7  # smaller than this is outlier
     disparity_std_min = 10
 
-    # process_list = sorted(wsvd_videos + youtube_videos)
-    # process_list = process_list[2::3]
-    process_list = youtube_videos
+    num_thread = 10
+    video_list = sorted(wsvd_videos + youtube_videos + stereo_blur_videos)
+    video_list = video_list[args.work_id::args.num_worker]
 
-    po = multiprocessing.Pool(10)
-    for i, video_file in enumerate(process_list):
-        po.apply_async(processvideo, [video_file, i % 10])
+    po = multiprocessing.Pool(num_thread)
+    for i in range(num_thread):
+        po.apply_async(process_list, [video_list[i::num_thread], i])
 
     po.close()
     po.join()

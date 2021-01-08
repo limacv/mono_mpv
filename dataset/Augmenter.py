@@ -11,8 +11,9 @@ class DataAugmenter:
     def __init__(self, outshape, mode="crop", ratio_tol=1.1, resize_tol=1.):
         """
         outshape: (height, weight)
-        mode="none", "crop", "resize", *"pad"   * = not implemented
-            when use crop:  in_shape -> crop_shape -> out_shape
+        mode="crop", "resize"
+            when use resize: in_shape -rsz-> out_shape
+            when use crop:  in_shape -crop-> crop_shape -rsz-> out_shape
         """
         self.mode = mode.lower()
         self.outhei, self.outwid = outshape
@@ -32,7 +33,7 @@ class DataAugmenter:
         call this every time before augmentation
         """
         self.cur_inhei, self.cur_inwid = in_shape
-        if self.mode in ["none", "resize"]:
+        if self.mode in "none":
             return
         elif self.mode == "crop":
             self.cur_crop_ratio = np.random.uniform(1. / self.ratio_tol, self.ratio_tol) * self.outwid / self.outhei
@@ -57,9 +58,13 @@ class DataAugmenter:
                 self.cur_crop_wid = min(int(self.cur_crop_hei * self.cur_crop_ratio), self.cur_inwid)
             self.cur_crop_top = np.random.randint(self.cur_inhei - self.cur_crop_hei + 1)
             self.cur_crop_left = np.random.randint(self.cur_inwid - self.cur_crop_wid + 1)
+            return
+        elif self.mode == "resize":
+            self.cur_crop_ratio = self.cur_inwid / self.cur_inhei
+            self.cur_crop_wid, self.cur_crop_hei = self.cur_inwid, self.cur_inhei
+            return
         else:
             raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")
-        return
 
     def apply_pts(self, ptxy: np.array, ptz: np.array):
         """
@@ -145,6 +150,7 @@ class DataAugmenter:
             return dispout
         elif self.mode == "resize":
             dispout = cv2.resize(disp, (self.outwid, self.outhei), interpolation=interpolation)
+            dispout *= (self.outwid / self.cur_crop_wid)
             return dispout
         else:
             raise NotImplementedError(f"DataAugmenter::{self.mode} not implemented")

@@ -14,11 +14,11 @@ def main(kwargs):
     modelloss = select_modelloss("fullv2")(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
 
-    dataset = select_dataset("stereovideo_seq", True, {})
+    dataset = select_dataset("stereovideo_seq", False, {})
     for i in range(int(14000)):
         datas_all = [[]] * 7
         for dev in range(1):
-            datas = dataset[-3]
+            datas = dataset[0]
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
@@ -59,7 +59,7 @@ main({
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
     "check_point": {
-        "": "v2_depthinnorm_021554_r0.pth"
+        "": "v2_scaleinvariant_032042_r0.pth"
     },
     "batchsz": 1,
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",

@@ -113,7 +113,12 @@ def select_modelloss(name: str):
 
 def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
     name = name.lower()
-    seq_len = cfg["seq_len"] if "seq_len" in cfg.keys() else 4
+    if istrain:
+        mode = "crop"
+        seq_len = 5
+    else:
+        mode = "resize"
+        seq_len = 10
     if "realestate10k_seq" in name:
         return RealEstate10K_Seq(istrain, seq_len=seq_len)
     elif "realestate10k_img" in name:
@@ -123,11 +128,11 @@ def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
     elif "stereoblur_seq" in name:
         return StereoBlur_Seq(istrain, seq_len=seq_len)
     elif "stereovideo_img" in name:
-        return StereoVideo_Img(istrain)
+        return StereoVideo_Img(istrain, mode=mode)
     elif "stereovideo_seq" in name:
-        return StereoVideo_Seq(istrain, seq_len=seq_len)
+        return StereoVideo_Seq(istrain, seq_len=seq_len, mode=mode)
     elif "stereovideo_test" in name:
-        return StereoVideo_Seq(istrain, seq_len=seq_len, test=True)
+        return StereoVideo_Seq(istrain, seq_len=seq_len, test=True, mode=mode)
     elif "mannequinchallenge_img" in name:
         return MannequinChallenge_Img(istrain)
     elif "mannequinchallenge_seq" in name:

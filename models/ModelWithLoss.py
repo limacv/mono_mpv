@@ -16,6 +16,8 @@ from .mpi_flow_network import *
 from .flow_utils import *
 from .hourglass import Hourglass
 from collections import deque
+from .img_utils import *
+
 
 '''
 This class is a model container provide interface between
@@ -1049,6 +1051,8 @@ class PipelineV2(nn.Module):
     def valid_forward(self, *args: torch.Tensor, **kwargs):
         args = [_t.cuda() for _t in args]
         refims, tarims, disp_gts, certainty_maps, isleft = args
+        shift_gt = isleft[:, 1]
+        isleft = isleft[:, 0]
         batchsz, framenum, _, heiori, widori = refims.shape
         self.prepareoffset(widori, heiori)
         layernum = self.mpimodel.num_layers
@@ -1059,12 +1063,10 @@ class PipelineV2(nn.Module):
                                       refims[:, 1:].reshape(bfnum_1, 3, heiori, widori))
             flows_b = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
                                       refims[:, :-2].reshape(bfnum_2, 3, heiori, widori))
-            certainty_norm = certainty_maps.sum(dim=[-1, -2])
+            certainty_norm = certainty_maps.sum(dim=[-1, -2], keepdim=True)
             flows_f = flows_f.reshape(batchsz, framenum - 1, 2, heiori, widori)
             flows_b = flows_b.reshape(batchsz, framenum - 2, 2, heiori, widori)
             depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
-
-            disp_list = []
 
             alpha0 = self.forwardmpi(
                 None,
@@ -1074,43 +1076,109 @@ class PipelineV2(nn.Module):
             )
             disp0 = estimate_disparity_torch(alpha0.unsqueeze(2), depth)
             disp_warp = self.forwardsf(flows_f[:, 0], flows_b[:, 0], disp0)
-            alpha1 = self.forwardmpi(
-                None,
-                refims[:, 1],
-                [flows_f[:, 1], flows_b],
-                disp_warp
-            )
-            disp1, bw1 = estimate_disparity_torch(alpha1.unsqueeze(2), depth, retbw=True)
-            flow_list = [flows_b, flows_f[:, 1]]
-            image_list = [refims[:, 0], refims[:, 2]]
-            if self.aflow_includeself:
-                image_list.append(refims[:, 1])
-                flow_list.append(torch.zeros_like(flow_list[-1]))
-            imbg1 = self.forwardaf(alpha1, disp1,
-                                   flows=flow_list,
-                                   mpis_last=refims[:, 0],
-                                   imgs_list=image_list
-                                   )
-            mpi1 = alpha2mpi(alpha1, refims[:, 1], imbg1, blend_weight=bw1)
+
+            disp_warp_list = [disp_warp]
+            disp_list = []
+            mpi_list = []
+
+            for frameidx in range(1, framenum - 1):
+                flow_list = [flows_b[:, frameidx - 1], flows_f[:, frameidx]]
+                alpha = self.forwardmpi(
+                    None,
+                    refims[:, frameidx],
+                    flow_list,
+                    disp_warp
+                )
+                disp, blend_weight = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
+
+                image_list = [refims[:, frameidx - 1], refims[:, frameidx + 1]]
+                if self.aflow_includeself:
+                    image_list.append(refims[:, frameidx])
+                    flow_list.append(torch.zeros_like(flow_list[-1]))
+                imbg = self.forwardaf(alpha, disp,
+                                      flows=flow_list,
+                                      mpis_last=None,
+                                      imgs_list=image_list
+                                      )
+                mpi = alpha2mpi(alpha, refims[:, frameidx], imbg, blend_weight=blend_weight)
+
+                disp_list.append(disp)
+                mpi_list.append(mpi)
+
+                if frameidx >= framenum - 2:
+                    break
+                disp_warp = self.forwardsf(
+                    flowf=flows_f[:, frameidx],
+                    flowb=flows_b[:, frameidx],
+                    disparity=disp,
+                    intcfg=None
+                )
+                disp_warp_list.append(disp_warp)
+
+            disp_diff0 = disp0 / (torch.abs(disp_gts[:, 0] - shift_gt.reshape(batchsz, 1, 1)) + 0.0001)
+            # estimate disparity to ground truth
+            scale = torch.exp((torch.log(disp_diff0) * certainty_maps[:, 0]).sum(dim=[-1, -2]) / certainty_norm[:, 0])
+            disparities = torch.reciprocal(depth * scale.reshape(-1, 1) * -isleft.reshape(-1, 1)) \
+                          + shift_gt.reshape(-1, 1)
             # render target view
-            tarview1 = shift_newview(mpi1, torch.reciprocal(depth * 0.15))
+            tarviews = [
+                shift_newview(mpi_, -disparities)
+                for mpi_ in mpi_list
+            ]
 
         val_dict = {}
+        # Photometric metric====================
+        tarviews = torch.stack(tarviews, dim=1)
+        targts = tarims[:, 1:-1]
+        metrics = ["psnr", "ssim"]
+        for metric in metrics:
+            error = compute_img_metric(
+                targts.reshape(-1, 3, heiori, widori),
+                tarviews.reshape(-1, 3, heiori, widori),
+                metric=metric
+            )
+            val_dict[f"val_{metric}"] = error
+
+        # depth difference===========================
+        disp = torch.stack(disp_list, dim=1)
+        disp_gt = (disp_gts[:, 1:-1] - shift_gt.reshape(batchsz, 1, 1, 1)) \
+                  * scale.reshape(batchsz, 1, 1, 1) * -isleft.reshape(batchsz, 1, 1, 1)
+        mask = certainty_maps[:, 1:-1]
+        mask_norm = certainty_norm[:, 1:-1].sum()
+
+        thresh = np.log(1.25) ** 2  # log(1.25) ** 2
+        diff = ((disp - disp_gt).abs() * mask).sum() / mask_norm
+        diff_scale = torch.pow(torch.log((disp_gt / disp).abs() + 0.00001), 2)
+        inliner_pct = ((diff_scale < thresh) * mask).sum() / mask_norm
+        diff_scale = (diff_scale * mask).sum() / mask_norm
+        val_dict["val_d_mae"] = diff
+        val_dict["val_d_msle"] = diff_scale
+        val_dict["val_d_goodpct"] = inliner_pct
+
+        # depth temporal consistency loss==============
+        temporal = torch.tensor(0.).type_as(refims)
+        temporal_scale = torch.tensor(0.).type_as(refims)
+        for disp, disp_warp in zip(disp_list, disp_warp_list):
+            temporal += (torch.abs(disp.unsqueeze(1) - disp_warp)).mean()
+            # print(f"disp_warp: min {disp_warp.min()}, max {disp_warp.max()}")
+            # print(f"disp_warp: min {disp.min()}, max {disp.max()}")
+            disp_warp = torch.max(disp_warp, torch.tensor(0.000001).type_as(disp_warp))
+            temporal_scale += torch.pow(torch.log(disp_warp / disp), 2).mean()
+        temporal /= len(disp_list)
+        temporal_scale /= len(disp_list)
+        val_dict["val_t_mae"] = temporal
+        val_dict["val_t_msle"] = temporal_scale
+
         if "visualize" in kwargs.keys() and kwargs["visualize"]:
-            # diff = (l1_map[0] * 255).detach().cpu().type(torch.uint8).numpy()
-            val_dict["vis_newv"] = (tarview1[0] * 255).permute(1, 2, 0).detach().cpu().type(torch.uint8).numpy()
-            # val_dict["vis_diff"] = cv2.cvtColor(cv2.applyColorMap(diff, cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
-            # sparsedepth = draw_sparse_depth(refim, pt2ds, 1 / ptzs_gt, depth[0, -1])
-            val_dict["vis_dispgt"] = draw_dense_disp(disp_gts[:, 1], 1. / disp_gts[0, 1].max())
-            val_dict["vis_disp"] = draw_dense_disp(disp1, 1)
-            if imbg1.dim() == 5:
-                imbg1 = imbg1[:, 9]
-            val_dict["vis_bgimg"] = (imbg1[0] * 255).permute(1, 2, 0).detach().cpu().type(torch.uint8).numpy()
+            val_dict["vis_dispgt"] = draw_dense_disp(disp_gt[:, 1], 1)
+            val_dict["vis_disp"] = draw_dense_disp(disp_list[1], 1)
+            val_dict["vis_bgimg"] = (imbg[0] * 255).permute(1, 2, 0).detach().cpu().type(torch.uint8).numpy()
+            val_dict["vis_img"] = (refims[0, -2] * 255).permute(1, 2, 0).detach().cpu().type(torch.uint8).numpy()
 
         return val_dict
 
     def prepareoffset(self, wid, hei):
-        if self.offset is None:
+        if self.offset is None or self.offset.shape[-2:] != (hei, wid):
             offsety, offsetx = torch.meshgrid([
                 torch.linspace(0, hei - 1, hei),
                 torch.linspace(0, wid - 1, wid)
@@ -1608,7 +1676,7 @@ class PipelineV2SV(PipelineV2):
         # with torch.no_grad():  # compute scale
         ptdis_es = [
             torchf.grid_sample(disp_out[i].unsqueeze(1),
-                               pt2ds[:, i:i+1]).reshape(batchsz, -1)
+                               pt2ds[:, i:i + 1]).reshape(batchsz, -1)
             for i in range(len(disp_out))
         ]
         # currently use first frame to compute scale

@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 import cv2
 import os
 from glob import glob
-from . import StereoVideo_root, is_DEBUG, OutputSize, StereoVideo_test_pct
+from . import StereoVideo_root, is_DEBUG, OutputSize, StereoVideo_test_pct, OutputSize_test
 from .colmap_wrapper import *
 from .cv2disparity import compute_disparity_uncertainty
 from .Augmenter import DataAugmenter
@@ -32,6 +32,7 @@ class StereoVideo_Base:
 
         test_split_file = self.gettestidx_path()
         if not os.path.exists(test_split_file):  # random generate test split if not exist
+            print(f"{self.name}::test_split.txt not find, random generating the test set")
             test_split_idx = np.random.choice(len(self.filebase_list),
                                               int(len(self.filebase_list) * StereoVideo_test_pct) + 1, replace=False)
             test_base = [self.filebase_list[idx] for idx in test_split_idx]
@@ -85,7 +86,8 @@ class StereoVideo_Img(Dataset, StereoVideo_Base):
 
         print(f"{self.name}: find {len(self.filebase_list)} video files in {self.trainstr} set")
 
-        self.augmenter = DataAugmenter(OutputSize, mode=mode)
+        Outsz = OutputSize if is_train else OutputSize_test
+        self.augmenter = DataAugmenter(Outsz, mode=mode)
 
     def __len__(self):
         return len(self.filebase_list)
@@ -168,7 +170,7 @@ class StereoVideo_Img(Dataset, StereoVideo_Base):
 
 
 class StereoVideo_Seq(Dataset, StereoVideo_Base):
-    def __init__(self, is_train, mode='crop', seq_len=4, max_skip=7, test=False):
+    def __init__(self, is_train, mode='crop', seq_len=4, max_skip=5, test=False):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         model=  'none': do noting
@@ -181,7 +183,8 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
 
         print(f"{self.name}: find {len(self.filebase_list)} video files in {self.trainstr} set")
 
-        self.augmenter = DataAugmenter(OutputSize, mode=mode)
+        Outsz = OutputSize if is_train else OutputSize_test
+        self.augmenter = DataAugmenter(Outsz, mode=mode)
         self.sequence_length = seq_len
         self.maxskip_framenum = max(2, max_skip)  # 2 means no skip
 
@@ -228,17 +231,17 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
             return None
 
         # random variables
-        # if self.trainstr == "train":
-        max_skip = min(self.maxskip_framenum, 1 + (framenum - 1) // (self.sequence_length - 1))
-        skipnum = np.random.randint(1, max_skip)
-        framenum_wid = (self.sequence_length - 1) * skipnum + 1
-        startid = np.random.randint(0, framenum - framenum_wid + 1)
-        retleft = (np.random.randint(2) == 0)
-        # else:
-        #     skipnum = 1
-        #     framenum_wid = self.sequence_length
-        #     startid = 1
-        #     retleft = False
+        if self.trainstr == "train":
+            max_skip = min(self.maxskip_framenum, 1 + (framenum - 1) // (self.sequence_length - 1))
+            skipnum = np.random.randint(1, max_skip)
+            framenum_wid = (self.sequence_length - 1) * skipnum + 1
+            startid = np.random.randint(0, framenum - framenum_wid + 1)
+            retleft = (np.random.randint(2) == 0)
+        else:
+            skipnum = 2 if framenum > 2 * self.sequence_length else 1
+            startid = 0
+            framenum_wid = (self.sequence_length - 1) * skipnum + 1
+            retleft = False
         idxs = np.arange(startid, startid + framenum_wid, skipnum)
         hei = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         wid = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) // 2

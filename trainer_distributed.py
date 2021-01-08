@@ -142,7 +142,7 @@ def train(cfg: dict):
                 for val_name, val_value in val_dict.items():
                     tensorboard.add_scalar(val_name, val_value, step)
                 print(f"EVAL{local_rank}:: " + ' | '.join([f"{k}: {v:.3f}" for k, v in val_dict.items()]), flush=True)
-                print(f"CHECKING Consistency:: {modelloss.module.parameters().__next__()[0, 0, 0]}")
+                # print(f"CHECKING Consistency:: {modelloss.module.parameters().__next__()[0, 0, 0]}")
 
             if (step + 1) % savepth_iter_freq == 0:
                 torch.save({

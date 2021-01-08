@@ -20,7 +20,7 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 10,
+    "validate_num": 32,
     "valid_freq": 200,
     "train_report_freq": 5,
 
@@ -34,10 +34,10 @@ cfg = {
     "model_name": "Fullv2",
     "modelloss_name": "fullv2",
     "batch_size": 1,
-    "num_epoch": 5000,
+    "num_epoch": 5000,  # actually it's num_iter
     "savepth_iter_freq": 500,
     "lr": 1e-4,
-    "check_point": "v2_M+R_vgg_300010_r0.pth",
+    "check_point": "no.pth",
     "loss_weights": {
         "pixel_loss_cfg": 'vgg',
         "pixel_loss": 0.2,
@@ -46,7 +46,7 @@ cfg = {
         "depth_loss": 5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
-        "tempdepth_loss": 0.2,
+        "tempdepth_loss": 1,
 
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
@@ -71,11 +71,10 @@ cfg = {
 #   >>> inpainting performance (pending to be test)
 #   \code
 #   >>> keep tuning the dataset
-#   >>> evaulate while training
-#   >>> Check what's the problem of the large scale of ManneDataset
 #   >>> Different settings that have tried in small dataset
 #   >>> Toward more than 2 neighbor frames (think one way to select best neighbors)
 #   >>> ready for the evaluating metric!!!!!
+#   >>> Check what's the problem of the large scale of ManneDataset
 #   \paper
 #   >>> prepare evaluation dataset that can be compared, as well as different evaluating metric
 #   >>> read papers and find works that can be compared and reproduce those
@@ -85,7 +84,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v2_inpaintdepthwarp"
+    cfg["id"] = "v2_baseline_scratch"
     cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
 
     parser = argparse.ArgumentParser()

@@ -20,7 +20,7 @@ def str2bool(s_):
     return s_
 
 
-path = "./log/checkpoint/v2_inpaintdepthwarp_040020_r0.pth"
+path = "./log/checkpoint/v2_scaleinvariant_032042_r0.pth"
 # Adjust configurations here ############################################
 state_dict_path = {
     '': "./log/checkpoint/v2_inpaintdepthwarp_040020_r0.pth",

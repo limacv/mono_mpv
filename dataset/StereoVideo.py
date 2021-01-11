@@ -106,6 +106,14 @@ class StereoVideo_Img(Dataset, StereoVideo_Base):
 
         # if still not working, randomly pick another idx untill success
         print(f"{self.name}.warning: cannot load {self.filebase_list[item]} after 3 tries")
+        while datas is None:
+            print(f"{self.name}: try fetch another data", flush=True)
+            try:
+                item = np.random.randint(len(self))
+                datas = self.getitem(item)
+            except Exception as e:
+                print(e)
+                datas = None
         return datas
 
     def getitem(self, idx):
@@ -126,7 +134,7 @@ class StereoVideo_Img(Dataset, StereoVideo_Base):
             retleft = (np.random.randint(2) == 0)
         else:
             idx = 1
-            retleft = True
+            retleft = False
         cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         ret, img = cap.read()
         cap.release()
@@ -150,14 +158,26 @@ class StereoVideo_Img(Dataset, StereoVideo_Base):
             return None
         disp = np.load(disp_path, allow_pickle=True)
         mask = disp > np.finfo(np.half).min
+        if retleft:
+            disp = np.where(mask, disp, np.finfo(np.float32).min).astype(np.float32)
+            shift = self.augmenter.apply_disparity_scale(disp.max() + 2)
+        else:
+            disp = np.where(mask, disp, np.finfo(np.float32).max).astype(np.float32)
+            shift = self.augmenter.apply_disparity_scale(disp.min() - 2)
+
         disp = np.where(mask, disp, 0).astype(np.float32)
         uncertainty = mask.astype(np.float32)
 
         imgl = self.augmenter.apply_img(imgl)
         imgr = self.augmenter.apply_img(imgr)
-        disp = self.augmenter.apply_disparity(disp)
-        uncertainty = self.augmenter.apply_img(uncertainty)
+        disp = self.augmenter.apply_disparity(disp, interpolation='nearest')
+        uncertainty = self.augmenter.apply_img(uncertainty, interpolation='nearest')
         isleft = torch.tensor([1.])
+
+        # if uncertainty part is too little, return None
+        if uncertainty.sum() < 0.2 * uncertainty.size:
+            print(f"{self.name}:: uncertainty map too sparse, this data not available")
+            return None
 
         if retleft:
             refimg = self.totensor(imgl)
@@ -166,7 +186,9 @@ class StereoVideo_Img(Dataset, StereoVideo_Base):
             refimg = self.totensor(imgr)
             tarimg = self.totensor(imgl)
             isleft = -isleft
-        return refimg, tarimg, torch.tensor(disp), torch.tensor(uncertainty), isleft
+        return refimg, tarimg, \
+               torch.tensor(disp), torch.tensor(uncertainty), \
+               torch.cat([isleft, torch.tensor([shift])]).type(torch.float32)
 
 
 class StereoVideo_Seq(Dataset, StereoVideo_Base):
@@ -308,5 +330,5 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
         disps = torch.stack(disps, dim=0)
         uncertainty_maps = torch.stack(uncertainty_maps, dim=0)
 
-        return refimg, tarimg, disps, uncertainty_maps, torch.cat([isleft, torch.tensor([shift])])
+        return refimg, tarimg, disps, uncertainty_maps, torch.cat([isleft, torch.tensor([shift])]).type(torch.float32)
 

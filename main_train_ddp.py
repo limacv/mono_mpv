@@ -20,7 +20,7 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 32,
+    "validate_num": -1,
     "valid_freq": 200,
     "train_report_freq": 5,
 
@@ -31,13 +31,15 @@ cfg = {
 
     "trainset": "stereovideo_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Fullv2",
+    "model_name": "Fullv241",
     "modelloss_name": "fullv2",
     "batch_size": 1,
     "num_epoch": 5000,  # actually it's num_iter
     "savepth_iter_freq": 500,
     "lr": 1e-4,
-    "check_point": "no.pth",
+    "check_point": {
+        "": "no.pth"
+    },
     "loss_weights": {
         "pixel_loss_cfg": 'vgg',
         "pixel_loss": 0.2,
@@ -47,7 +49,7 @@ cfg = {
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
         "tempdepth_loss": 1,
-
+        "temporal_loss_mode": "mse"
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
         # "alpha2mpf": True,
@@ -70,11 +72,11 @@ cfg = {
 #   >>> temporal consistency when training in large dataset
 #   >>> inpainting performance (pending to be test)
 #   \code
-#   >>> keep tuning the dataset
+#   >>> temporal consistency in lower resolution
+#   >>>
 #   >>> Different settings that have tried in small dataset
 #   >>> Toward more than 2 neighbor frames (think one way to select best neighbors)
 #   >>> ready for the evaluating metric!!!!!
-#   >>> Check what's the problem of the large scale of ManneDataset
 #   \paper
 #   >>> prepare evaluation dataset that can be compared, as well as different evaluating metric
 #   >>> read papers and find works that can be compared and reproduce those
@@ -84,7 +86,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v2_baseline_scratch"
+    cfg["id"] = "v241_gaussian1"
     cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
 
     parser = argparse.ArgumentParser()

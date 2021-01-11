@@ -163,8 +163,8 @@ def process_clip(videofile, model, scale_func: Callable, fpsx2=False, needswarp=
     writer_vis = cv2.VideoWriter()
     framecount = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     print(f"process {classname}_{basename}, total {framecount} frames", flush=True)
-    # imglr_last = None
-    # flowlr_last = None
+    imglr_last = None
+    flowlr_last = None
     offset = None
 
     vis_disp_min, vis_disp_max = None, None
@@ -321,6 +321,20 @@ def processvideos(video_list, cudaid):
 
 
 if __name__ == "__main__":
+    # datasetroot = "/home/lmaag/xgpu-scratch/mali_data"
+    # num_process = 10
+    # Source_midfix = "StereoVideo_stage1"
+    # Dest_midfix = "StereoVideoFinal"
+    # Source_prefix = os.path.join(datasetroot, Source_midfix)
+    # Output_prefix = os.path.join(datasetroot, Dest_midfix)
+    # with open(os.path.join(datasetroot, "StereoVideo_stage1v2", "v3_list.txt"), 'r') as f:
+    #     lines = f.readlines()
+    # processlist = [os.path.join(Source_prefix, "WSVD", l_.strip('\n').split('_', 1)[1] + ".mp4") for l_ in lines]
+    # po = multiprocessing.Pool(num_process)
+    # for i in range(num_process):
+    #     po.apply_async(processvideos, [processlist[i::num_process], i])
+    # exit(1000)
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--work_id', dest='work_id', type=int, help="index of num_worker")
     parser.add_argument('--num_worker', dest='num_worker', type=int, default=3, help="total number of Nodes used")
@@ -329,7 +343,7 @@ if __name__ == "__main__":
     datasetroot = "/home/lmaag/xgpu-scratch/mali_data"
     num_process = 10
     Source_midfix = "StereoVideo_stage1v2"
-    Dest_midfix = "StereoVideoFinalv2"
+    Dest_midfix = "StereoVideoFinalv3"
     Source_prefix = os.path.join(datasetroot, Source_midfix)
     Output_prefix = os.path.join(datasetroot, Dest_midfix)
 
@@ -345,6 +359,8 @@ if __name__ == "__main__":
     with open(os.path.join(Source_prefix, "Youtube_list.txt"), 'r') as f:
         lines = f.readlines()
         youtube_videos = [os.path.join(Source_prefix, "Youtube", l_.strip('\n')) for l_ in lines]
+
+    processvideos(wsvd_videos[19:], 0)
 
     all_videos = sorted(stereo_blur_videos + wsvd_videos + youtube_videos)
     all_videos = all_videos[args.work_id::args.num_worker]

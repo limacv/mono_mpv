@@ -48,11 +48,11 @@ def select_module(name: str) -> nn.Module:
         })
     elif "MPI_FlowGrad" == name:
         return MPI_FlowGrad(plane_num)
-    elif "Fullv1" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_Fullv1(plane_num),
-            "MPF": MPFNet(plane_num)
-        })
+    # elif "Fullv1" == name:
+    #     return nn.ModuleDict({
+    #         "MPI": MPI_Fullv1(plane_num),
+    #         "MPF": MPFNet(plane_num)
+    #     })
     elif "Fullv20" == name:
         return nn.ModuleDict({
             "MPI": MPI_alpha(plane_num),
@@ -89,6 +89,30 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": SceneFlowNet(),
             "AppearanceFlow": ASPFNetWithMaskOut()
         })
+    elif "Fullv23a" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_alpha(plane_num),
+            "SceneFlow": SceneFlowNet_alpha(plane_num),
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
+    elif "Fullv23i" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_alpha(plane_num),
+            "SceneFlow": SceneFlowNet_img(),
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
+    elif "Fullv241" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_gaussian1(plane_num),
+            "SceneFlow": SceneFlowNet(),
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
+    elif "Fullv242" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_gaussian2(plane_num),
+            "SceneFlow": SceneFlowNet(),
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
@@ -99,14 +123,16 @@ def select_modelloss(name: str):
         return ModelandSVLoss
     elif "disp_img" == name:
         return ModelandDispLoss
-    elif "fullv1" == name:
-        return ModelandFullv1Loss
-    elif "fullsvv1" == name:
-        return ModelandFullSVv1Loss
+    # elif "fullv1" == name:
+    #     return ModelandFullv1Loss
+    # elif "fullsvv1" == name:
+    #     return ModelandFullSVv1Loss
     elif "fullv2" == name:
         return PipelineV2
     elif "fullsvv2" == name:
         return PipelineV2SV
+    elif "fullv3" == name:
+        return PipelineV3
     else:
         raise ValueError(f"unrecognized modelloss name: {name}")
 

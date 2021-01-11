@@ -6,7 +6,7 @@ torch.manual_seed(6666)
 
 def main(kwargs):
     batchsz = kwargs["batchsz"]
-    model = select_module("Fullv2")
+    model = select_module("Fullv242")
 
     smart_load_checkpoint("./log/checkpoint/", kwargs, model)
 
@@ -59,7 +59,7 @@ main({
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
     "check_point": {
-        "": "v2_scaleinvariant_032042_r0.pth"
+        # "": "mpinet_pretrain.pth",
     },
     "batchsz": 1,
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",
@@ -73,18 +73,21 @@ main({
                      "depth_loss_mode": "hat",
                      "depth_loss_ord": 0.5,
                      "depth_loss_rmresidual": True,
+                     "mpi_flowgrad_in": False,
                      "templ1_loss": 1,
                      "tempdepth_loss": 0.01,
                      "dilate_mpfin": False,
                      "alpha2mpf": True,
+                     "aflow_fusefgpct": True,
                      "sflow_mode": "backward",
                      "pipe_optim_frame0": True,
                      "aflow_residual": True,
                      "aflow_includeself": False,
                      "flow_epe": 0.1,
                      "flow_smth": 0.1,
-                     "sflow_loss": 0.1,
-                     "smooth_flowgrad_loss": 0.1},
+                     # "sflow_loss": 0.1,
+                     "smooth_flowgrad_loss": 0.1,
+                     "temporal_loss_mode": "msle"},
 })
 # good data list
 # 01bfb80e5b8fe757

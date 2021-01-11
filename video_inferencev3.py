@@ -39,49 +39,34 @@ cfg_str = torch.load(state_dict_path[''])["cfg"]
 loss_weights = [i for i in cfg_str.split('\n') if i.startswith("Loss: ")][0][6:].split(', ')
 loss_weights = {i.split(':')[0]: str2bool(i.split(':')[1]) for i in loss_weights}
 modelname = [i for i in cfg_str.split('\n') if i.startswith("Model: ")][0].split(', ')[0][7:]
-modellossname = [i for i in cfg_str.split('\n') if i.startswith("Model: ")][0].split(', ')[1][11:]
 
 model = select_module(modelname).cuda()
-modelloss = select_modelloss(modellossname)(model, {"loss_weights": loss_weights})
-ret_cfg = " "
-infer_single_frame = False
+pipeline = PipelineV3(model, {"loss_weights": loss_weights})
+ret_cfg = ""
 
-save_infer_mpi = True and infer_single_frame
-save_newview = False
+save_infer_mpi = True
 save_disparity = True
 save_mpv = True
-save_mpf = False
 # \Adjust configuration here ############################################
 
 out_prefix = "Z:\\tmp\\Visual"
 if not os.path.exists(out_prefix):
     out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
 if "StereoBlur" in video_path:
-    saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
+    saveprefix = "ZV3" + os.path.basename(state_dict_path['']).split('.')[0] \
                  + os.path.basename(video_path).split('.')[0] + ret_cfg
 else:
-    saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
+    saveprefix = "ZV3" + os.path.basename(state_dict_path['']).split('.')[0] \
                  + os.path.basename(os.path.dirname(video_path)).split('.')[0] + ret_cfg
 dispvideo_path = os.path.join(out_prefix, saveprefix + "_disparity.mp4")
-newviewsvideo_path = os.path.join(out_prefix, saveprefix + "_newview.mp4")
-mpiout_path = os.path.join(out_prefix, saveprefix)
 mpvout_path = os.path.join(out_prefix, saveprefix + ".mp4")
-# state_dict = torch.load(state_dict_path[''], map_location='cuda:0')
-# torch.save({"state_dict": state_dict["state_dict"]}, state_dict_path)
-# if "state_dict" in state_dict:
-#     state_dict = state_dict["state_dict"]
-# model.load_state_dict(state_dict)
 smart_load_checkpoint('', {"check_point": state_dict_path}, model)
 
 # ## ### #### ##### ###### ####### ######## ####### ###### ##### #### ### ## #
 
 cap = cv2.VideoCapture(video_path)
 dispout = cv2.VideoWriter()
-newview_out = cv2.VideoWriter() if save_newview else None
 mpvout = MPVWriter(mpvout_path)
-mpfout = MPFWriter(mpvout_path)
-# if infer_single_frame:
-#     cap.set(cv2.CAP_PROP_POS_FRAMES, 5)
 
 frameidx = 0
 with torch.no_grad():
@@ -91,9 +76,9 @@ with torch.no_grad():
         # if frameidx % 10 != 0:
         #     frameidx += 1
         #     continue
-
+        force_finish = False
         if not ret or frameidx > 50:
-            break
+            force_finish = True
         hei, wid, _ = img.shape
         if wid > hei * 2:
             img = img[:, :wid // 2]
@@ -102,62 +87,28 @@ with torch.no_grad():
         img = cv2.resize(img, None, None, 0.5, 0.5)
         hei, wid, _ = img.shape
         img_tensor = ToTensor()(img).cuda()
+        img_tensor = img_tensor.unsqueeze(0)
+        iskeyframe = pipeline.update_window(img_tensor)
 
-        mpi = modelloss.infer_forward(img_tensor, ret_cfg=ret_cfg)
+        if iskeyframe or force_finish:
+            for i in range(len(pipeline.img_window) - 1):
+                mpi = pipeline.infer_forward(i, ret_cfg=ret_cfg)
 
-        if mpi is None:
-            continue
-        if isinstance(mpi, tuple):
-            mpi, mpf = mpi
-        if save_mpf:
-            mpfout.write(mpi[0], mpf[0])
-        if save_mpv:
-            mpvout.write(mpi[0])
-        depthes = make_depths(mpi.shape[1]).cuda()
-        disparity = estimate_disparity_torch(mpi, depthes)
-        visdisp = draw_dense_disp(disparity, depthes[-1])[:, :, ::-1]
+                if save_mpv:
+                    mpvout.write(mpi[0])
+                depthes = make_depths(mpi.shape[1]).cuda()
+                disparity = estimate_disparity_torch(mpi, depthes)
+                visdisp = draw_dense_disp(disparity, depthes[-1])[:, :, ::-1]
 
-        if save_newview:
-            target_pose = torch.tensor(
-                [[1.0, 0.0, 0.0, -0.1],
-                 [0.0, 1.0, 0.0, 0],
-                 [0.0, 0.0, 1.0, 0]]
-            ).type_as(mpi).unsqueeze(0)
-            source_pose = torch.tensor(
-                [[1.0, 0.0, 0.0, 0],
-                 [0.0, 1.0, 0.0, 0],
-                 [0.0, 0.0, 1.0, 0]]
-            ).type_as(mpi).unsqueeze(0)
-            intrin = torch.tensor(
-                [[wid / 2, 0.0, wid / 2],
-                 [0.0, hei / 2, hei / 2],
-                 [0.0, 0.0, 1.0]]
-            ).type_as(mpi).unsqueeze(0)
-            view = render_newview(mpi, source_pose, target_pose, intrin, depthes)
-            visview = (view * 255).type(torch.uint8).squeeze(0).permute(1, 2, 0).cpu().numpy()
-            visview = cv2.cvtColor(visview, cv2.COLOR_RGB2BGR)
+                if save_disparity:
+                    if not dispout.isOpened():
+                        dispout.open(dispvideo_path, 828601953, 30., (wid, hei), True)
+                    dispout.write(visdisp)
 
-        if infer_single_frame and frameidx == 5:
-            if save_infer_mpi:
-                save_mpi(mpi, mpiout_path)
-            cv2.imwrite(dispvideo_path + ".jpg", visdisp)
-            if save_newview:
-                cv2.imwrite(newviewsvideo_path + ".jpg", visview)
+        if force_finish:
             break
-
-        if save_disparity:
-            if not dispout.isOpened():
-                dispout.open(dispvideo_path, 828601953, 30., (wid, hei), True)
-                if newview_out is not None:
-                    newview_out.open(newviewsvideo_path, 828601953, 30., (wid, hei), True)
-            dispout.write(visdisp)
-        if newview_out is not None:
-            newview_out.write(visview)
-
         frameidx += 1
 
     print("\n")
     if dispout is not None:
         dispout.release()
-    if newview_out is not None:
-        newview_out.release()

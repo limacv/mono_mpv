@@ -94,8 +94,7 @@ def train(cfg: dict):
         for iternum, datas in enumerate(trainingdata):
             step = len(trainingdata) * epoch + iternum
             # one epoch
-            step_scheduler = 1e10 if "mpinet_ori.pth" in cfg["check_point"] else step
-            loss_dict = modelloss(*datas, step=step_scheduler)
+            loss_dict = modelloss(*datas, step=step)
             loss = loss_dict["loss"]
             loss_dict = loss_dict["loss_dict"]
             loss = loss.mean()

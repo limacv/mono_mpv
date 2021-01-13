@@ -220,7 +220,7 @@ class ModelandDispLoss(nn.Module):
         self.photo_loss = select_photo_loss(self.pixel_loss_mode).cuda()
         self.scheduler = ParamScheduler([1e4, 2e4], [0.5, 1])
 
-    def infer_forward(self, im: torch.Tensor):
+    def infer_forward(self, im: torch.Tensor, ret_cfg=None):
         with torch.no_grad():
             if im.dim() == 3:
                 im = im.unsqueeze(0)
@@ -737,9 +737,37 @@ class PipelineV2(nn.Module):
             alpha1 = self.gaussian2alpha(mean1, std1, scale, alpha)
             alpha2 = self.gaussian2alpha(mean2, std2, scale, alpha)
             alpha = alpha1 * weight + alpha2 * (1 - weight)
+            alpha = torch.clamp(alpha, 0, 1)
+        elif isinstance(self.mpimodel, MPI_square):
+            if tmpcfg is not None:
+                if "gaussian2" in tmpcfg:
+                    tmpcfg["gaussian2"].append(netout)
+                else:
+                    tmpcfg["gaussian2"] = [netout]
+            cnl = netout.shape[1]
+            alpha = torch.linspace(0, 1, layernum).reshape(1, layernum, 1, 1).type_as(netout)
+            if cnl == 2:
+                depth, thick = torch.split(netout, 1, dim=1)
+                alpha = self.square2alpha(alpha, depth, thick)
+            elif cnl == 3:
+                depth, thick, scale = torch.split(netout, 1, dim=1)
+                alpha = self.square2alpha(alpha, depth, thick, scale)
+            elif cnl == 4:
+                depth1, thick1, depth2, thick2 = torch.split(netout, 1, dim=1)
+                alpha1 = self.square2alpha(alpha, depth1, thick1)
+                alpha2 = self.square2alpha(alpha, depth2, thick2)
+                alpha = alpha1 + alpha2
+            elif cnl == 6:
+                depth1, thick1, scale1, depth2, thick2, scale2 = torch.split(netout, 1, dim=1)
+                alpha1 = self.square2alpha(alpha, depth1, thick1, scale1)
+                alpha2 = self.square2alpha(alpha, depth2, thick2, scale2)
+                alpha = alpha1 + alpha2
+            else:
+                raise NotImplementedError
+            alpha = torch.clamp(alpha, 0, 1)
         else:
             raise NotImplementedError
-
+        
         alpha = torch.cat([torch.ones([batchsz, 1, hei, wid]).type_as(alpha), alpha], dim=1)
         return alpha
 
@@ -749,6 +777,13 @@ class PipelineV2(nn.Module):
         y = n * torch.exp(-torch.abs((x - mean) / std))
         y = torch.where(x <= mean, y, 2 * n - y)
         return (y[:, 1:] - y[:, :-1]) * self.mpimodel.num_layers
+
+    def square2alpha(self, x, depth, thick, scale=1):
+        denorm = self.mpimodel.num_layers - 1
+        n = denorm * scale * (x - depth)
+        n = torch.max(n, torch.zeros(1).type_as(n))
+        n = torch.min(n, denorm * scale * thick)
+        return n[:, 1:] - n[:, :-1]
 
     def flowfwarp_warp(self, flowf, flowb, content):
         """
@@ -936,7 +971,7 @@ class PipelineV2(nn.Module):
         ]
         # currently use first frame to compute scale and shift
         scale = torch.exp((torch.log(disp_diffs[0]) * certainty_maps[:, 0]).sum(dim=[-1, -2]) / certainty_norm[:, 0])
-
+        scale = scale + 0.005
         # disparity in ground truth space
         disparities = torch.reciprocal(depth * scale.reshape(-1, 1) * -isleft.reshape(-1, 1)) + shift_gt.reshape(-1, 1)
         # render target view

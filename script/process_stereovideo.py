@@ -19,6 +19,7 @@ from torchvision.transforms import ToTensor
 import numpy as np
 import multiprocessing
 import argparse
+from collections import deque
 
 
 width_2_list = [
@@ -129,6 +130,27 @@ def prepareoffset(wid, hei):
     return offset.permute(0, 2, 3, 1)
 
 
+class Flow_Cacher:
+    def __init__(self, max_sz):
+        self.sz = max_sz
+        self.flow_cache = {}
+        self.history_que = deque()
+
+    def estimate_flow(self, model, im0, im1):
+        key = f"{id(im0)}_{id(im1)}"
+        if key in self.flow_cache:
+            # print("cache hit!")
+            return self.flow_cache[key]
+        else:
+            with torch.no_grad():
+                flow = model(im0, im1)
+            self.flow_cache[key] = flow
+            self.history_que.append(key)
+            if len(self.history_que) > self.sz:
+                self.flow_cache.pop(self.history_que.popleft())
+            return flow
+
+
 def detect_black_border(img: np.ndarray):
     img = img.sum(axis=-1).astype(np.float32)
     img_h = np.maximum(img.mean(axis=1) - 20, 0) > 0
@@ -163,12 +185,18 @@ def process_clip(videofile, model, scale_func: Callable, fpsx2=False, needswarp=
     writer_vis = cv2.VideoWriter()
     framecount = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     print(f"process {classname}_{basename}, total {framecount} frames", flush=True)
-    imglr_last = None
-    flowlr_last = None
+    # imglr_last = None
+    # flowlr_last = None
     offset = None
 
     vis_disp_min, vis_disp_max = None, None
     blackl, blackr, blackt, blackb = -1, -1, -1, -1
+    imgl_window, imgr_window = deque(), deque()
+    imglt_window, imgrt_window = deque(), deque()
+    displ_window, dispr_window = deque(), deque()
+    flow_cachel = Flow_Cacher(100)
+    flow_cacher = Flow_Cacher(100)
+
     for frameidx in range(framecount):
         print(f"{frameidx}", end='.')
         ret, img = cap.read()
@@ -206,44 +234,99 @@ def process_clip(videofile, model, scale_func: Callable, fpsx2=False, needswarp=
         imgl = imgl[blackt: hei-blackb, blackl: wid-blackr]
         imgr = imgr[blackt: hei-blackb, blackl: wid-blackr]
         hei, wid, _ = imgl.shape
+        offset = prepareoffset(wid, hei) if offset is None else offset
 
         imglt, imgrt = totensor(cv2.cvtColor(imgl, cv2.COLOR_BGR2RGB)).unsqueeze(0).cuda(), \
                        totensor(cv2.cvtColor(imgr, cv2.COLOR_BGR2RGB)).unsqueeze(0).cuda()
-        offset = prepareoffset(wid, hei) if offset is None else offset
-        imglrt = torch.cat([imglt, imgrt])
-
-        flowlr_ini = None
-        # if imglr_last is None:
-        #     flowlr_ini = None
-        # else:
-        #     with torch.no_grad():
-        #         flowlrnowlast = model(imglrt, imglr_last)
-        #         flowlr_ini = warp_flow(flowlr_last, flowlrnowlast, offset=offset)
-        #         flowlr_ini = downflow8(flowlr_ini)
-
+        # ==============================================
+        # predicting the current disparity map
+        # ==============================================
+        val_ninf = torch.tensor(float('-inf')).type_as(imglt)
+        val_inf = torch.tensor(float('inf')).type_as(imglt)
+        val_false = torch.tensor(False).to(imglt.device)
         with torch.no_grad():
-            flowl2r, flowr2l = model(imglrt, torch.cat([imgrt, imglt]),
-                                     init_flow=flowlr_ini,
-                                     iters=20 if flowlr_ini is None else 12)
+            flowl2r, flowr2l = model(torch.cat([imglt, imgrt]), torch.cat([imgrt, imglt]),
+                                     iters=20)
             flowl2r, flowr2l = flowl2r.unsqueeze(0), flowr2l.unsqueeze(0)
             occl = warp_flow(flowr2l, flowl2r, offset=offset) + flowl2r
-            occl = (torch.norm(occl, dim=1) < flow_bidirect_thresh)[0]
-            vflowl = (flowl2r[0, 1].abs() < vertical_disparity_torl)
-            invalidl_ma = torch.logical_not(torch.logical_and(occl, vflowl)).cpu().numpy()
-            displ = flowl2r[0, 0].cpu().numpy().astype(np.half)
+            occl = (torch.norm(occl, dim=1, keepdim=True) < flow_bidirect_thresh)
+            vflowl = (flowl2r[:, 1:].abs() < vertical_disparity_torl)
+            invalidl_ma = torch.logical_not(torch.logical_and(occl, vflowl))
+            displ = torch.where(invalidl_ma, val_ninf, flowl2r[:, 0:1])
 
             occr = warp_flow(flowl2r, flowr2l, offset=offset) + flowr2l
-            occr = (torch.norm(occr, dim=1) < flow_bidirect_thresh)[0]
-            vflowr = (flowr2l[0, 1].abs() < vertical_disparity_torl)
-            invalidr_ma = torch.logical_not(torch.logical_and(occr, vflowr)).cpu().numpy()
-            dispr = flowr2l[0, 0].cpu().numpy().astype(np.half)
+            occr = (torch.norm(occr, dim=1, keepdim=True) < flow_bidirect_thresh)
+            vflowr = (flowr2l[0, 1:].abs() < vertical_disparity_torl)
+            invalidr_ma = torch.logical_not(torch.logical_and(occr, vflowr))
+            dispr = torch.where(invalidr_ma, val_ninf, flowr2l[:, 0:1])
 
-        disp_min = np.min(dispr)
-        displ[invalidl_ma] = np.finfo(np.half).min
-        dispr[invalidr_ma] = np.finfo(np.half).min
+        # ==========================================
+        # filtering
+        # ==========================================
+        imgl_window.append(imgl)
+        imgr_window.append(imgr)
+        imglt_window.append(imglt)
+        imgrt_window.append(imgrt)
+        displ_window.append(displ)
+        dispr_window.append(dispr)
+        if len(imgl_window) < Filter_WinSz:
+            continue
+        elif len(imgl_window) > Filter_WinSz:
+            imgl_window.popleft()
+            imgr_window.popleft()
+            imglt_window.popleft()
+            imgrt_window.popleft()
+            displ_window.popleft()
+            dispr_window.popleft()
 
-        # for visualization
-        vis_disp = np.where(dispr == np.finfo(np.half).min, disp_min, dispr)
+        mididx = Filter_WinSz // 2
+
+        def filter_depth(cache: Flow_Cacher, img_win, disp_win):
+            disp_list = []
+            for i in range(Filter_WinSz):
+                if i == mididx:
+                    disp_list.append(disp_win[i])
+                else:
+                    flowf = cache.estimate_flow(model, img_win[mididx], img_win[i])
+                    flowb = cache.estimate_flow(model, img_win[i], img_win[mididx])
+                    dispwarp = warp_flow(disp_win[i], flowf, offset=offset, mode='nearest')
+                    occ = warp_flow(flowb, flowf, offset=offset) + flowf
+                    occ = torch.norm(occ, dim=1, keepdim=True)
+                    disp = torch.where(occ < 2, dispwarp, val_ninf)
+                    disp_list.append(disp)
+
+            disp_all = torch.cat(disp_list, dim=0)
+            good_ma = (disp_all > -9999)
+            condition1 = good_ma.type(torch.float).sum(dim=0, keepdim=True) >= Filter_good_time_min
+            good_ma = torch.where(condition1, good_ma, val_false)
+
+            maxval = disp_all.max(dim=0, keepdim=True)[0]
+            minval = torch.where(good_ma, disp_all, val_inf).min(dim=0, keepdim=True)[0]
+            condition2 = (maxval - minval) < Filter_max_diff_tol
+            good_ma = torch.where(condition2, good_ma, val_false)
+            condition = torch.logical_and(condition1, condition2)
+
+            disp_all = torch.where(good_ma, disp_all, torch.tensor(0.).cuda())
+            weight = torch.tensor(Filter_weight).reshape(-1, 1, 1, 1).type_as(disp_all)
+            weight = torch.where(good_ma, weight, torch.tensor(0.).cuda())
+            weightsum = weight.sum(dim=0, keepdim=True) + 0.0000001
+            disp = (disp_all * weight).sum(dim=0, keepdim=True) / weightsum
+            disp = torch.where(condition, disp, val_ninf)
+            return disp.squeeze(0).squeeze(0)
+
+        imgl = imgl_window[mididx]
+        imgr = imgr_window[mididx]
+
+        displ = filter_depth(flow_cachel, imglt_window, displ_window)
+        dispr = filter_depth(flow_cacher, imgrt_window, dispr_window)
+        displ = displ.cpu().numpy()
+        dispr = dispr.cpu().numpy()
+
+        # ==============================================
+        # visualization and save
+        # ==============================================
+        invalidr_ma = dispr < -99999
+        vis_disp = np.where(invalidr_ma, dispr.max(), dispr)
         if vis_disp_min is None:
             vis_disp_min = np.min(vis_disp)
             vis_disp_max = np.max(vis_disp)
@@ -264,14 +347,16 @@ def process_clip(videofile, model, scale_func: Callable, fpsx2=False, needswarp=
         if not writer.isOpened():
             writer.open(video_out_path, fourcc, 30, (wid * 2, hei), isColor=True)
             writer_vis.open(visual_out_path, fourcc, 30, (vis_wid, vis_hei), isColor=True)
+            outframeidx = 0
 
         stereoimg = np.hstack([imgl, imgr])
         stereovis = np.hstack([vis_img, vis_disp])
         writer.write(stereoimg)
         writer_vis.write(stereovis)
 
-        np.save(os.path.join(displ_out_path, f"{frameidx:06d}.npy"), displ)
-        np.save(os.path.join(dispr_out_path, f"{frameidx:06d}.npy"), dispr)
+        np.save(os.path.join(displ_out_path, f"{outframeidx:06d}.npy"), displ)
+        np.save(os.path.join(dispr_out_path, f"{outframeidx:06d}.npy"), dispr)
+        outframeidx += 1
 
         # imglr_last = imglrt
         # flowlr_last = torch.cat([flowl2r, flowr2l])
@@ -344,6 +429,10 @@ if __name__ == "__main__":
     num_process = 10
     Source_midfix = "StereoVideo_stage1v2"
     Dest_midfix = "StereoVideoFinalv3"
+    Filter_WinSz = 7
+    Filter_weight = (0.05, 0.1, 0.2, 0.3, 0.2, 0.1, 0.05)
+    Filter_max_diff_tol = 8
+    Filter_good_time_min = 3
     Source_prefix = os.path.join(datasetroot, Source_midfix)
     Output_prefix = os.path.join(datasetroot, Dest_midfix)
 
@@ -359,8 +448,6 @@ if __name__ == "__main__":
     with open(os.path.join(Source_prefix, "Youtube_list.txt"), 'r') as f:
         lines = f.readlines()
         youtube_videos = [os.path.join(Source_prefix, "Youtube", l_.strip('\n')) for l_ in lines]
-
-    processvideos(wsvd_videos[19:], 0)
 
     all_videos = sorted(stereo_blur_videos + wsvd_videos + youtube_videos)
     all_videos = all_videos[args.work_id::args.num_worker]

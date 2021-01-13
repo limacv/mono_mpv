@@ -113,6 +113,30 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": SceneFlowNet(),
             "AppearanceFlow": ASPFNetWithMaskOut()
         })
+    elif "Fullv243" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_square(plane_num, 2),
+            "SceneFlow": SceneFlowNet(),
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
+    elif "Fullv244" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_square(plane_num, 3),
+            "SceneFlow": SceneFlowNet(),
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
+    elif "Fullv245" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_square(plane_num, 2 + 2),
+            "SceneFlow": SceneFlowNet(),
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
+    elif "Fullv246" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_square(plane_num, 3 + 3),
+            "SceneFlow": SceneFlowNet(),
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 

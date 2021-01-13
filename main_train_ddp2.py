@@ -20,7 +20,7 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 32,
+    "validate_num": -1,
     "valid_freq": 200,
     "train_report_freq": 5,
 
@@ -29,25 +29,27 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "stereovideo_img",
+    "trainset": "stereovideo_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "MPINetv2",
-    "modelloss_name": "disp_img",
+    "model_name": "Fullv245",
+    "modelloss_name": "fullv2",
     "batch_size": 1,
     "num_epoch": 5000,  # actually it's num_iter
     "savepth_iter_freq": 500,
     "lr": 1e-4,
-    "check_point": "mpinet_pretrain.pth",
+    "check_point": {
+        "": "no.pth"
+    },
     "loss_weights": {
         "pixel_loss_cfg": 'vgg',
         "pixel_loss": 0.2,
-        "smooth_loss": 0.1,
-        # "smooth_flowgrad_loss": 0.05,
+        "smooth_loss": 0.05,
+        "smooth_flowgrad_loss": 0.05,
         "depth_loss": 5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
-        # "tempdepth_loss": 1,
-        # "temporal_loss_mode": "mse"
+        "tempdepth_loss": 1,
+        "temporal_loss_mode": "mse"
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
         # "alpha2mpf": True,
@@ -69,8 +71,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "singleframe_baseline"
-    cfg["comment"] = "single frame baseline"
+    cfg["id"] = "v245_dtdt"
+    cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

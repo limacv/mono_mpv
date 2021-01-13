@@ -20,10 +20,10 @@ def str2bool(s_):
     return s_
 
 
-path = "./log/checkpoint/v2_baseline_pretrain_081932_r0.pth"
+path = "./log/checkpoint/v241_gaussian1_111707_r0.pth"
 # Adjust configurations here ############################################
 state_dict_path = {
-    '': "./log/checkpoint/v2_baseline_pretrain_081932_r0.pth",
+    '': "./log/checkpoint/v241_gaussian1_111707_r0.pth",
     # "MPF.": "./log/checkpoint/mpf_bugfix_ord1smth_052107_r0.pth"
 }
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"

@@ -28,10 +28,10 @@ cfg = {
     # comment of current epoch, will print on config.txt
     "id": "",
     "comment": "",
-
+    
     "trainset": "stereovideo_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Fullv243",
+    "model_name": "Fullv246",
     "modelloss_name": "fullv2",
     "batch_size": 1,
     "num_epoch": 5000,  # actually it's num_iter
@@ -67,21 +67,11 @@ cfg = {
 }
 
 
-# TODO
-#   \problems
-#   >>> temporal consistency when training in large dataset
-#   >>> inpainting performance (pending to be test)
-#   \code
-#   >>> temporal consistency in lower resolution
-#   >>> smooth loss, temporal loss regarding the alpha distribution parameters
-#   >>>
-#   >>> ready for the evaluating metric!!!!!
-
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v243_dt"
+    cfg["id"] = "v246_dtsdts"
     cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
 
     parser = argparse.ArgumentParser()

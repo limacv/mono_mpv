@@ -630,10 +630,13 @@ class MPI_square(nn.Module):
         self.output = nn.Conv2d(64, outcnl, 3, padding=1)
         self.meanout = nn.Sigmoid()
         self.register_buffer("outputscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
+        self.register_buffer("xscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
         self.outputscale[:, 1] = 0.3  # thickness
         if self.outcnl == 4:
+            self.xscale[:, 2] = 0.3
             self.outputscale[:, 3] = 0.3
         elif self.outcnl == 6:
+            self.xscale[:, 3] = 0.3
             self.outputscale[:, 4] = 0.3
 
     @staticmethod
@@ -657,7 +660,7 @@ class MPI_square(nn.Module):
         x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
         x = self.post2(self.post1(torch.cat(self.shapeto(x, down1), dim=1)))
         x = self.output(self.up1b(self.up1(x)))
-        x = self.meanout(x) * self.outputscale
+        x = self.meanout(x * self.xscale) * self.outputscale
         return x
 
     def initial_weights(self):
@@ -667,8 +670,8 @@ class MPI_square(nn.Module):
                 if layer.bias is not None:
                     nn.init.constant_(layer.bias, 0)
 
-        nn.init.constant_(self.output.weight, 0)
-        nn.init.constant_(self.output.bias, 0)
+        # nn.init.constant_(self.output.weight, 0)
+        nn.init.constant_(self.output.bias, -1)
 
 
 class MPI_down8(nn.Module):
@@ -704,23 +707,23 @@ class MPI_down8(nn.Module):
         self.up6b = conv(512, 512, 3)
         self.up5 = conv(1024, 512, 3)
         self.up5b = conv(512, 512, 3)
-        self.up4 = conv(768, 256, 3)
+        self.up4 = conv(512, 256, 3)
         self.up4b = conv(256, 256, 3)
-        self.up3 = conv(384, 128, 3)
+        self.up3 = conv(256, 128, 3)
         self.up3b = conv(128, 128, 3)
-        self.up2 = conv(192, 64, 3)
+        self.up2 = conv(128 + 256, 64, 3)
         self.up2b = conv(64, 64, 3)
-        self.post1 = conv(96, 64, 3)
-        self.post2 = conv(64, 64, 3)
+        self.post1 = conv(64 + 128, 128, 3)
+        self.post2 = conv(128, 64, 3)
         self.up1 = conv(64, 64, 3)
         self.up1b = conv(64, 64, 3)
         self.output = nn.Conv2d(64, outcnl, 3, padding=1)
         self.meanout = nn.Sigmoid()
         self.register_buffer("outputscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
+        self.register_buffer("xscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
         self.outputscale[:, 1] = 0.3  # thickness
-        if self.outcnl == 4:
-            self.outputscale[:, 3] = 0.3
-        elif self.outcnl == 6:
+        if self.outcnl == 6:
+            self.xscale[:, 3] = 0.3
             self.outputscale[:, 4] = 0.3
 
     @staticmethod
@@ -728,6 +731,8 @@ class MPI_down8(nn.Module):
         return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
 
     def forward(self, img):
+        batchsz, _, hei, wid = img.shape
+        assert hei % 8 == 0 and wid % 8 == 0
         down1 = self.down1b(self.down1(img))
         down2 = self.down2b(self.down2(self.down(down1)))
         down3 = self.down3b(self.down3(self.down(down2)))
@@ -739,12 +744,12 @@ class MPI_down8(nn.Module):
         x = self.up(self.up7b(self.up7(torch.cat(self.shapeto(x, down7), dim=1))))
         x = self.up(self.up6b(self.up6(torch.cat(self.shapeto(x, down6), dim=1))))
         x = self.up(self.up5b(self.up5(torch.cat(self.shapeto(x, down5), dim=1))))
-        x = self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1)))
-        x = self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1)))
-        x = self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1)))
-        x = self.post2(self.post1(torch.cat(self.shapeto(x, down1), dim=1)))
+        x1 = self.up4b(self.up4(x[..., :hei // 8, :wid // 8]))
+        x2 = self.up3b(self.up3(x1))
+        x = self.up2b(self.up2(torch.cat([x2, x1], dim=1)))
+        x = self.post2(self.post1(torch.cat([x, x2], dim=1)))
         x = self.output(self.up1b(self.up1(x)))
-        x = self.meanout(x) * self.outputscale
+        x = self.meanout(x * self.xscale) * self.outputscale
         return x
 
     def initial_weights(self):
@@ -754,5 +759,5 @@ class MPI_down8(nn.Module):
                 if layer.bias is not None:
                     nn.init.constant_(layer.bias, 0)
 
-        nn.init.constant_(self.output.weight, 0)
-        nn.init.constant_(self.output.bias, 0)
+        # nn.init.constant_(self.output.weight, 0)
+        nn.init.constant_(self.output.bias, -1)

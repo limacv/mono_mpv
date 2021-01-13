@@ -31,7 +31,7 @@ cfg = {
 
     "trainset": "stereovideo_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Fullv243",
+    "model_name": "Fullv30",
     "modelloss_name": "fullv2",
     "batch_size": 1,
     "num_epoch": 5000,  # actually it's num_iter
@@ -81,7 +81,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v243_dt"
+    cfg["id"] = "v30_down_dts"
     cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
 
     parser = argparse.ArgumentParser()

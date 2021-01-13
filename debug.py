@@ -6,7 +6,7 @@ torch.manual_seed(6666)
 
 def main(kwargs):
     batchsz = kwargs["batchsz"]
-    model = select_module("Fullv246")
+    model = select_module("Fullv31")
 
     smart_load_checkpoint("./log/checkpoint/", kwargs, model)
 

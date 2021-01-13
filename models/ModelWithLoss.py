@@ -17,7 +17,7 @@ from .flow_utils import *
 from .hourglass import Hourglass
 from collections import deque
 from .img_utils import *
-
+from .RAFT_network import learned_upsample
 '''
 This class is a model container provide interface between
                                             1. dataset <-> model
@@ -487,6 +487,7 @@ class PipelineV2(nn.Module):
         self.neighbor_sz = 1
         self.max_win_sz = self.neighbor_sz * 2 + 1
         self.img_window = deque()
+        self.upmask_window = deque()
         self.flowf_win, self.flowb_win = deque(), deque()
         self.disp_warp = None
         self.lastmpi = None
@@ -499,6 +500,7 @@ class PipelineV2(nn.Module):
             self.img_window.clear()
             self.flowb_win.clear()
             self.flowf_win.clear()
+            self.upmask_window.clear()
             self.disp_warp = None
             self.lastmpi = None
 
@@ -512,13 +514,16 @@ class PipelineV2(nn.Module):
         self.prepareoffset(wid, hei)
         self.img_window.append(img)
         if len(self.img_window) > 1:
-            self.flowf_win.append(self.flow_estim(self.img_window[-2], self.img_window[-1]))
+            flowf, upmask = self.flow_estim(self.img_window[-2], self.img_window[-1], ret_upmask=True)
+            self.flowf_win.append(flowf)
+            self.upmask_window.append(upmask)
             self.flowb_win.append(self.flow_estim(self.img_window[-1], self.img_window[-2]))
 
         if len(self.img_window) > self.max_win_sz:
             self.img_window.popleft()
             self.flowf_win.popleft()
             self.flowb_win.popleft()
+            self.upmask_window.popleft()
         elif len(self.img_window) < self.max_win_sz:
             return None
 
@@ -529,6 +534,7 @@ class PipelineV2(nn.Module):
             None,
             self.img_window[1],
             flow_list,
+            self.upmask_window[1],
             self.disp_warp
         )
         depth = make_depths(alpha.shape[1]).type_as(alpha).unsqueeze(0).repeat(1, 1)
@@ -561,11 +567,12 @@ class PipelineV2(nn.Module):
         bfnum_1 = batchsz * (framenum - 1)
         bfnum_2 = batchsz * (framenum - 2)
         with torch.no_grad():
-            flows_f = self.flow_estim(refims[:, :-1].reshape(bfnum_1, 3, heiori, widori),
-                                      refims[:, 1:].reshape(bfnum_1, 3, heiori, widori))
+            flows_f, upmask = self.flow_estim(refims[:, :-1].reshape(bfnum_1, 3, heiori, widori),
+                                              refims[:, 1:].reshape(bfnum_1, 3, heiori, widori), ret_upmask=True)
             flows_b = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
                                       refims[:, :-2].reshape(bfnum_2, 3, heiori, widori))
             certainty_norm = certainty_maps.sum(dim=[-1, -2], keepdim=True)
+            upmask = upmask.reshape(batchsz, framenum - 1, -1, heiori, widori)
             flows_f = flows_f.reshape(batchsz, framenum - 1, 2, heiori, widori)
             flows_b = flows_b.reshape(batchsz, framenum - 2, 2, heiori, widori)
             depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
@@ -574,6 +581,7 @@ class PipelineV2(nn.Module):
                 None,
                 refims[:, 0],
                 [flows_f[:, 0]],
+                upmask[:, 0],
                 None
             )
             disp0 = estimate_disparity_torch(alpha0.unsqueeze(2), depth)
@@ -590,6 +598,7 @@ class PipelineV2(nn.Module):
                     None,
                     refims[:, frameidx],
                     flow_list,
+                    upmask[:, frameidx],
                     disp_warp
                 )
                 disp, blend_weight = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
@@ -690,7 +699,7 @@ class PipelineV2(nn.Module):
             self.offset = torch.stack([offsetx, offsety], 0).unsqueeze(0).float().cuda()
             self.offset_bhw2 = self.offset.permute(0, 2, 3, 1).contiguous()
 
-    def forwardmpi(self, tmpcfg, img, flow_list: list, disp_warp=None):
+    def forwardmpi(self, tmpcfg, img, flow_list: list, upmask, disp_warp=None):
         """
         Now this only return alpha channles (like depth estimation)
         """
@@ -765,6 +774,26 @@ class PipelineV2(nn.Module):
             else:
                 raise NotImplementedError
             alpha = torch.clamp(alpha, 0, 1)
+        elif isinstance(self.mpimodel, MPI_down8):
+            if tmpcfg is not None:
+                if "down8" in tmpcfg:
+                    tmpcfg["down8"].append(netout)
+                else:
+                    tmpcfg["down8"] = [netout]
+
+            netout = learned_upsample(netout, upmask)
+            outcnl = netout.shape[1]
+            alpha = torch.linspace(0, 1, layernum).reshape(1, layernum, 1, 1).type_as(netout)
+            if outcnl == 3:
+                depth, thick, scale = torch.split(netout, 1, dim=1)
+                alpha = self.square2alpha(alpha, depth, thick, scale)
+            elif outcnl == 6:
+                depth1, thick1, scale1, depth2, thick2, scale2 = torch.split(netout, 1, dim=1)
+                alpha1 = self.square2alpha(alpha, depth1, thick1, scale1)
+                alpha2 = self.square2alpha(alpha, depth2, thick2, scale2)
+                alpha = alpha1 + alpha2
+            else:
+                raise NotImplementedError
         else:
             raise NotImplementedError
         
@@ -881,11 +910,12 @@ class PipelineV2(nn.Module):
         bfnum_2 = batchsz * (framenum - 2)
         # All are [B x Frame [x cnl] x H x W]
         with torch.no_grad():
-            flows_f = self.flow_estim(refims[:, :-1].reshape(bfnum_1, 3, heiori, widori),
-                                      refims[:, 1:].reshape(bfnum_1, 3, heiori, widori))
+            flows_f, upmasks = self.flow_estim(refims[:, :-1].reshape(bfnum_1, 3, heiori, widori),
+                                               refims[:, 1:].reshape(bfnum_1, 3, heiori, widori), ret_upmask=True)
             flows_b = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
                                       refims[:, :-2].reshape(bfnum_2, 3, heiori, widori))
             certainty_norm = certainty_maps.sum(dim=[-1, -2])
+            upmasks = upmasks.reshape(batchsz, framenum - 1, -1, heiori, widori)
             flows_f = flows_f.reshape(batchsz, framenum - 1, 2, heiori, widori)
             flows_b = flows_b.reshape(batchsz, framenum - 2, 2, heiori, widori)
         disp_out = []
@@ -908,6 +938,7 @@ class PipelineV2(nn.Module):
                 None,
                 refims[:, 0],
                 [flow0_1],
+                upmasks[:, 0],
                 None
             )
             disp = estimate_disparity_torch(alphas.unsqueeze(2), depth)
@@ -923,6 +954,7 @@ class PipelineV2(nn.Module):
                 intermediates,
                 refims[:, frameidx],
                 flow_list,
+                upmasks[:, 0],
                 disp_warp
             )
             disp, blend_weight = estimate_disparity_torch(alphas.unsqueeze(2), depth, retbw=True)

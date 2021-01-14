@@ -31,7 +31,7 @@ cfg = {
 
     "trainset": "stereovideo_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Fullv245",
+    "model_name": "Fullv30",
     "modelloss_name": "fullv2",
     "batch_size": 1,
     "num_epoch": 5000,  # actually it's num_iter
@@ -43,8 +43,7 @@ cfg = {
     "loss_weights": {
         "pixel_loss_cfg": 'vgg',
         "pixel_loss": 0.2,
-        "smooth_loss": 0.05,
-        "smooth_flowgrad_loss": 0.05,
+        "smooth_loss": 0.1,
         "depth_loss": 5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
@@ -71,8 +70,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v245_dtdt"
-    cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
+    cfg["id"] = "v30new_dts"
+    cfg["comment"] = "full model of v3 pipeline trained on stereovideo dataset"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

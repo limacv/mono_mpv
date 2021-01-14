@@ -24,20 +24,6 @@ def upsample_flow(content, mask):
     return up_flow.reshape(N, C, 8 * H, 8 * W)
 
 
-def learned_upsample(content, mask):
-    """ Upsample flow field [H/8, W/8, 2] -> [H, W, 2] using convex combination """
-    N, C, H, W = content.shape
-    mask = mask.view(N, 1, 9, 8, 8, H, W)
-    mask = torch.softmax(mask, dim=2)
-
-    up_flow = torchf.unfold(content, [3, 3], padding=1)
-    up_flow = up_flow.view(N, C, 9, 1, 1, H, W)
-
-    up_flow = torch.sum(mask * up_flow, dim=2)
-    up_flow = up_flow.permute(0, 1, 4, 2, 5, 3)
-    return up_flow.reshape(N, C, 8 * H, 8 * W)
-
-
 # default args: alternate_corr = False; mixed_precision = False; small = False;
 class RAFTNet(nn.Module):
     def __init__(self, small=False):
@@ -84,7 +70,7 @@ class RAFTNet(nn.Module):
         fmap = self.fnet(frame)
         return [fmap, frame]
 
-    def forward(self, image1, image2, init_flow=None, iters=12, ret_upmask=False):
+    def forward(self, image1, image2, init_flow=None, iters=12, ret_upsample=False):
         """ Estimate optical flow between pair of frames """
         # for compatiability
         if isinstance(image1, Sequence):
@@ -115,26 +101,18 @@ class RAFTNet(nn.Module):
 
         coords0, coords1 = self.initialize_flow(fmap1, init_flow)
 
-        flow_predictions = []
         for itr in range(iters):
             coords1 = coords1.detach()
             corr = corr_fn(coords1)  # index correlation volume
             
             flow = coords1 - coords0
-            net, up_mask, delta_flow = self.update_block(net, inp, corr, flow)
+            net, up_mask, delta_flow = self.update_block(net, inp, corr, flow, upmask=(itr == iters-1))
 
             # F(t+1) = F(t) + \Delta(t)
             coords1 = coords1 + delta_flow
 
-            # upsample predictions
-            if up_mask is None:
-                flow_up = upflow8(coords1 - coords0)
-            else:
-                flow_up = upsample_flow(coords1 - coords0, up_mask)
-
-            flow_predictions.append(flow_up[:, :, :image1.shape[2], :image1.shape[3]])
-
-        if ret_upmask:
-            return flow_predictions[-1], up_mask
+        flow = coords1 - coords0
+        if ret_upsample:
+            return flow, upsample_flow(flow, up_mask)
         else:
-            return flow_predictions[-1]
+            return flow

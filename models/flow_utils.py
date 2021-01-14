@@ -413,7 +413,7 @@ class FlowEstimator(nn.Module):
             self.offset = torch.stack([offsetx, offsety], 0).unsqueeze(0).type(im1.type()).cuda()
 
         flow += self.offset
-        im1_warpped = torchf.grid_sample(im1, flow)
+        im1_warpped = torchf.grid_sample(im1, flow, align_corners=True)
         return im1_warpped
 
 

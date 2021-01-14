@@ -6,15 +6,14 @@ torch.manual_seed(6666)
 
 def main(kwargs):
     batchsz = kwargs["batchsz"]
-    model = select_module("Fullv31")
+    model = select_module("Fullv30")
 
     smart_load_checkpoint("./log/checkpoint/", kwargs, model)
 
     model.cuda()
     modelloss = select_modelloss("fullv2")(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
-
-    dataset = select_dataset("stereovideo_seq", False, {})
+    dataset = select_dataset("stereovideo_seq", True, {})
     for i in range(int(14000)):
         datas_all = [[]] * 7
         for dev in range(1):
@@ -22,7 +21,6 @@ def main(kwargs):
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
-        _val_dict = modelloss.valid_forward(*datas, visualize=True)
         with torch.autograd.set_detect_anomaly(True):
             loss_dict = modelloss(*datas, step=i)
             loss = loss_dict["loss"]
@@ -30,6 +28,7 @@ def main(kwargs):
             loss_dict = loss_dict["loss_dict"]
             optimizer.zero_grad()
             loss.backward()
+        _val_dict = modelloss.valid_forward(*datas, visualize=True)
         optimizer.step()
         loss_dict = {k: v.mean() for k, v in loss_dict.items()}
 
@@ -87,7 +86,7 @@ main({
                      "flow_smth": 0.1,
                      # "sflow_loss": 0.1,
                      "smooth_flowgrad_loss": 0.1,
-                     "temporal_loss_mode": "msle"},
+                     "temporal_loss_mode": "mse"},
 })
 # good data list
 # 01bfb80e5b8fe757

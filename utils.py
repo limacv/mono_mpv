@@ -53,100 +53,16 @@ def select_module(name: str) -> nn.Module:
     #         "MPI": MPI_Fullv1(plane_num),
     #         "MPF": MPFNet(plane_num)
     #     })
-    elif "Fullv20" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_alpha(plane_num),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": AMPFNetAIn2D(plane_num)
-        })
-    elif "Fullv21" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_alpha(plane_num),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetAIn(plane_num)
-        })
-    elif "Fullv22" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_alpha(plane_num),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetDIn()
-        })
-    elif "Fullv220" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_alpha(plane_num),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv221" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_alpha(plane_num),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetWithMaskInOut()
-        })
-    elif "Fullv2" == name:  # the ultimate model
-        return nn.ModuleDict({
-            "MPI": MPI_alpha(plane_num),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv23a" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_alpha(plane_num),
-            "SceneFlow": SceneFlowNet_alpha(plane_num),
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv23i" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_alpha(plane_num),
-            "SceneFlow": SceneFlowNet_img(),
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv241" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_gaussian1(plane_num),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv242" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_gaussian2(plane_num),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv243" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_square(plane_num, 2),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv244" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_square(plane_num, 3),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv245" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_square(plane_num, 2 + 2),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv246" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_square(plane_num, 3 + 3),
-            "SceneFlow": SceneFlowNet(),
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
     elif "Fullv30" == name:
         return nn.ModuleDict({
-            "MPI": MPI_down8(plane_num, 3),
-            "SceneFlow": SceneFlowNet(),
+            "MPI": MPI_down8_mask(plane_num, 3),
+            "SceneFlow": None,
             "AppearanceFlow": ASPFNetWithMaskOut()
         })
     elif "Fullv31" == name:
         return nn.ModuleDict({
-            "MPI": MPI_down8(plane_num, 6),
-            "SceneFlow": SceneFlowNet(),
+            "MPI": MPI_down8_mask(plane_num, 6),
+            "SceneFlow": None,
             "AppearanceFlow": ASPFNetWithMaskOut()
         })
     else:

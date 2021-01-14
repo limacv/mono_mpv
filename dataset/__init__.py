@@ -25,7 +25,7 @@ is_DEBUG = False  # (getattr(sys, 'gettrace', None) is not None)
 if 'COMPUTERNAME' in os.environ.keys() and os.environ['COMPUTERNAME'] == "MSI":
     colmap_path = "D:\\MSI_NB\\source\\util\\COLMAP-3.6-exe\\COLMAP.bat"
     youtubedl_path = "C:\\Users\\MSI_NB\\AppData\\Roaming\\Python\\Python37\\Scripts\\youtube-dl.exe"
-    OutputSize = (200, 300)
+    OutputSize = (200, 296)
 
     RealEstate10K_root = "Z:\\dataset\\RealEstate10K_test\\"
     MannequinChallenge_root = "Z:\\dataset\\MannequinChallenge"

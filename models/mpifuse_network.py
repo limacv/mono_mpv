@@ -4,9 +4,12 @@ from ._modules import *
 
 
 def initial_weights(model):
+    if model is None:
+        return
     if isinstance(model, nn.ModuleDict):
         for k, m in model.items():
-            m.initial_weights()
+            if m is not None:
+                m.initial_weights()
     else:
         model.initial_weights()
 

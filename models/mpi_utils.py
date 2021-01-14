@@ -228,7 +228,7 @@ def warp_homography(homos: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
     new_grid = (new_grid.squeeze(-1) / new_grid[..., 2:3, 0])[..., 0:2]  # grid: B x D x H x W x 2
     new_grid = new_grid / torch.tensor([wid / 2, hei / 2]).type_as(new_grid) - 1.
     warpped = torchf.grid_sample(images.reshape(batchsz * planenum, cnl, hei, wid),
-                                 new_grid.reshape(batchsz * planenum, hei, wid, 2))
+                                 new_grid.reshape(batchsz * planenum, hei, wid, 2), align_corners=True)
     return warpped.reshape(batchsz, planenum, cnl, hei, wid)
 
 
@@ -259,7 +259,7 @@ def warp_homography_withdepth(homos: torch.Tensor, images: torch.Tensor, depth: 
     new_grid = (new_grid.squeeze(-1) / new_grid[..., 2:3, 0])[..., 0:2]  # grid: B x D x H x W x 2
     new_grid = new_grid / torch.tensor([wid / 2, hei / 2]).type_as(new_grid) - 1.
     warpped = torchf.grid_sample(images.reshape(batchsz * planenum, cnl, hei, wid),
-                                 new_grid.reshape(batchsz * planenum, hei, wid, 2))
+                                 new_grid.reshape(batchsz * planenum, hei, wid, 2), align_corners=True)
     return warpped.reshape(batchsz, planenum, cnl, hei, wid), new_depth
 
 
@@ -355,7 +355,7 @@ def shift_newview(mpi: torch.Tensor, disparities: torch.Tensor, ret_mask=False, 
     affine[:, :, 0, -1] = (disparities / ((wid - 1) / 2))
 
     grid = torchf.affine_grid(affine.reshape(bpnum, 2, 3), [bpnum, cnl, hei, wid])
-    mpi_warp = torchf.grid_sample(mpi.reshape(bpnum, cnl, hei, wid), grid)
+    mpi_warp = torchf.grid_sample(mpi.reshape(bpnum, cnl, hei, wid), grid, align_corners=True)
     mpi_warp = mpi_warp.reshape(batchsz, planenum, cnl, hei, wid)
 
     if ret_dispmap:
@@ -382,7 +382,7 @@ def warp_flow(content: torch.Tensor, flow: torch.Tensor, offset=None, pad_mode="
         offset = torch.stack([x, y], dim=-1)
     grid = offset.reshape(1, hei, wid, 2) + flow
     normanator = torch.tensor([(wid - 1) / 2, (hei - 1) / 2]).reshape(1, 1, 1, 2).type_as(grid)
-    warpped = torchf.grid_sample(mpi, grid / normanator - 1., padding_mode=pad_mode, mode=mode)
+    warpped = torchf.grid_sample(mpi, grid / normanator - 1., padding_mode=pad_mode, mode=mode, align_corners=True)
     return warpped.reshape(orishape)
 
 

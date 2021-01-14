@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as torchf
 import numpy as np
+import torchvision
 from ._modules import *
 
 
@@ -422,172 +423,9 @@ class MPI_alpha(nn.Module):
         nn.init.constant_(self.output.bias, 0)
 
 
-class MPI_gaussian1(nn.Module):
+class MPI_down8_mask(nn.Module):
     """
     Takes in: rgb, flow_gradient, warpped disparity map
-    output: two gaussian distribution, (u_1, u_2, sigma1, sigma2)
-    """
-    def __init__(self, mpi_layers):
-        super().__init__()
-        self.num_layers = mpi_layers
-        self.down = nn.MaxPool2d(2, ceil_mode=True)
-        self.up = up
-        self.down1 = conv(3 + 2 + 1, 32, 7)
-        self.down1b = conv(32, 32, 7)
-        self.down2 = conv(32, 64, 5)
-        self.down2b = conv(64, 64, 5)
-        self.down3 = conv(64, 128, 3)
-        self.down3b = conv(128, 128, 3)
-        self.down4 = conv(128, 256, 3)
-        self.down4b = conv(256, 256, 3)
-        self.down5 = conv(256, 512, 3)
-        self.down5b = conv(512, 512, 3)
-        self.down6 = conv(512, 512, 3)
-        self.down6b = conv(512, 512, 3)
-        self.down7 = conv(512, 512, 3)
-        self.down7b = conv(512, 512, 3)
-        self.mid1 = conv(512, 512, 3)
-        self.mid2 = conv(512, 512, 3)
-        self.up7 = conv(1024, 512, 3)
-        self.up7b = conv(512, 512, 3)
-        self.up6 = conv(1024, 512, 3)
-        self.up6b = conv(512, 512, 3)
-        self.up5 = conv(1024, 512, 3)
-        self.up5b = conv(512, 512, 3)
-        self.up4 = conv(768, 256, 3)
-        self.up4b = conv(256, 256, 3)
-        self.up3 = conv(384, 128, 3)
-        self.up3b = conv(128, 128, 3)
-        self.up2 = conv(192, 64, 3)
-        self.up2b = conv(64, 64, 3)
-        self.post1 = conv(96, 64, 3)
-        self.post2 = conv(64, 64, 3)
-        self.up1 = conv(64, 64, 3)
-        self.up1b = conv(64, 64, 3)
-        self.output = nn.Conv2d(64, 3, 3, padding=1)
-        self.meanout = nn.Sigmoid()
-        self.register_buffer("outputscale", torch.tensor([1, 1, 0.2]).reshape(1, 3, 1, 1))
-
-    @staticmethod
-    def shapeto(x, tar):
-        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
-
-    def forward(self, img):
-        down1 = self.down1b(self.down1(img))
-        down2 = self.down2b(self.down2(self.down(down1)))
-        down3 = self.down3b(self.down3(self.down(down2)))
-        down4 = self.down4b(self.down4(self.down(down3)))
-        down5 = self.down5b(self.down5(self.down(down4)))
-        down6 = self.down6b(self.down6(self.down(down5)))
-        down7 = self.down7b(self.down7(self.down(down6)))
-        x = self.up(self.mid2(self.mid1(self.down(down7))))
-        x = self.up(self.up7b(self.up7(torch.cat(self.shapeto(x, down7), dim=1))))
-        x = self.up(self.up6b(self.up6(torch.cat(self.shapeto(x, down6), dim=1))))
-        x = self.up(self.up5b(self.up5(torch.cat(self.shapeto(x, down5), dim=1))))
-        x = self.up(self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1))))
-        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
-        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
-        x = self.post2(self.post1(torch.cat(self.shapeto(x, down1), dim=1)))
-        x = self.output(self.up1b(self.up1(x)))
-        x = self.meanout(x) * self.outputscale
-        return x
-
-    def initial_weights(self):
-        for layer in self.modules():
-            if isinstance(layer, nn.Conv2d):
-                nn.init.kaiming_normal_(layer.weight)
-                if layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0)
-
-        nn.init.xavier_normal_(self.output.weight)
-        nn.init.constant_(self.output.bias, 0)
-
-
-class MPI_gaussian2(nn.Module):
-    """
-    Takes in: rgb, flow_gradient, warpped disparity map
-    output: two gaussian distribution, (weight, u_1, u_2, sigma1, sigma2)
-    """
-    def __init__(self, mpi_layers):
-        super().__init__()
-        self.num_layers = mpi_layers
-        self.down = nn.MaxPool2d(2, ceil_mode=True)
-        self.up = up
-        self.down1 = conv(3 + 2 + 1, 32, 7)
-        self.down1b = conv(32, 32, 7)
-        self.down2 = conv(32, 64, 5)
-        self.down2b = conv(64, 64, 5)
-        self.down3 = conv(64, 128, 3)
-        self.down3b = conv(128, 128, 3)
-        self.down4 = conv(128, 256, 3)
-        self.down4b = conv(256, 256, 3)
-        self.down5 = conv(256, 512, 3)
-        self.down5b = conv(512, 512, 3)
-        self.down6 = conv(512, 512, 3)
-        self.down6b = conv(512, 512, 3)
-        self.down7 = conv(512, 512, 3)
-        self.down7b = conv(512, 512, 3)
-        self.mid1 = conv(512, 512, 3)
-        self.mid2 = conv(512, 512, 3)
-        self.up7 = conv(1024, 512, 3)
-        self.up7b = conv(512, 512, 3)
-        self.up6 = conv(1024, 512, 3)
-        self.up6b = conv(512, 512, 3)
-        self.up5 = conv(1024, 512, 3)
-        self.up5b = conv(512, 512, 3)
-        self.up4 = conv(768, 256, 3)
-        self.up4b = conv(256, 256, 3)
-        self.up3 = conv(384, 128, 3)
-        self.up3b = conv(128, 128, 3)
-        self.up2 = conv(192, 64, 3)
-        self.up2b = conv(64, 64, 3)
-        self.post1 = conv(96, 64, 3)
-        self.post2 = conv(64, 64, 3)
-        self.up1 = conv(64, 64, 3)
-        self.up1b = conv(64, 64, 3)
-        self.output = nn.Conv2d(64, 6, 3, padding=1)
-        self.meanout = nn.Sigmoid()
-        self.register_buffer("outputscale", torch.tensor([1, 1, 1, 1, 0.1, 0.1]).reshape(1, 6, 1, 1))
-
-    @staticmethod
-    def shapeto(x, tar):
-        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
-
-    def forward(self, img):
-        down1 = self.down1b(self.down1(img))
-        down2 = self.down2b(self.down2(self.down(down1)))
-        down3 = self.down3b(self.down3(self.down(down2)))
-        down4 = self.down4b(self.down4(self.down(down3)))
-        down5 = self.down5b(self.down5(self.down(down4)))
-        down6 = self.down6b(self.down6(self.down(down5)))
-        down7 = self.down7b(self.down7(self.down(down6)))
-        x = self.up(self.mid2(self.mid1(self.down(down7))))
-        x = self.up(self.up7b(self.up7(torch.cat(self.shapeto(x, down7), dim=1))))
-        x = self.up(self.up6b(self.up6(torch.cat(self.shapeto(x, down6), dim=1))))
-        x = self.up(self.up5b(self.up5(torch.cat(self.shapeto(x, down5), dim=1))))
-        x = self.up(self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1))))
-        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
-        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
-        x = self.post2(self.post1(torch.cat(self.shapeto(x, down1), dim=1)))
-        x = self.output(self.up1b(self.up1(x)))
-        x = self.meanout(x) * self.outputscale
-        return x
-
-    def initial_weights(self):
-        for layer in self.modules():
-            if isinstance(layer, nn.Conv2d):
-                nn.init.kaiming_normal_(layer.weight)
-                if layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0)
-
-        nn.init.xavier_normal_(self.output.weight)
-        nn.init.constant_(self.output.bias, 0)
-
-
-class MPI_square(nn.Module):
-    """
-    Takes in: rgb, flow_gradient, warpped disparity map
-    output: w1, b1, w2, b2, w11, w12, w21, w22, b21, b22, w211, w222
     """
     def __init__(self, mpi_layers, outcnl):
         super().__init__()
@@ -595,130 +433,50 @@ class MPI_square(nn.Module):
         self.outcnl = outcnl
         self.down = nn.MaxPool2d(2, ceil_mode=True)
         self.up = up
-        self.down1 = conv(3 + 2 + 1, 32, 7)
-        self.down1b = conv(32, 32, 7)
-        self.down2 = conv(32, 64, 5)
-        self.down2b = conv(64, 64, 5)
-        self.down3 = conv(64, 128, 3)
-        self.down3b = conv(128, 128, 3)
-        self.down4 = conv(128, 256, 3)
-        self.down4b = conv(256, 256, 3)
-        self.down5 = conv(256, 512, 3)
-        self.down5b = conv(512, 512, 3)
-        self.down6 = conv(512, 512, 3)
-        self.down6b = conv(512, 512, 3)
-        self.down7 = conv(512, 512, 3)
-        self.down7b = conv(512, 512, 3)
+        self.resnet_backbone = nn.ModuleList([
+            torchvision.models.resnet101(pretrained=True).conv1,
+            torchvision.models.resnet101(pretrained=True).bn1,
+            torchvision.models.resnet101(pretrained=True).relu,
+            torchvision.models.resnet101(pretrained=True).maxpool,
+            torchvision.models.resnet101(pretrained=True).layer1,
+            torchvision.models.resnet101(pretrained=True).layer2,
+        ])  # cnl = 256
+        self.flow_encoder = nn.Sequential(
+            conv(2, 32, 3),
+            conv(32, 64, 3)
+        )
+        self.disp_last_encoder = nn.Sequential(
+            conv(self.outcnl, 32, 3),
+            conv(32, 64, 3)
+        )
+        self.down1 = conv(512 + 64, 512, 3)
+        self.down1b = conv(512, 512, 3)
+        self.down2 = conv(512, 512, 3)
+        self.down2b = conv(512, 512, 3)
+        self.down3 = conv(512, 512, 3)
+        self.down3b = conv(512, 512, 3)
         self.mid1 = conv(512, 512, 3)
         self.mid2 = conv(512, 512, 3)
-        self.up7 = conv(1024, 512, 3)
-        self.up7b = conv(512, 512, 3)
-        self.up6 = conv(1024, 512, 3)
-        self.up6b = conv(512, 512, 3)
-        self.up5 = conv(1024, 512, 3)
-        self.up5b = conv(512, 512, 3)
-        self.up4 = conv(768, 256, 3)
-        self.up4b = conv(256, 256, 3)
-        self.up3 = conv(384, 128, 3)
-        self.up3b = conv(128, 128, 3)
-        self.up2 = conv(192, 64, 3)
-        self.up2b = conv(64, 64, 3)
-        self.post1 = conv(96, 64, 3)
-        self.post2 = conv(64, 64, 3)
-        self.up1 = conv(64, 64, 3)
-        self.up1b = conv(64, 64, 3)
+        self.up3 = conv(1024, 512, 3)
+        self.up3b = conv(512, 512, 3)
+        self.up2 = conv(1024, 512, 3)
+        self.up2b = conv(512, 512, 3)
+        self.up1 = conv(1024, 512, 3)
+        self.up1b = conv(512, 512, 3)
+
+        self.mask_1 = nn.Sequential(
+            conv(512, 512, 3),
+            conv(512, 64 * 9, 3),
+        )
+        self.depth_1 = conv(512 + 64, 512, 3)
+        self.depth_1b = conv(512, 256, 3)
+        self.depth_2 = conv(256, 128, 3)
+        self.depth_2b = conv(128, 128, 3)
+        self.depth_3 = conv(128, 64, 3)
+        self.depth_3b = conv(64, 64, 3)
         self.output = nn.Conv2d(64, outcnl, 3, padding=1)
         self.meanout = nn.Sigmoid()
-        self.register_buffer("outputscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
-        self.register_buffer("xscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
-        self.outputscale[:, 1] = 0.3  # thickness
-        if self.outcnl == 4:
-            self.xscale[:, 2] = 0.3
-            self.outputscale[:, 3] = 0.3
-        elif self.outcnl == 6:
-            self.xscale[:, 3] = 0.3
-            self.outputscale[:, 4] = 0.3
 
-    @staticmethod
-    def shapeto(x, tar):
-        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
-
-    def forward(self, img):
-        down1 = self.down1b(self.down1(img))
-        down2 = self.down2b(self.down2(self.down(down1)))
-        down3 = self.down3b(self.down3(self.down(down2)))
-        down4 = self.down4b(self.down4(self.down(down3)))
-        down5 = self.down5b(self.down5(self.down(down4)))
-        down6 = self.down6b(self.down6(self.down(down5)))
-        down7 = self.down7b(self.down7(self.down(down6)))
-        x = self.up(self.mid2(self.mid1(self.down(down7))))
-        x = self.up(self.up7b(self.up7(torch.cat(self.shapeto(x, down7), dim=1))))
-        x = self.up(self.up6b(self.up6(torch.cat(self.shapeto(x, down6), dim=1))))
-        x = self.up(self.up5b(self.up5(torch.cat(self.shapeto(x, down5), dim=1))))
-        x = self.up(self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1))))
-        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
-        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
-        x = self.post2(self.post1(torch.cat(self.shapeto(x, down1), dim=1)))
-        x = self.output(self.up1b(self.up1(x)))
-        x = self.meanout(x * self.xscale) * self.outputscale
-        return x
-
-    def initial_weights(self):
-        for layer in self.modules():
-            if isinstance(layer, nn.Conv2d):
-                nn.init.kaiming_normal_(layer.weight)
-                if layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0)
-
-        # nn.init.constant_(self.output.weight, 0)
-        nn.init.constant_(self.output.bias, -1)
-
-
-class MPI_down8(nn.Module):
-    """
-    Takes in: rgb, flow_gradient, warpped disparity map
-    output: w1, b1, w2, b2, w11, w12, w21, w22, b21, b22, w211, w222
-    """
-    def __init__(self, mpi_layers, outcnl):
-        super().__init__()
-        self.num_layers = mpi_layers
-        self.outcnl = outcnl
-        self.down = nn.MaxPool2d(2, ceil_mode=True)
-        self.up = up
-        self.down1 = conv(3 + 2 + 1, 32, 7)
-        self.down1b = conv(32, 32, 7)
-        self.down2 = conv(32, 64, 5)
-        self.down2b = conv(64, 64, 5)
-        self.down3 = conv(64, 128, 3)
-        self.down3b = conv(128, 128, 3)
-        self.down4 = conv(128, 256, 3)
-        self.down4b = conv(256, 256, 3)
-        self.down5 = conv(256, 512, 3)
-        self.down5b = conv(512, 512, 3)
-        self.down6 = conv(512, 512, 3)
-        self.down6b = conv(512, 512, 3)
-        self.down7 = conv(512, 512, 3)
-        self.down7b = conv(512, 512, 3)
-        self.mid1 = conv(512, 512, 3)
-        self.mid2 = conv(512, 512, 3)
-        self.up7 = conv(1024, 512, 3)
-        self.up7b = conv(512, 512, 3)
-        self.up6 = conv(1024, 512, 3)
-        self.up6b = conv(512, 512, 3)
-        self.up5 = conv(1024, 512, 3)
-        self.up5b = conv(512, 512, 3)
-        self.up4 = conv(512, 256, 3)
-        self.up4b = conv(256, 256, 3)
-        self.up3 = conv(256, 128, 3)
-        self.up3b = conv(128, 128, 3)
-        self.up2 = conv(128 + 256, 64, 3)
-        self.up2b = conv(64, 64, 3)
-        self.post1 = conv(64 + 128, 128, 3)
-        self.post2 = conv(128, 64, 3)
-        self.up1 = conv(64, 64, 3)
-        self.up1b = conv(64, 64, 3)
-        self.output = nn.Conv2d(64, outcnl, 3, padding=1)
-        self.meanout = nn.Sigmoid()
         self.register_buffer("outputscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
         self.register_buffer("xscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
         self.outputscale[:, 1] = 0.3  # thickness
@@ -730,27 +488,31 @@ class MPI_down8(nn.Module):
     def shapeto(x, tar):
         return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
 
-    def forward(self, img):
+    def forward(self, img, flow_grad, disp_warp):
         batchsz, _, hei, wid = img.shape
         assert hei % 8 == 0 and wid % 8 == 0
-        down1 = self.down1b(self.down1(img))
+        im_feat = img
+        for layer in self.resnet_backbone:
+            im_feat = layer(im_feat)
+        flow_feat = self.flow_encoder(flow_grad)
+        disp_feat = self.disp_last_encoder(disp_warp)
+        down1 = self.down1b(self.down1(self.down(torch.cat([im_feat, flow_feat], dim=1))))
         down2 = self.down2b(self.down2(self.down(down1)))
         down3 = self.down3b(self.down3(self.down(down2)))
-        down4 = self.down4b(self.down4(self.down(down3)))
-        down5 = self.down5b(self.down5(self.down(down4)))
-        down6 = self.down6b(self.down6(self.down(down5)))
-        down7 = self.down7b(self.down7(self.down(down6)))
-        x = self.up(self.mid2(self.mid1(self.down(down7))))
-        x = self.up(self.up7b(self.up7(torch.cat(self.shapeto(x, down7), dim=1))))
-        x = self.up(self.up6b(self.up6(torch.cat(self.shapeto(x, down6), dim=1))))
-        x = self.up(self.up5b(self.up5(torch.cat(self.shapeto(x, down5), dim=1))))
-        x1 = self.up4b(self.up4(x[..., :hei // 8, :wid // 8]))
-        x2 = self.up3b(self.up3(x1))
-        x = self.up2b(self.up2(torch.cat([x2, x1], dim=1)))
-        x = self.post2(self.post1(torch.cat([x, x2], dim=1)))
-        x = self.output(self.up1b(self.up1(x)))
-        x = self.meanout(x * self.xscale) * self.outputscale
-        return x
+        x = self.up(self.mid2(self.mid1(self.down(down3))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
+        x = x[..., :hei // 8, :wid // 8]
+
+        feat = self.depth_1b(self.depth_1(torch.cat([x, disp_feat], dim=1)))  # 256
+        feat = self.depth_2b(self.depth_2(feat))  # 128
+        feat = self.depth_3b(self.depth_3(feat))  # 64
+        feat = self.output(feat)
+        feat = self.meanout(feat * self.xscale) * self.outputscale
+
+        upmask = self.mask_1(x)
+        return feat, upmask
 
     def initial_weights(self):
         for layer in self.modules():
@@ -761,3 +523,19 @@ class MPI_down8(nn.Module):
 
         # nn.init.constant_(self.output.weight, 0)
         nn.init.constant_(self.output.bias, -1)
+
+
+def learned_upsample(content, mask):
+    """ Upsample flow field [H/8, W/8, 2] -> [H, W, 2] using convex combination """
+    N, C, H, W = content.shape
+    mask = mask.view(N, 1, 9, 8, 8, H, W)
+    mask = torch.softmax(mask, dim=2)
+
+    content = torchf.pad(content, [1, 1, 1, 1], 'replicate')
+    up_flow = torchf.unfold(content, [3, 3], padding=0)
+    up_flow = up_flow.view(N, C, 9, 1, 1, H, W)
+
+    up_flow = torch.sum(mask * up_flow, dim=2)
+    up_flow = up_flow.permute(0, 1, 4, 2, 5, 3)
+    return up_flow.reshape(N, C, 8 * H, 8 * W)
+

@@ -1444,6 +1444,134 @@ class PipelineV3(PipelineV2):
             return mpi
 
 
+class PipelineV4(PipelineV2):
+    def __init__(self, models: nn.Module, cfg: dict):
+        super().__init__(models, cfg)
+        self.img_window = deque()
+        self.frameinfo_window = deque()
+        self.flow_cache = {}
+        self.winsz = cfg.pop("winsz", None)
+
+    def estimate_flow(self, idx0, idx1):
+        with torch.no_grad():
+            if idx0 < 0:
+                idx0 = len(self.img_window) + idx0
+            if idx1 < 0:
+                idx1 = len(self.img_window) + idx1
+            if idx0 == idx1:
+                return torch.zeros_like(self.offset)
+            key = (idx0, idx1)
+            if key not in self.flow_cache.keys():
+                flow = self.flow_estim(self.img_window[idx0], self.img_window[idx1])
+                self.flow_cache[key] = flow
+                return flow
+            else:
+                return self.flow_cache[key]
+
+    def update_one_frame(self, img):
+        batchsz, cnl, hei, wid = img.shape
+        self.prepareoffset(wid, hei)
+        self.img_window.append(img)
+
+        alpha, net, upmask = self.forwardmpi(None, img, )
+        if len(self.img_window) > self.winsz:
+            self.img_window.popleft()
+            # update flow_cache
+            self.flow_cache = {(idx0 - 1, idx1 - 1) for (idx0, idx1), v in self.flow_cache if idx0 > 0 and idx1 > 0}
+
+    def update_window(self, img: torch.Tensor):
+        """
+        update img_window, and detect keyframe
+        return: is keyframe detected
+        """
+        if self.kf_lock:
+            print("start new key frame segment")
+            self.img_window = self.img_window[-1:]
+            self.flow_cache.clear()
+            self.kf0_cache.update(self.kf1_cache.disp, self.kf1_cache.mpi)
+            self.kf1_cache.update(None, None)
+            self.kf_lock = False
+
+        batchsz, cnl, hei, wid = img.shape
+        self.prepareoffset(wid, hei)
+        self.img_window.append(img)
+        if len(self.img_window) < 2:
+            return False
+
+        # detect keyframes
+        flowf = self.estimate_flow(0, len(self.img_window) - 1)
+        flowb = self.estimate_flow(len(self.img_window) - 1, 0)
+
+        occmask = warp_flow(flowb, flowf, offset=self.offset_bhw2) + flowf
+        occmask = (torch.norm(occmask, dim=1)).type(torch.float32)
+        if occmask.max() > 0.1 * max(hei, wid):
+            self.kf_lock = True
+            return True
+        else:
+            return False
+
+    def infer_forward(self, idx, ret_cfg: str):
+        """
+        estimate the mpi in index idx (self.img_window)
+        """
+        if not self.kf_lock:
+            print("Warning! haven't lock key frames, force produce result based on current status")
+            self.kf_lock = True
+
+        if idx == len(self.img_window) - 1:
+            return None
+        with torch.no_grad():
+            depth = make_depths(self.mpimodel.num_layers).type_as(self.img_window[0]).unsqueeze(0).repeat(1, 1)
+            # keyframe need special deal
+            if self.kf0_cache.isinvalid():
+                flow_list = [self.estimate_flow(0, i) for i in [len(self.img_window) // 2, -1]]
+                img_list = [self.img_window[i] for i in [len(self.img_window) // 2, -1]]
+                disp = None
+                for i in range(3):
+                    alpha = self.forwardmpi(None, self.img_window[0], flow_list, disp_warp=disp)
+                    disp, blend_weight = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
+                    disp = disp.unsqueeze(1)
+                disp = disp.squeeze(1)
+                imbg = self.forwardaf(alpha, disp, flow_list, None, img_list)
+                mpi = alpha2mpi(alpha, self.img_window[0], imbg, blend_weight=blend_weight)
+                self.kf0_cache.update(disp, mpi)
+
+            if self.kf1_cache.isinvalid():
+                disp_warp = self.flowfwarp_warp(self.estimate_flow(0, -1), self.estimate_flow(-1, 0),
+                                                self.kf0_cache.disp.unsqueeze(1))
+                flow_list = [self.estimate_flow(-1, i) for i in [0, -len(self.img_window) // 2]]
+                img_list = [self.img_window[i] for i in [0, -len(self.img_window) // 2]]
+                alpha = self.forwardmpi(None, self.img_window[-1], flow_list, disp_warp=disp_warp)
+                disp, blend_weight = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
+                imbg = self.forwardaf(alpha, disp, flow_list, None, img_list)
+                mpi = alpha2mpi(alpha, self.img_window[-1], imbg, blend_weight=blend_weight)
+                self.kf1_cache.update(disp, mpi)
+
+            if idx == 0:
+                return self.kf0_cache.mpi
+
+            alpha_warp0 = self.flowfwarp_warp(
+                flowf=self.estimate_flow(0, idx),
+                flowb=self.estimate_flow(idx, 0),
+                content=self.kf0_cache.mpi[:, :, -1]
+            )
+            weight0 = (len(self.img_window) - 1 - idx) / (len(self.img_window) - 1)
+            alpha_warp1 = self.flowfwarp_warp(
+                flowf=self.estimate_flow(-1, idx),
+                flowb=self.estimate_flow(idx, -1),
+                content=self.kf1_cache.mpi[:, :, -1]
+            )
+            weight1 = idx / (len(self.img_window) - 1)
+            alpha = alpha_warp0 * weight0 + alpha_warp1 * weight1
+
+            flow_list = [self.estimate_flow(idx, 0), self.estimate_flow(idx, -1)]
+            img_list = [self.img_window[0], self.img_window[-1]]
+            disp, blend_weight = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
+            imbg = self.forwardaf(alpha, disp, flow_list, None, img_list)
+            mpi = alpha2mpi(alpha, self.img_window[idx], imbg, blend_weight=blend_weight)
+            return mpi
+
+
 class KeyFrameInfo:
     def __init__(self):
         self.disp = None
@@ -1455,3 +1583,9 @@ class KeyFrameInfo:
 
     def isinvalid(self):
         return self.mpi is None
+
+
+class FrameInfo:
+    def __init__(self):
+        self.net = None
+        self.upmask = None

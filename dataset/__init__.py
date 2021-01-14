@@ -11,7 +11,8 @@ MannequinChallenge_skip_framenum = 1
 StereoBlur_root = "/home/lmaag/xgpu-scratch/mali_data/StereoBlur_test/"
 StereoBlur_use_saved_disparity = True
 
-StereoVideo_root = "/home/lmaag/xgpu-scratch/mali_data/StereoVideoFinalv2/"
+StereoVideo_version = "v2"
+StereoVideo_root = f"/home/lmaag/xgpu-scratch/mali_data/StereoVideoFinal{StereoVideo_version}/"
 StereoVideo_test_pct = 0.1
 
 # OutputSize = (512j, 512 + 128 * 2)  # (h, w)
@@ -32,12 +33,12 @@ if 'COMPUTERNAME' in os.environ.keys() and os.environ['COMPUTERNAME'] == "MSI":
 
     StereoBlur_root = "D:\\MSI_NB\\source\\data\\StereoBlur_test"
     StereoBlur_use_saved_disparity = True
-    StereoVideo_root = "Z:\\dataset\\StereoVideoFinalv2\\"
+    StereoVideo_root = f"Z:\\dataset\\StereoVideoFinal{StereoVideo_version}\\"
 
     if not os.path.exists(RealEstate10K_root):  # not pluged
         RealEstate10K_root = "D:\\MSI_NB\\source\\data\\RealEstate10K\\"
         MannequinChallenge_root = "D:\\MSI_NB\\source\\data\\MannequinChallenge"
-        StereoVideo_root = "D:\\MSI_NB\\source\\data\\StereoVideoFinalv2"
+        StereoVideo_root = f"D:\\MSI_NB\\source\\data\\StereoVideoFinal{StereoVideo_version}"
 
     is_DEBUG = True
 

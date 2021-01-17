@@ -469,6 +469,8 @@ class PipelineV2(nn.Module):
         state_dict = torch.load(RAFT_path["sintel"], map_location='cpu')
         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
         self.flow_estim.load_state_dict(state_dict)
+        for param in self.flow_estim.parameters():
+            param.requires_grad = False
 
         # self.flow_loss_ord = self.loss_weight.pop("flow_smth_ord", 2)
         # self.flow_loss_consider_weight = self.loss_weight.pop("flow_smth_bw", False)
@@ -483,6 +485,10 @@ class PipelineV2(nn.Module):
             milestones=[10e3, 20e3],
             values=[0.5, 1]
         ) if self.aflow_fusefgpct else None
+        self.mask_loss_scheduler = ParamScheduler(
+            milestones=[5e3, 10e3],
+            values=[1, 0]
+        )
 
         # used for inference
         self.neighbor_sz = 1
@@ -490,6 +496,8 @@ class PipelineV2(nn.Module):
         self.img_window = deque()
         self.upmask_window = deque()
         self.flowf_win, self.flowb_win = deque(), deque()
+        self.flowfnet_win, self.flowbnet_win = deque(), deque()
+        self.flowfmask_win, self.flowbmask_win = deque(), deque()
         self.net_warp = None
         self.lastmpi = None
 
@@ -497,10 +505,15 @@ class PipelineV2(nn.Module):
         """
         new frames will be pushed into a queue, and will only output if len(queue)==self.maxwinsz
         """
+        self.eval()
         if "restart" in ret_cfg:
             self.img_window.clear()
             self.flowb_win.clear()
             self.flowf_win.clear()
+            self.flowbmask_win.clear()
+            self.flowfmask_win.clear()
+            self.flowfnet_win.clear()
+            self.flowbnet_win.clear()
             self.upmask_window.clear()
             self.net_warp = None
             self.lastmpi = None
@@ -515,37 +528,55 @@ class PipelineV2(nn.Module):
         self.prepareoffset(wid, hei)
         self.img_window.append(img)
         if len(self.img_window) > 1:
-            flowf = self.flow_estim(self.img_window[-2], self.img_window[-1])
+            flowf, flowf_upmask, flowf_net = self.flow_estim(self.img_window[-2],
+                                                             self.img_window[-1],
+                                                             ret_upmask=True)
+            flowb, flowb_upmask, flowb_net = self.flow_estim(self.img_window[-1],
+                                                             self.img_window[-2],
+                                                             ret_upmask=True)
             self.flowf_win.append(flowf)
-            self.flowb_win.append(self.flow_estim(self.img_window[-1], self.img_window[-2]))
+            self.flowfnet_win.append(flowf_net)
+            self.flowfmask_win.append(flowf_upmask)
+            self.flowb_win.append(flowb)
+            self.flowbnet_win.append(flowb_net)
+            self.flowbmask_win.append(flowb_upmask)
 
         if len(self.img_window) > self.max_win_sz:
             self.img_window.popleft()
-            self.flowf_win.popleft()
-            self.flowb_win.popleft()
+            self.flowf_win.popleft(), self.flowfnet_win.popleft(), self.flowfmask_win.popleft()
+            self.flowb_win.popleft(), self.flowbnet_win.popleft(), self.flowbmask_win.popleft()
+
         elif len(self.img_window) < self.max_win_sz:
             return None
-
-        flow_list = [self.flowb_win[0], self.flowf_win[1]]
-        img_list = [self.img_window[0], self.img_window[2]]
 
         alpha, net, upmask = self.forwardmpi(
             None,
             self.img_window[1],
-            flow_list,
+            [self.flowbnet_win[0], self.flowfnet_win[1]],
             self.net_warp
         )
         depth = make_depths(alpha.shape[1]).type_as(alpha).unsqueeze(0).repeat(1, 1)
         disp, blend_weight = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
+
+        img_list = [self.img_window[0], self.img_window[2]]
+        flow_list = [self.flowb_win[0], self.flowf_win[1]]
+        flownet_list = [self.flowbnet_win[0], self.flowfnet_win[1]]
+        flowmask_list = [self.flowbmask_win[0], self.flowfmask_win[1]]
+
         if self.aflow_includeself or "aflow_includeself" in ret_cfg:
-            flow_list.append(torch.zeros_like(flow_list[-1]))
             img_list.append(self.img_window[1])
-        if "aflow_selfonly" in ret_cfg:
-            flow_list = [torch.zeros_like(flow_list[-1])]
-            img_list = [self.img_window[1]]
+            with torch.no_grad():
+                flowself, flownetself, flowmaskself = \
+                    self.flow_estim(self.img_window[1], self.img_window[1])
+            flow_list.append(flowself)
+            flownet_list.append(flownetself)
+            flowmask_list.append(flowmaskself)
+
         imbg = self.forwardaf(disp, net, upmask,
-                              flows=flow_list,
-                              imgs_list=img_list)
+                              flows_list=flow_list,
+                              imgs_list=img_list,
+                              flow_nets_list=flownet_list,
+                              flow_upmasks_list=flowmask_list)
         mpi = alpha2mpi(alpha, self.img_window[1], imbg, blend_weight=blend_weight)
 
         # update last frame info
@@ -555,6 +586,7 @@ class PipelineV2(nn.Module):
 
     def valid_forward(self, *args: torch.Tensor, **kwargs):
         args = [_t.cuda() for _t in args]
+        self.eval()
         refims, tarims, disp_gts, certainty_maps, isleft = args
         shift_gt = isleft[:, 1]
         isleft = isleft[:, 0]
@@ -564,23 +596,30 @@ class PipelineV2(nn.Module):
         bfnum_1 = batchsz * (framenum - 1)
         bfnum_2 = batchsz * (framenum - 2)
         with torch.no_grad():
-            flows_f, flows_f_up = self.flow_estim(refims[:, :-1].reshape(bfnum_1, 3, heiori, widori),
-                                                  refims[:, 1:].reshape(bfnum_1, 3, heiori, widori),
-                                                  ret_upsample=True)
-            flows_b, flows_b_up = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
-                                                  refims[:, :-2].reshape(bfnum_2, 3, heiori, widori),
-                                                  ret_upsample=True)
-            certainty_norm = certainty_maps.sum(dim=[-1, -2], keepdim=True)
+            flows_f, flows_f_upmask, flows_f_net = self.flow_estim(refims[:, :-1].reshape(bfnum_1, 3, heiori, widori),
+                                                                   refims[:, 1:].reshape(bfnum_1, 3, heiori, widori),
+                                                                   ret_upmask=True)
+            flows_b, flows_b_upmask, flows_b_net = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
+                                                                   refims[:, :-2].reshape(bfnum_2, 3, heiori, widori),
+                                                                   ret_upmask=True)
+            flows_f_up = upsample_flow(flows_f, flows_f_upmask)
+            flows_b_up = upsample_flow(flows_b, flows_b_upmask)
+            certainty_norm = certainty_maps.sum(dim=[-1, -2])
             flows_f = flows_f.reshape(batchsz, framenum - 1, 2, heiori // 8, widori // 8)
-            flows_f_up = flows_f_up.reshape(batchsz, framenum - 1, 2, heiori, widori)
+            flows_f_up = flows_f_up.reshape(batchsz, framenum - 1, -1, heiori, widori)
+            flows_f_net = flows_f_net.reshape(batchsz, framenum - 1, -1, heiori // 8, widori // 8)
+            flows_f_upmask = flows_f_upmask.reshape(batchsz, framenum - 1, -1, heiori // 8, widori // 8)
             flows_b = flows_b.reshape(batchsz, framenum - 2, 2, heiori // 8, widori // 8)
-            flows_b_up = flows_b_up.reshape(batchsz, framenum - 2, 2, heiori, widori)
+            flows_b_up = flows_b_up.reshape(batchsz, framenum - 2, -1, heiori, widori)
+            flows_b_net = flows_b_net.reshape(batchsz, framenum - 2, -1, heiori // 8, widori // 8)
+            flows_b_upmask = flows_b_upmask.reshape(batchsz, framenum - 2, -1, heiori // 8, widori // 8)
+
             depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
 
             alpha0, net, upmask = self.forwardmpi(
                 None,
                 refims[:, 0],
-                [flows_f[:, 0]],
+                [flows_f_net[:, 0]],
                 None
             )
             net_warp = self.forwardsf(flows_f[:, 0], flows_b[:, 0], net)
@@ -594,22 +633,31 @@ class PipelineV2(nn.Module):
             net_list = []
 
             for frameidx in range(1, framenum - 1):
-                flow_list = [flows_b[:, frameidx - 1], flows_f[:, frameidx]]
                 alpha, net, upmask = self.forwardmpi(
                     None,
                     refims[:, frameidx],
-                    flow_list,
+                    [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx]],
                     net_warp
                 )
                 disp, blend_weight = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
 
+                flow_list = [flows_b[:, frameidx - 1], flows_f[:, frameidx]]
+                flow_net_list = [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx]]
+                flow_mask_list = [flows_b_upmask[:, frameidx - 1], flows_f_upmask[:, frameidx]]
                 image_list = [refims[:, frameidx - 1], refims[:, frameidx + 1]]
                 if self.aflow_includeself:
                     image_list.append(refims[:, frameidx])
-                    flow_list.append(torch.zeros_like(flow_list[-1]))
+                    with torch.no_grad():
+                        flow_self, flow_net_self, flow_upmask_self = \
+                            self.flow_estim(refims[:, frameidx], refims[:, frameidx])
+                        flow_list.append(flow_self)
+                        flow_net_list.append(flow_net_self)
+                        flow_mask_list.append(flow_upmask_self)
                 imbg = self.forwardaf(disp, net, upmask,
-                                      flows=flow_list,
-                                      imgs_list=image_list)
+                                      flows_list=flow_list,
+                                      imgs_list=image_list,
+                                      flow_nets_list=flow_net_list,
+                                      flow_upmasks_list=flow_mask_list)
                 mpi = alpha2mpi(alpha, refims[:, frameidx], imbg, blend_weight=blend_weight)
 
                 disp_list.append(disp)
@@ -707,32 +755,24 @@ class PipelineV2(nn.Module):
             self.offset_d8 = torch.stack([offsetx, offsety], 0).unsqueeze(0).float().cuda()
             self.offset_bhw2_d8 = self.offset_d8.permute(0, 2, 3, 1).contiguous()
 
-    def forwardmpi(self, tmpcfg, img, flow_list: list, net_warp=None):
+    def forwardmpi(self, tmpcfg, img, flow_net_list: list, net_warp=None):
         """
         Now this only return alpha channles (like depth estimation)
         """
         batchsz, cnl, hei, wid = img.shape
-        flows = torch.cat(flow_list, dim=0)
-
-        with torch.no_grad():
-            flow_gradx, flow_grady = gradient(flows)
-            flow_gradx = flow_gradx.abs().sum(dim=1).reshape(-1, batchsz, 1, hei // 8, wid // 8)
-            flow_grady = flow_grady.abs().sum(dim=1).reshape(-1, batchsz, 1, hei // 8, wid // 8)
-            flow_gradx = torch.max(flow_gradx, dim=0)[0]
-            flow_grady = torch.max(flow_grady, dim=0)[0]
 
         if net_warp is None:
             net_cnl = self.mpimodel.outcnl
             net_warp = torch.zeros(batchsz, net_cnl, hei // 8, wid // 8).type_as(img)
 
-        if self.mpi_flowgrad_in:
-            net, upmask = self.mpimodel(img, torch.cat([flow_gradx, flow_grady], dim=1), net_warp)
-        else:
-            net, upmask = self.mpimodel(img, flow_list[-1], net_warp)
+        # randomly drop one flow net if training
+        if len(flow_net_list) == 1:
+            with torch.no_grad():
+                selfflow, _, flow_net = self.flow_estim(img, img, ret_upmask=True)
+                flow_net_list.append(flow_net)
 
-        if tmpcfg is not None:
-            tmpcfg["flow_gradx"].append(flow_gradx)
-            tmpcfg["flow_grady"].append(flow_grady)
+        flow_net = torch.cat(flow_net_list, dim=1)
+        net, upmask = self.mpimodel(img, flow_net, net_warp)
 
         alpha = self.net2alpha(net, upmask)
         return alpha, net, upmask
@@ -782,6 +822,26 @@ class PipelineV2(nn.Module):
         )
         return content_warp
 
+    def warp_and_occ(self, flowf, flowb, content):
+        """
+        :param flowf: t0 -> t1
+        :param flowb: t1 -> t0
+        :param content: t0
+        :return: t1 and occ_t1
+        """
+        if flowf.shape == self.offset.shape:
+            offset = self.offset_bhw2
+        else:
+            offset = self.offset_bhw2_d8
+        content_warp = warp_flow(
+                  content=content,
+                  flow=flowb,
+                  offset=offset
+        )
+        occ = warp_flow(flowf, flowb, offset=offset) + flowb
+        occ_norm = torch.norm(occ, dim=1, keepdim=True)
+        return content_warp, occ_norm
+
     def forwardsf(self, flowf, flowb, net, intcfg=None):
         if self.sfmodel is None:
             net_last = net
@@ -793,17 +853,18 @@ class PipelineV2(nn.Module):
         net_warp = self.flowfwarp_warp(flowf, flowb, net_last)
         return net_warp
 
-    def forwardaf(self, disparity, net, upmask, flows: list, imgs_list: list):
+    def forwardaf(self, disparity, net, upmask,
+                  flows_list: list, imgs_list: list, flow_nets_list: list, flow_upmasks_list: list):
         """
         Guarantee the flows[0] and imgs_list[0] to be the last frame
         """
-        assert len(flows) == len(imgs_list)
+        assert len(flows_list) == len(imgs_list) == len(flow_nets_list)
         assert isinstance(self.afmodel, (ASPFNetWithMaskInOut, ASPFNetWithMaskOut)), f"model not compatible"
 
         masks, bgs = [], []
         lastmask = None
-        for flow, img in zip(flows, imgs_list):
-            flow = learned_upsample(flow, upmask)
+        for flow, img, flow_net, flow_upmask in zip(flows_list, imgs_list, flow_nets_list, flow_upmasks_list):
+            flow = learned_upsample(flow, flow_upmask)
             if isinstance(self.afmodel, ASPFNetWithMaskOut):
                 bgflow, mask = self.afmodel(flow, disparity)
             else:
@@ -824,6 +885,7 @@ class PipelineV2(nn.Module):
 
     def forward(self, *args: torch.Tensor, **kwargs):
         # tocuda and unzip
+        self.train()
         args = [_t.cuda() for _t in args]
         refims, tarims, disp_gts, certainty_maps, isleft = args
         layernum = self.mpimodel.num_layers
@@ -834,6 +896,7 @@ class PipelineV2(nn.Module):
         isleft = isleft[:, 0]
         certainty_maps = certainty_maps[:, 1:]
         fg_pct = None
+        step = kwargs["step"]
 
         batchsz, framenum, _, heiori, widori = refims.shape
         self.prepareoffset(widori, heiori)
@@ -842,13 +905,19 @@ class PipelineV2(nn.Module):
         # All are [B x Frame [x cnl] x H x W]
         with torch.no_grad():
             # the flow in /8 resolution
-            flows_f = self.flow_estim(refims[:, :-1].reshape(bfnum_1, 3, heiori, widori),
-                                      refims[:, 1:].reshape(bfnum_1, 3, heiori, widori))
-            flows_b = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
-                                      refims[:, :-2].reshape(bfnum_2, 3, heiori, widori))
+            flows_f, flows_f_upmask, flows_f_net = self.flow_estim(refims[:, :-1].reshape(bfnum_1, 3, heiori, widori),
+                                                                   refims[:, 1:].reshape(bfnum_1, 3, heiori, widori),
+                                                                   ret_upmask=True)
+            flows_b, flows_b_upmask, flows_b_net = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
+                                                                   refims[:, :-2].reshape(bfnum_2, 3, heiori, widori),
+                                                                   ret_upmask=True)
             certainty_norm = certainty_maps.sum(dim=[-1, -2])
             flows_f = flows_f.reshape(batchsz, framenum - 1, 2, heiori // 8, widori // 8)
+            flows_f_upmask = flows_f_upmask.reshape(batchsz, framenum - 1, -1, heiori // 8, widori // 8)
+            flows_f_net = flows_f_net.reshape(batchsz, framenum - 1, -1, heiori // 8, widori // 8)
             flows_b = flows_b.reshape(batchsz, framenum - 2, 2, heiori // 8, widori // 8)
+            flows_b_upmask = flows_b_upmask.reshape(batchsz, framenum - 2, -1, heiori // 8, widori // 8)
+            flows_b_net = flows_b_net.reshape(batchsz, framenum - 2, -1, heiori // 8, widori // 8)
         disp_out = []
         mpi_out = []
         net_out = []
@@ -868,7 +937,7 @@ class PipelineV2(nn.Module):
             alphas, net, upmask = self.forwardmpi(
                 None,
                 refims[:, 0],
-                [flow0_1],
+                [flows_f_net[:, 0]],
                 None
             )
 
@@ -879,11 +948,10 @@ class PipelineV2(nn.Module):
         # there will be framenum - 2 mpi,
         for frameidx in range(1, framenum - 1):
             # predict alphas
-            flow_list = [flows_b[:, frameidx - 1], flows_f[:, frameidx]]
             alphas, net, upmask = self.forwardmpi(
                 intermediates,
                 refims[:, frameidx],
-                flow_list,
+                [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx]],
                 net_warp
             )
             disp, blend_weight = estimate_disparity_torch(alphas.unsqueeze(2), depth, retbw=True)
@@ -893,15 +961,25 @@ class PipelineV2(nn.Module):
             intermediates["blend_weight"].append(blend_weight)
 
             # predict appearance flow
+            flow_list = [flows_b[:, frameidx - 1], flows_f[:, frameidx]]
+            flow_net_list = [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx]]
+            flow_mask_list = [flows_b_upmask[:, frameidx - 1], flows_f_upmask[:, frameidx]]
             image_list = [refims[:, frameidx - 1], refims[:, frameidx + 1]]
             if self.aflow_includeself:
                 image_list.append(refims[:, frameidx])
-                flow_list.append(torch.zeros_like(flow_list[-1]))
+                with torch.no_grad():
+                    flow_self, flow_net_self, flow_upmask_self = \
+                        self.flow_estim(refims[:, frameidx], refims[:, frameidx])
+                    flow_list.append(flow_self)
+                    flow_net_list.append(flow_net_self)
+                    flow_mask_list.append(flow_upmask_self)
             imbg = self.forwardaf(disp, net, upmask,
-                                  flows=flow_list,
-                                  imgs_list=image_list)
+                                  flows_list=flow_list,
+                                  imgs_list=image_list,
+                                  flow_nets_list=flow_net_list,
+                                  flow_upmasks_list=flow_mask_list)
+
             if self.pct_scheduler is not None:
-                step = kwargs["step"]
                 fg_pct = self.pct_scheduler.get_value(step)
                 imfg = imbg * (1. - fg_pct) + refims[:, frameidx] * fg_pct
             else:
@@ -993,6 +1071,16 @@ class PipelineV2(nn.Module):
             temporal /= len(disp_out)
             final_loss += (temporal * self.loss_weight["tempdepth_loss"])
             loss_dict["tempdepth"] = temporal.detach()
+
+        if "mask_loss" in self.loss_weight.keys():
+            mask_loss = torch.tensor(0.).type_as(refims)
+            for upmask, flow_upmask in zip(upmask_out, torch.split(flows_b_upmask, 1, dim=1)):
+                diff = (upmask - flow_upmask.squeeze(1)).abs().mean()
+                mask_loss += diff
+            mask_loss /= len(upmask)
+            weight = self.mask_loss_scheduler.get_value(step)
+            final_loss += (weight * self.loss_weight["mask_loss"] * mask_loss)
+            loss_dict["upmask"] = mask_loss.detach()
 
         final_loss = final_loss.unsqueeze(0)
         loss_dict = {k: v.unsqueeze(0) for k, v in loss_dict.items()}
@@ -1348,6 +1436,114 @@ class PipelineV3(PipelineV2):
             disp, blend_weight = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
             imbg = self.forwardaf(disp, net, upmask, flow_list, img_list)
             mpi = alpha2mpi(alpha, self.img_window[idx], imbg, blend_weight=blend_weight)
+            return mpi
+
+
+class PipelineV4(PipelineV2):
+    def __init__(self, models: nn.Module, cfg: dict):
+        super().__init__(models, cfg)
+        self.img_window = deque()
+        self.net_window = deque()
+        self.upmask_window = deque()
+        self.flow_cache = dict()
+
+        self.winsz = cfg.pop("winsz", 7)
+        self.mididx = self.winsz // 2
+        self.filter_weight = torch.tensor([0.1, 0.15, 0.15, 0.2, 0.15, 0.15, 0.1])
+
+    def estimate_flow(self, idx0, idx1):
+        with torch.no_grad():
+            if idx0 < 0:
+                idx0 = len(self.img_window) + idx0
+                assert idx0 >= 0
+            if idx1 < 0:
+                idx1 = len(self.img_window) + idx1
+                assert idx1 >= 0
+            if idx0 == idx1:
+                return torch.zeros_like(self.offset)
+            key = (idx0, idx1)
+            if key not in self.flow_cache.keys():
+                flowinfo = self.flow_estim(self.img_window[idx0], self.img_window[idx1], ret_upmask=True)
+                self.flow_cache[key] = flowinfo
+                return flowinfo
+            else:
+                return self.flow_cache[key]
+
+    def update_one_frame(self, img):
+        """return whether is ready for output one frame"""
+        batchsz, cnl, hei, wid = img.shape
+        self.prepareoffset(wid, hei)
+        self.img_window.append(img)
+        if len(self.img_window) > self.winsz + 1:  # an extra image for flow estimation
+            self.img_window.popleft()
+            self.net_window.popleft()
+            self.upmask_window.popleft()
+            # update flow_cache
+            self.flow_cache = {(idx0 - 1, idx1 - 1): v
+                               for (idx0, idx1), v in self.flow_cache.items()
+                               if idx0 > 0 and idx1 > 0}
+        elif len(self.img_window) < self.winsz + 1:
+            return False
+        return True
+
+    def infer_forward(self, img, ret_cfg: str):
+        """
+        estimate the mpi in index idx (self.img_window)
+        """
+        if len(self.img_window) == 0:  # bootstrap
+            self.update_one_frame(img)
+            return None
+
+        isready = self.update_one_frame(img)
+        # compute net and upmask of *last second frame*
+        if self.net_warp is None:
+            flow_list = [self.estimate_flow(-2, -1)[FLOW_IDX]]
+            flownet_list = [self.estimate_flow(-2, -1)[FLOWNET_IDX]]
+            flowmask_list = [self.estimate_flow(-2, -1)[FLOWMASK_IDX]]
+        else:
+            flow_list = [self.estimate_flow(-2, -1)[FLOW_IDX], self.estimate_flow(-2, -3)[FLOW_IDX]]
+            flownet_list = [self.estimate_flow(-2, -1)[FLOWNET_IDX], self.estimate_flow(-2, -3)[FLOWNET_IDX]]
+            flowmask_list = [self.estimate_flow(-2, -1)[FLOWMASK_IDX], self.estimate_flow(-2, -3)[FLOWMASK_IDX]]
+        alpha, net, upmask = self.forwardmpi(None, img, flownet_list, self.net_warp)
+        self.net_window.append(net)
+        self.upmask_window.append(upmask)
+        self.net_warp = self.forwardsf(self.estimate_flow(-2, -1)[FLOW_IDX],
+                                       self.estimate_flow(-1, -2)[FLOW_IDX], net)
+
+        if not isready:
+            return None
+        else:
+            net_warp_list = []
+            net_warp_weight = []
+            for i in range(self.winsz):
+                if i == self.mididx:
+                    net_warp_list.append(self.net_window[i])
+                    net_warp_weight.append(torch.ones_like(net_warp_weight[-1]))
+                else:
+                    net_warp, occ_norm = self.warp_and_occ(self.estimate_flow(i, self.mididx)[FLOW_IDX],
+                                                           self.estimate_flow(self.mididx, i)[FLOW_IDX],
+                                                           self.net_window[i])
+                    net_warp_weight.append((occ_norm < 0.25).type(torch.float32))
+                    net_warp_list.append(net_warp)
+            net_warps = torch.cat(net_warp_list, dim=0)
+            weights = torch.cat(net_warp_weight, dim=0)
+            self.filter_weight = self.filter_weight.type_as(net_warps).reshape(-1, 1, 1, 1)
+            weights = self.filter_weight * weights
+            net_filtered = (weights * net_warps).sum(dim=0, keepdim=True) / weights.sum(dim=0, keepdim=True)
+            upmask = self.upmask_window[self.mididx]
+            alpha = self.net2alpha(net_filtered, upmask)
+
+            depth = make_depths(self.mpimodel.num_layers).type_as(self.img_window[0]).unsqueeze(0).repeat(1, 1)
+            disp, bw = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
+            flow_list = [self.estimate_flow(self.mididx, 0)[FLOW_IDX],
+                         self.estimate_flow(self.mididx, -1)[FLOW_IDX]]
+            flownet_list = [self.estimate_flow(self.mididx, 0)[FLOWNET_IDX],
+                            self.estimate_flow(self.mididx, -1)[FLOWNET_IDX]]
+            flowmask_list = [self.estimate_flow(self.mididx, 0)[FLOWMASK_IDX],
+                             self.estimate_flow(self.mididx, -1)[FLOWMASK_IDX]]
+            img_list = [self.img_window[0], self.img_window[-1]]
+            imbg = self.forwardaf(disp, net_filtered, upmask, flow_list, img_list, flownet_list, flowmask_list)
+            mpi = alpha2mpi(alpha, self.img_window[self.mididx], imbg, blend_weight=bw)
             return mpi
 
 

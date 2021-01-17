@@ -31,7 +31,7 @@ cfg = {
 
     "trainset": "stereovideo_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Fullv30",
+    "model_name": "Fullv4",
     "modelloss_name": "fullv2",
     "batch_size": 1,
     "num_epoch": 5000,  # actually it's num_iter
@@ -43,11 +43,11 @@ cfg = {
     "loss_weights": {
         "pixel_loss_cfg": 'vgg',
         "pixel_loss": 0.2,
-        "smooth_loss": 0.05,
-        "smooth_flowgrad_loss": 0.05,
+        "smooth_loss": 0.1,
         "depth_loss": 5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
+        "mask_loss": 1,
         "tempdepth_loss": 1,
         "temporal_loss_mode": "mse"
         # "splat_mode": "bilinear",
@@ -72,8 +72,11 @@ cfg = {
 #   >>> temporal consistency when training in large dataset
 #   >>> inpainting performance (pending to be test)
 #   \code
-#   >>> temporal consistency in lower resolution
-#   >>> smooth loss, temporal loss regarding the alpha distribution parameters
+#   >>> try slightly different settings in the current mpimodel
+#   >>> check other dataset for depth supervision
+#   >>> try a big temporal consistency term
+#   >>> single frame regularization
+#   >>> check reason for very big scale in Manne
 #   >>>
 #   >>> ready for the evaluating metric!!!!!
 
@@ -81,7 +84,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v30_down_dts"
+    cfg["id"] = "v4_raftnet_masksupervise"
     cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
 
     parser = argparse.ArgumentParser()

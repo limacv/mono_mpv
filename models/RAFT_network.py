@@ -10,20 +10,6 @@ from ._modules import CorrBlock
 from ._modules import coords_grid, upflow8
 
 
-def upsample_flow(content, mask):
-    """ Upsample flow field [H/8, W/8, 2] -> [H, W, 2] using convex combination """
-    N, C, H, W = content.shape
-    mask = mask.view(N, 1, 9, 8, 8, H, W)
-    mask = torch.softmax(mask, dim=2)
-
-    up_flow = torchf.unfold(8 * content, [3, 3], padding=1)
-    up_flow = up_flow.view(N, C, 9, 1, 1, H, W)
-
-    up_flow = torch.sum(mask * up_flow, dim=2)
-    up_flow = up_flow.permute(0, 1, 4, 2, 5, 3)
-    return up_flow.reshape(N, C, 8 * H, 8 * W)
-
-
 # default args: alternate_corr = False; mixed_precision = False; small = False;
 class RAFTNet(nn.Module):
     def __init__(self, small=False):
@@ -70,7 +56,7 @@ class RAFTNet(nn.Module):
         fmap = self.fnet(frame)
         return [fmap, frame]
 
-    def forward(self, image1, image2, init_flow=None, iters=12, ret_upsample=False):
+    def forward(self, image1, image2, init_flow=None, iters=12, ret_upmask=False, ret_net=False):
         """ Estimate optical flow between pair of frames """
         # for compatiability
         if isinstance(image1, Sequence):
@@ -106,13 +92,10 @@ class RAFTNet(nn.Module):
             corr = corr_fn(coords1)  # index correlation volume
             
             flow = coords1 - coords0
-            net, up_mask, delta_flow = self.update_block(net, inp, corr, flow, upmask=(itr == iters-1))
+            net, up_mask, delta_flow = self.update_block(net, inp, corr, flow, upmask=(itr == iters-1) and ret_upmask)
 
             # F(t+1) = F(t) + \Delta(t)
             coords1 = coords1 + delta_flow
 
         flow = coords1 - coords0
-        if ret_upsample:
-            return flow, upsample_flow(flow, up_mask)
-        else:
-            return flow
+        return flow, up_mask, net

@@ -417,6 +417,23 @@ class FlowEstimator(nn.Module):
         return im1_warpped
 
 
+def upsample_flow(content, mask):
+    """ Upsample flow field [H/8, W/8, 2] -> [H, W, 2] using convex combination """
+    N, C, H, W = content.shape
+    mask = mask.view(N, 1, 9, 8, 8, H, W)
+    mask = torch.softmax(mask, dim=2)
+
+    up_flow = torchf.unfold(8 * content, [3, 3], padding=1)
+    up_flow = up_flow.view(N, C, 9, 1, 1, H, W)
+
+    up_flow = torch.sum(mask * up_flow, dim=2)
+    up_flow = up_flow.permute(0, 1, 4, 2, 5, 3)
+    return up_flow.reshape(N, C, 8 * H, 8 * W)
+
+
+FLOW_IDX, FLOWMASK_IDX, FLOWNET_IDX = 0, 1, 2
+
+
 # Please use this
 # Global_Flow_Estimator = FlowEstimator(False, 'sintel')
 max_flow_thresh = 1e5

@@ -6,7 +6,7 @@ torch.manual_seed(6666)
 
 def main(kwargs):
     batchsz = kwargs["batchsz"]
-    model = select_module("Fullv30")
+    model = select_module("Fullv41")
 
     smart_load_checkpoint("./log/checkpoint/", kwargs, model)
 
@@ -58,7 +58,7 @@ main({
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
     "check_point": {
-        # "": "mpinet_pretrain.pth",
+        # "": "v4_raftnet_masksupervise_162138_r0.pth",
     },
     "batchsz": 1,
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",
@@ -72,6 +72,7 @@ main({
                      "depth_loss_mode": "hat",
                      "depth_loss_ord": 0.5,
                      "depth_loss_rmresidual": True,
+                     "mask_loss": 1,
                      "mpi_flowgrad_in": False,
                      "templ1_loss": 1,
                      "tempdepth_loss": 0.01,

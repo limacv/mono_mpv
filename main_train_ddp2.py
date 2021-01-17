@@ -31,7 +31,7 @@ cfg = {
 
     "trainset": "stereovideo_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Fullv30",
+    "model_name": "Fullv4",
     "modelloss_name": "fullv2",
     "batch_size": 1,
     "num_epoch": 5000,  # actually it's num_iter
@@ -47,6 +47,7 @@ cfg = {
         "depth_loss": 5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
+        "mask_loss": 1,
         "tempdepth_loss": 1,
         "temporal_loss_mode": "mse"
         # "splat_mode": "bilinear",
@@ -70,8 +71,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v30new_dts"
-    cfg["comment"] = "full model of v3 pipeline trained on stereovideo dataset"
+    cfg["id"] = "v4raft_synbn"
+    cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -85,6 +86,7 @@ def main(cfg):
         cfg["comment"] = "Dont't forget to change comment" * 100
         cfg["world_size"] = 2
         cfg["train_report_freq"] = 1
+        cfg["valid_freq"] = 20
     else:
         import warnings
         warnings.filterwarnings("ignore")

@@ -53,15 +53,15 @@ def select_module(name: str) -> nn.Module:
     #         "MPI": MPI_Fullv1(plane_num),
     #         "MPF": MPFNet(plane_num)
     #     })
-    elif "Fullv30" == name:
+    elif "Fullv4" == name:
         return nn.ModuleDict({
-            "MPI": MPI_down8_mask(plane_num, 3),
+            "MPI": MPI_down8_mask(plane_num, 6),
             "SceneFlow": None,
             "AppearanceFlow": ASPFNetWithMaskOut()
         })
-    elif "Fullv31" == name:
+    elif "Fullv41" == name:
         return nn.ModuleDict({
-            "MPI": MPI_down8_mask(plane_num, 6),
+            "MPI": MPI_down8_mask_nobn(plane_num, 6),
             "SceneFlow": None,
             "AppearanceFlow": ASPFNetWithMaskOut()
         })

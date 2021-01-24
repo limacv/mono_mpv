@@ -15,12 +15,12 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run/",
+    "tensorboard_logdir": "run1/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 24,
+    "validate_num": -1,
     "valid_freq": 500,
     "train_report_freq": 10,
 
@@ -30,8 +30,8 @@ cfg = {
     "comment": "",
 
     "trainset": "mannequin+realestate_seq",
-    "evalset": "mannequin+realestate_seq",
-    "model_name": "Fullv221",
+    "evalset": "mannequinchallenge_seq",
+    "model_name": "Fullv62",
     "modelloss_name": "fullsvv2",
     "batch_size": 1,
     "num_epoch": 100,
@@ -41,40 +41,41 @@ cfg = {
     "loss_weights": {
         "pixel_loss_cfg": 'vgg',
         "pixel_loss": 0.2,
-        "smooth_loss": 0.05,
-        "smooth_flowgrad_loss": 0.05,
-        "depth_loss": 3,
-
+        "net_smth_loss_fg": 0.5,
+        "net_smth_loss_bg": 0.5,
+        "depth_loss": 0.1,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
-        "tempdepth_loss": 1,
+        "mask_warmup": 1,
+        "bgflow_warmup": 1,
+        "net_warmup": 1,
+        "aflow_fusefgpct": True,
 
-        # "pipe_optim_frame0": False,
+        "tempdepth_loss": 1,
+        "temporal_loss_mode": "mse",
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
         # "alpha2mpf": True,
-        # "learmpf": False
 
-        # "flow_epe": 0.1,
-        # "flow_smth": 0.01,
+        # "flow_epe": 1,
+        # "flow_smth": 0.1,
         # "flow_smth_ord": 1,
         # "flow_smth_bw": False
+        # "aflow_includeself": True,
+        # "sflow_loss": 0.1
 
         # "sparse_loss": 0.1,
         # "smooth_tar_loss": 0.5,
     },
 }
 
-# todo Current Problem:
-#   >>> Dataset: finefuning the WSVD dataset, and find more stereo video from youtube/flickr to form a dataset of my own
-
 
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v221_M+R_vgg"
-    cfg["comment"] = "Pipeline V221 trained on Mannequin + RealEstate10K"
+    cfg["id"] = "v62_pretrain_>s<d"
+    cfg["comment"] = "too lazy to write comment"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -87,6 +88,8 @@ def main(cfg):
         print("Debug Mode!!!", flush=True)
         cfg["comment"] = "Dont't forget to change comment" * 50
         cfg["world_size"] = 2
+        cfg["train_report_freq"] = 1
+        cfg["valid_freq"] = 20
     else:
         import warnings
         warnings.filterwarnings("ignore")

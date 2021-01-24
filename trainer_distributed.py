@@ -143,7 +143,7 @@ def train(cfg: dict):
                 print(f"EVAL{local_rank}:: " + ' | '.join([f"{k}: {v:.3f}" for k, v in val_dict.items()]), flush=True)
                 print(f"CHECKING Consistency:: {modelloss.module.parameters().__next__()[0, 0, 0]}")
 
-            if (step + 1) % savepth_iter_freq == 0:
+            if (step + 1) % savepth_iter_freq == 0 and local_rank == 0:
                 torch.save({
                     "epoch": epoch,
                     "step": step,

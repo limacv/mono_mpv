@@ -1,12 +1,12 @@
 from utils import *
 
-np.random.seed(6666)
-torch.manual_seed(6666)
+# np.random.seed(66)
+# torch.manual_seed(66)
 
 
 def main(kwargs):
     batchsz = kwargs["batchsz"]
-    model = select_module("Fullv41")
+    model = select_module("Fullv60HR_netflow")
 
     smart_load_checkpoint("./log/checkpoint/", kwargs, model)
 
@@ -16,7 +16,7 @@ def main(kwargs):
     dataset = select_dataset("stereovideo_seq", True, {})
     for i in range(int(14000)):
         datas_all = [[]] * 7
-        for dev in range(1):
+        for dev in range(batchsz):
             datas = dataset[0]
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
@@ -58,9 +58,9 @@ main({
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
     "check_point": {
-        # "": "v4_raftnet_masksupervise_162138_r0.pth",
+        "MPI": "Fullv62_bugfix_211420_r0.pth",
     },
-    "batchsz": 1,
+    "batchsz": 2,
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",
     # "savefile": "./log/DBG_pretrain.pth",
     "logdir": "./log/run/debug_svscratch",
@@ -68,11 +68,14 @@ main({
     "loss_weights": {"pixel_loss": 1,
                      "pixel_loss_cfg": "vgg",
                      "smooth_loss": 0.5,
+                     "net_smth_loss": 0.1,
                      "depth_loss": 0.1,
                      "depth_loss_mode": "hat",
                      "depth_loss_ord": 0.5,
                      "depth_loss_rmresidual": True,
-                     "mask_loss": 1,
+                     "mask_warmup": 1,
+                     "net_warmup": 1,
+                     "bgflow_warmup": 1.,
                      "mpi_flowgrad_in": False,
                      "templ1_loss": 1,
                      "tempdepth_loss": 0.01,
@@ -86,7 +89,8 @@ main({
                      "flow_epe": 0.1,
                      "flow_smth": 0.1,
                      # "sflow_loss": 0.1,
-                     "smooth_flowgrad_loss": 0.1,
+                     # "smooth_flowgrad_loss": 0.1,
+                     "temporal_loss": 0.9,
                      "temporal_loss_mode": "mse"},
 })
 # good data list

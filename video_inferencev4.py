@@ -20,10 +20,10 @@ def str2bool(s_):
     return s_
 
 
-path = "./log/checkpoint/v4_raftnet_masksupervise_162138_r0.pth"
+path = "./log/checkpoint/v53LR_netflownet_191850_r0.pth"
 # Adjust configurations here ############################################
 state_dict_path = {
-    '': "./log/checkpoint/v4_raftnet_masksupervise_162138_r0.pth",
+    '': "./log/checkpoint/v53LR_netflownet_191850_r0.pth",
     # "MPF.": "./log/checkpoint/mpf_bugfix_ord1smth_052107_r0.pth"
 }
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
@@ -43,7 +43,7 @@ modelname = [i for i in cfg_str.split('\n') if i.startswith("Model: ")][0].split
 model = select_module(modelname).cuda()
 pipeline = PipelineV4(model, {"loss_weights": loss_weights,
                               "winsz": 7})
-ret_cfg = " "
+ret_cfg = "dbg"
 
 save_infer_mpi = True
 save_disparity = True

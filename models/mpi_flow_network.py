@@ -476,6 +476,245 @@ class ASPFNetWithMaskOut(nn.Module):
         nn.init.constant_(self.outputma[0].bias, 0)
 
 
+class AFNet_HR_netflowin(nn.Module):
+    """
+    Appearance Multiplane flow with disparity input
+    alpha input
+    Multi plane flow input, output single plane appearance flow
+    in: B x 3 (dx, dy, alpha) x H x W
+    """
+    def __init__(self):
+        super().__init__()
+        self.down = nn.MaxPool2d(2, ceil_mode=True)
+        self.up = up
+        self.down1 = conv(6 + 2, 64, 7)
+        self.down1b = conv(64, 64, 5)
+        self.down2 = conv(64, 64, 5)
+        self.down2b = conv(64, 64, 5)
+        self.down3 = conv(64, 128, 3)
+        self.down3b = conv(128, 128, 3)
+        self.down4 = conv(128, 256, 3)
+        self.down4b = conv(256, 256, 3)
+        self.mid1 = conv(256, 384, 3)
+        self.mid2 = conv(384, 384, 3)
+        self.up4 = conv(384 + 256, 256, 3)
+        self.up4b = conv(256, 128, 3)
+        self.up3 = conv(128 + 128, 128, 3)
+        self.up3b = conv(128, 64, 3)
+        self.up2 = conv(64 + 64, 64, 3)
+        self.up2b = conv(64, 32, 3)
+        self.up1 = conv(32 + 64, 32, 3)
+        self.up1b = conv(32, 32, 3)
+        self.output = nn.Conv2d(32, 2, 3, padding=1)
+        self.outputma = nn.Sequential(
+            nn.Conv2d(32, 1, 3, padding=1),
+            nn.Sigmoid()
+        )
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, net, flow):
+        x = torch.cat([net, flow], dim=1)
+        down1 = self.down1b(self.down1(x))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        down4 = self.down4b(self.down4(self.down(down3)))
+        x = self.up(self.mid2(self.mid1(self.down(down4))))
+        x = self.up(self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1)))
+        return self.output(x), self.outputma(x)
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.output.weight)
+        nn.init.constant_(self.output.bias, 0)
+        nn.init.xavier_normal_(self.outputma[0].weight)
+        nn.init.constant_(self.outputma[0].bias, 0)
+
+
+class AFNet_HR_netflowimgin(nn.Module):
+    """
+    Appearance Multiplane flow with disparity input
+    alpha input
+    Multi plane flow input, output single plane appearance flow
+    in: B x 3 (dx, dy, alpha) x H x W
+    """
+    def __init__(self):
+        super().__init__()
+        self.down = nn.MaxPool2d(2, ceil_mode=True)
+        self.up = up
+        self.down1 = conv(6 + 2 + 3, 64, 7)
+        self.down1b = conv(64, 64, 5)
+        self.down2 = conv(64, 64, 5)
+        self.down2b = conv(64, 64, 5)
+        self.down3 = conv(64, 128, 3)
+        self.down3b = conv(128, 128, 3)
+        self.down4 = conv(128, 256, 3)
+        self.down4b = conv(256, 256, 3)
+        self.mid1 = conv(256, 384, 3)
+        self.mid2 = conv(384, 384, 3)
+        self.up4 = conv(384 + 256, 384, 3)
+        self.up4b = conv(384, 256, 3)
+        self.up3 = conv(256 + 128, 256, 3)
+        self.up3b = conv(256, 128, 3)
+        self.up2 = conv(128 + 64, 128, 3)
+        self.up2b = conv(128, 64, 3)
+        self.up1 = conv(64 + 64, 64, 3)
+        self.up1b = conv(64, 64, 3)
+        self.output = nn.Conv2d(64, 2, 3, padding=1)
+        self.outputma = nn.Sequential(
+            nn.Conv2d(64, 1, 3, padding=1),
+            nn.Sigmoid()
+        )
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, net, flow, img):
+        x = torch.cat([net, flow, img], dim=1)
+        down1 = self.down1b(self.down1(x))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        down4 = self.down4b(self.down4(self.down(down3)))
+        x = self.up(self.mid2(self.mid1(self.down(down4))))
+        x = self.up(self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1)))
+        return self.output(x), self.outputma(x)
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.output.weight)
+        nn.init.constant_(self.output.bias, 0)
+        nn.init.xavier_normal_(self.outputma[0].weight)
+        nn.init.constant_(self.outputma[0].bias, 0)
+
+
+class AFNet_LR_netflowin(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.down = nn.MaxPool2d(2, ceil_mode=True)
+        self.up = up
+        self.down1 = conv(6 + 2, 64, 3)
+        self.down1b = conv(64, 64, 3)
+        self.down2 = conv(64, 64, 3)
+        self.down2b = conv(64, 128, 3)
+        self.down3 = conv(128, 128, 3)
+        self.down3b = conv(128, 256, 3)
+        self.mid1 = conv(256, 256, 3)
+        self.mid2 = conv(256, 256, 3)
+        self.up3 = conv(256 + 256, 256, 3)
+        self.up3b = conv(256, 256, 3)
+        self.up2 = conv(256 + 128, 128, 3)
+        self.up2b = conv(128, 64, 3)
+        self.up1 = conv(64 + 64, 64, 3)
+        self.up1b = conv(64, 32, 3)
+        self.output = nn.Conv2d(32, 2, 3, padding=1)
+        self.outputma = nn.Sequential(
+            nn.Conv2d(32, 1, 3, padding=1),
+            nn.Sigmoid()
+        )
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, net, flow):
+        x = torch.cat([net, flow], dim=1)
+        down1 = self.down1b(self.down1(x))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        x = self.up(self.mid2(self.mid1(self.down(down3))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1)))
+        return self.output(x), self.outputma(x)
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.output.weight)
+        nn.init.constant_(self.output.bias, 0)
+        nn.init.xavier_normal_(self.outputma[0].weight)
+        nn.init.constant_(self.outputma[0].bias, 0)
+
+
+class AFNet_LR_netflownetin(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.down = nn.MaxPool2d(2, ceil_mode=True)
+        self.up = up
+        self.pre1 = conv(6, 64, 3)
+        self.pre1b = conv(64, 64, 3)
+        self.down1 = conv(64 + 128, 128, 3)
+        self.down1b = conv(128, 128, 3)
+        self.down2 = conv(128, 128, 3)
+        self.down2b = conv(128, 256, 3)
+        self.down3 = conv(256, 256, 3)
+        self.down3b = conv(256, 256, 3)
+        self.mid1 = conv(256, 256, 3)
+        self.mid2 = conv(256, 256, 3)
+        self.up3 = conv(256 + 256, 384, 3)
+        self.up3b = conv(384, 256, 3)
+        self.up2 = conv(256 + 256, 256, 3)
+        self.up2b = conv(256, 128, 3)
+        self.up1 = conv(128 + 128, 128, 3)
+        self.up1b = conv(128, 64, 3)
+        self.output = nn.Conv2d(64, 2, 3, padding=1)
+        self.outputma = nn.Sequential(
+            nn.Conv2d(64, 1, 3, padding=1),
+            nn.Sigmoid()
+        )
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, net, flow_net):
+        net_feat = self.pre1b(self.pre1(net))
+        feat_in = torch.cat([net_feat, flow_net], dim=1)
+        down1 = self.down1b(self.down1(feat_in))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        x = self.up(self.mid2(self.mid1(self.down(down3))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1)))
+        return self.output(x), self.outputma(x)
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.output.weight)
+        nn.init.constant_(self.output.bias, 0)
+        nn.init.xavier_normal_(self.outputma[0].weight)
+        nn.init.constant_(self.outputma[0].bias, 0)
+
+
 class SceneFlowNet(nn.Module):
     """
     Flow.xy / disparity in and Flow.z out

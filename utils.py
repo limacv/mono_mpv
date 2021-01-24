@@ -10,10 +10,10 @@ from dataset.MannequinChallenge import *
 from dataset.RealEstate10K import *
 from dataset.StereoBlur import *
 from dataset.StereoVideo import *
-
+from models.rdn import RDN
 from models.ModelWithLoss import *
 
-plane_num = 24
+plane_num = 32
 
 
 def select_module(name: str) -> nn.Module:
@@ -57,13 +57,75 @@ def select_module(name: str) -> nn.Module:
         return nn.ModuleDict({
             "MPI": MPI_down8_mask(plane_num, 6),
             "SceneFlow": None,
-            "AppearanceFlow": ASPFNetWithMaskOut()
+            "AppearanceFlow": AFNet_HR_netflowin()
         })
     elif "Fullv41" == name:
         return nn.ModuleDict({
             "MPI": MPI_down8_mask_nobn(plane_num, 6),
             "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin()
+        })
+    elif "Fullv4big" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_down8_mask_big(plane_num, 6),
+            "SceneFlow": None,
+            # "AppearanceFlow": AFNet_HR_netflowin()
             "AppearanceFlow": ASPFNetWithMaskOut()
+        })
+    elif "Fullv4lite" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_down8_mask_lite(plane_num, 6),
+            "SceneFlow": None,
+            # "AppearanceFlow": AFNet_HR_netflowin()
+            "AppearanceFlow": ASPFNetWithMaskOut()
+        })
+    elif "Fullv50HR_netflow" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_down8_mask_lite(plane_num, 6),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin()
+        })
+    elif "Fullv52LR_netflow" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_down8_mask_lite(plane_num, 6),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_LR_netflowin()
+        })
+    elif "Fullv53LR_netflownet" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_down8_mask_lite(plane_num, 6),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_LR_netflownetin()
+        })
+    elif "Fullv61" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_V3(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_LR_netflowin()
+        })
+    elif "Fullv62" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_V3(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_LR_netflownetin()
+        })
+    elif "Fullv60HR_netflow" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_V3(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin()
+        })
+    elif "Fullv62LR_netflow" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_V3(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_LR_netflowin()
+        })
+    elif "Fullv63LR_netflownet" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_V3(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_LR_netflownetin()
         })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
@@ -112,16 +174,16 @@ def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
     elif "stereovideo_test" in name:
         return StereoVideo_Seq(istrain, seq_len=seq_len, test=True, mode=mode)
     elif "mannequinchallenge_img" in name:
-        return MannequinChallenge_Img(istrain)
+        return MannequinChallenge_Img(istrain, mode=mode)
     elif "mannequinchallenge_seq" in name:
-        return MannequinChallenge_Seq(istrain, seq_len=seq_len)
+        return MannequinChallenge_Seq(istrain, seq_len=seq_len, mode=mode)
     elif "mannequin+realestate_img" in name:
         dataset = ConcatDataset([RealEstate10K_Img(istrain), MannequinChallenge_Img(istrain)])
         dataset.name = "mannequin+realestate_img"
         return dataset
     elif "mannequin+realestate_seq" in name:
-        dataset = ConcatDataset([RealEstate10K_Seq(istrain, seq_len=seq_len),
-                                 MannequinChallenge_Seq(istrain, seq_len=seq_len)])
+        dataset = ConcatDataset([RealEstate10K_Seq(istrain, seq_len=seq_len, mode=mode),
+                                 MannequinChallenge_Seq(istrain, seq_len=seq_len, mode=mode)])
         dataset.name = "mannequin+realestate_seq"
         return dataset
     else:

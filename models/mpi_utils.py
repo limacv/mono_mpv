@@ -454,6 +454,31 @@ class MPFWriter:
         self.out.release()
 
 
+class NetWriter:
+    def __init__(self, path):
+        self.out = cv2.VideoWriter()
+        self.path = path.split('.')[0] + "_net.mp4"
+        self.size = (0, 0)
+
+    def write(self, net: torch.Tensor):
+        net = (net * 255).type(torch.uint8)
+        layer1, layer2, imfg, imbg = torch.split(net.squeeze(0), 3, dim=0)
+        savefig = torchvision.utils.make_grid([layer1, layer2, imfg, imbg], nrow=2, padding=0)
+
+        cnl, hei, wid = savefig.shape
+        mpipad = savefig.cpu().numpy()
+        rgb = mpipad[:3][::-1].transpose(1, 2, 0)
+
+        if not self.out.isOpened():
+            self.out.open(self.path, 828601953, 30., (wid, hei), True)
+            if not self.out.isOpened():
+                raise RuntimeError(f"MPVWriter::cannot open {self.path}")
+        self.out.write(rgb)
+
+    def __del__(self):
+        self.out.release()
+
+
 def dilate(alpha: torch.Tensor):
     """
     alpha: B x L x H x W
@@ -510,6 +535,21 @@ def matplot_img(img):
             img = img.transpose(1, 2, 0)
         elif img.shape[0] == 1:
             img = img[0]
+    plt.imshow(img)
+    plt.show()
+
+
+def matplot_net(net):
+    import matplotlib.pyplot as plt
+    plt.figure()
+    if net.dim() != 4 and net.shape[1] != 6:
+        assert True, "not a net"
+    net = net[0]
+    net = torch.cat([
+        torch.cat([net[0], net[1], net[2]], dim=-1),
+        torch.cat([net[3], net[4], net[5]], dim=-1),
+    ], dim=-2)
+    img = net.detach().cpu().numpy()
     plt.imshow(img)
     plt.show()
 

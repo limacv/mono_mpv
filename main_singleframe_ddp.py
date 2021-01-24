@@ -15,7 +15,7 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run/",
+    "tensorboard_logdir": "run1/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
 
@@ -29,32 +29,24 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "stereovideo_seq",
+    "trainset": "stereovideo_img",
     "evalset": "stereovideo_seq",
-    "model_name": "Fullv62LR_netflow",
-    "modelloss_name": "fullv2",
-    "batch_size": 1,
-    "num_epoch": 200,
+    "model_name": "MPINetv2",
+    "modelloss_name": "disp_img",
+    "batch_size": 2,
+    "num_epoch": 300,
     "savepth_iter_freq": 500,
-    "lr": 1e-4,
-    "check_point": {
-        "MPI": "v62_pretrain_212056_r0.pth"
-    },
+    "lr": 2e-5,
+    "check_point": "mpinet_ori.pth",
     "loss_weights": {
-        "pixel_loss_cfg": 'vgg',
-        "pixel_loss": 0.2,
-        "net_smth_loss_fg": 0.1,
-        "net_smth_loss_bg": 0.1,
-        "depth_loss": 5,
+        "pixel_loss_cfg": 'l1',
+        "pixel_loss": 1,
+        "smooth_loss": 0.5,
+        "depth_loss": 0.1,
+
+        # "temporal_loss": 0.9,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
-        "mask_warmup": 1,
-        "bgflow_warmup": 1,
-        "net_warmup": 0.5,
-        "aflow_fusefgpct": True,
-
-        "tempdepth_loss": 1,
-        "temporal_loss_mode": "mse",
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
         # "alpha2mpf": True,
@@ -76,8 +68,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "Fullv62LR_netflow"
-    cfg["comment"] = "too lazy to write comment"
+    cfg["id"] = "SV_baseline_frompaper"
+    cfg["comment"] = "single frame method baseline (fine-tuning on my dataset)"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

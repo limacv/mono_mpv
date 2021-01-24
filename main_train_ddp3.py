@@ -31,25 +31,30 @@ cfg = {
 
     "trainset": "stereovideo_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Fullv41",
+    "model_name": "Fullv63LR_netflownet",
     "modelloss_name": "fullv2",
     "batch_size": 1,
-    "num_epoch": 5000,  # actually it's num_iter
+    "num_epoch": 200,
     "savepth_iter_freq": 500,
     "lr": 1e-4,
     "check_point": {
-        "": "no.pth"
+        "MPI": "v62_pretrain_212056_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'vgg',
         "pixel_loss": 0.2,
-        "smooth_loss": 0.1,
+        "net_smth_loss_fg": 0.1,
+        "net_smth_loss_bg": 0.1,
         "depth_loss": 5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
-        "mask_loss": 1,
+        "mask_warmup": 1,
+        "bgflow_warmup": 1,
+        "net_warmup": 0.5,
+        "aflow_fusefgpct": True,
+
         "tempdepth_loss": 1,
-        "temporal_loss_mode": "mse"
+        "temporal_loss_mode": "mse",
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
         # "alpha2mpf": True,
@@ -71,8 +76,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v4raft_nobn"
-    cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
+    cfg["id"] = "Fullv63LR_netflownet"
+    cfg["comment"] = "too lazy to write comment"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

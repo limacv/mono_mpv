@@ -629,14 +629,326 @@ class MPI_down8_mask_nobn(nn.Module):
         nn.init.constant_(self.depth_decoder[-1].bias, -0.5)
 
 
+class MPI_down8_mask_big(nn.Module):
+    """
+    Takes in: rgb, flow_gradient, warpped disparity map
+    """
+    def __init__(self, mpi_layers, outcnl=6):
+        super().__init__()
+        self.num_layers = mpi_layers
+        self.outcnl = outcnl
+        down = nn.MaxPool2d(2, ceil_mode=True)
+        self.down = down
+        self.up = up
+        self.backbone = nn.ModuleList([
+            conv(3, 32, 7),
+            conv(32, 32, 7),
+            down,
+            conv(32, 64, 5),
+            conv(64, 64, 5),
+            down,
+            conv(64, 128, 3),
+            conv(128, 128, 3),
+            down,
+            conv(128, 256, 3),
+            conv(256, 256, 3)
+        ])  # cnl = 256
+        self.disp_last_encoder = nn.Sequential(
+            conv(self.outcnl, 32, 3),
+            conv(32, 64, 3)
+        )
+        self.down1 = conv(256 + 128 * 2, 512, 3)
+        self.down1b = conv(512, 512, 3)
+        self.down2 = conv(512, 512, 3)
+        self.down2b = conv(512, 512, 3)
+        self.down3 = conv(512, 512, 3)
+        self.down3b = conv(512, 512, 3)
+        self.mid1 = conv(512, 512, 3)
+        self.mid2 = conv(512, 512, 3)
+        self.up3 = conv(1024, 512, 3)
+        self.up3b = conv(512, 512, 3)
+        self.up2 = conv(1024, 512, 3)
+        self.up2b = conv(512, 512, 3)
+        self.up1 = conv(1024, 512, 3)
+        self.up1b = conv(512, 512, 3)
+
+        self.mask_decoder = nn.Sequential(
+            conv(512 + 512, 512, 3),
+            conv(512, 64 * 9, 1, isReLU=False),
+        )
+        self.depth_decoder = nn.Sequential(
+            conv(512 + 512 + 64, 512, 3),
+            conv(512, 256, 3),
+            conv(256, 128, 3),
+            conv(128, 64, 3),
+            nn.Conv2d(64, outcnl, 3, padding=1)
+        )
+        self.output_layer = nn.Sigmoid()
+
+        self.register_buffer("outputscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
+        self.register_buffer("xscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
+        # output channel: depth, thickness, scale, depth, thickness, scale
+        self.outputscale[:, 1] = 0.3  # thickness
+        if self.outcnl == 6:
+            self.xscale[:, 3] = 0.3  # mimic the background depth
+            self.outputscale[:, 4] = 0.3
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, img, flow_net, disp_warp):
+        batchsz, _, hei, wid = img.shape
+        assert hei % 8 == 0 and wid % 8 == 0
+        im_feat = img
+        for layer in self.backbone:
+            im_feat = layer(im_feat)
+
+        feat_in = torch.cat([im_feat, flow_net], dim=1)
+        down1 = self.down1b(self.down1(self.down(feat_in)))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        x = self.up(self.mid2(self.mid1(self.down(down3))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
+        x = x[..., :hei // 8, :wid // 8]
+
+        disp_feat = self.disp_last_encoder(disp_warp)
+        feat = self.depth_decoder(torch.cat([x, im_feat, flow_net, disp_feat], dim=1))  # 256
+        feat = self.output_layer(feat * self.xscale) * self.outputscale
+
+        upmask = self.mask_decoder(torch.cat([x, im_feat, flow_net], dim=1)) * 0.25
+        return feat, upmask
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        # nn.init.constant_(self.output.weight, 0)
+        nn.init.constant_(self.depth_decoder[-1].bias, -0.5)
+
+
+class MPI_down8_mask_lite(nn.Module):
+    """
+    Takes in: rgb, flow_gradient, warpped disparity map
+    """
+    def __init__(self, mpi_layers, outcnl=6):
+        super().__init__()
+        self.num_layers = mpi_layers
+        self.outcnl = outcnl
+        down = nn.MaxPool2d(2, ceil_mode=True)
+        self.down = down
+        self.up = up
+        self.backbone = nn.ModuleList([
+            conv(3, 32, 7),
+            conv(32, 32, 7),
+            down,
+            conv(32, 64, 5),
+            conv(64, 64, 5),
+            down,
+            conv(64, 128, 3),
+            conv(128, 128, 3),
+            down,
+            conv(128, 256, 3),
+            conv(256, 256, 3)
+        ])  # cnl = 256
+        self.disp_last_encoder = nn.Sequential(
+            conv(self.outcnl, 32, 3),
+            conv(32, 64, 3)
+        )
+        self.down1 = conv(256 + 128 * 2, 384, 3)
+        self.down1b = conv(384, 384, 3)
+        self.down2 = conv(384, 384, 3)
+        self.down2b = conv(384, 512, 3)
+        self.down3 = conv(512, 512, 3)
+        self.down3b = conv(512, 512, 3)
+        self.mid1 = conv(512, 512, 3)
+        self.mid2 = conv(512, 512, 3)
+        self.up3 = conv(1024, 512, 3)
+        self.up3b = conv(512, 384, 3)
+        self.up2 = conv(384 + 512, 512, 3)
+        self.up2b = conv(512, 384, 3)
+        self.up1 = conv(384 + 384, 384, 3)
+        self.up1b = conv(384, 256, 3)
+        self.post = conv(256 + 512, 512, 3)
+
+        self.mask_decoder = nn.Sequential(
+            conv(512, 512, 3),
+            conv(512, 64 * 9, 1, isReLU=False),
+        )
+        self.depth_decoder = nn.Sequential(
+            conv(512 + 64, 256, 3),
+            conv(256, 128, 3),
+            conv(128, 64, 3),
+            nn.Conv2d(64, outcnl, 3, padding=1)
+        )
+        self.output_layer = nn.Sigmoid()
+
+        self.register_buffer("outputscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
+        self.register_buffer("xscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
+        # output channel: depth, thickness, scale, depth, thickness, scale
+        self.outputscale[:, 1] = 0.3  # thickness
+        if self.outcnl == 6:
+            self.xscale[:, 3] = 0.3  # mimic the background depth
+            self.outputscale[:, 4] = 0.3
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, img, flow_net, disp_warp):
+        batchsz, _, hei, wid = img.shape
+        assert hei % 8 == 0 and wid % 8 == 0
+        im_feat = img
+        for layer in self.backbone:
+            im_feat = layer(im_feat)
+
+        feat_in = torch.cat([im_feat, flow_net], dim=1)
+        down1 = self.down1b(self.down1(self.down(feat_in)))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        x = self.up(self.mid2(self.mid1(self.down(down3))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
+        x = self.post(torch.cat(self.shapeto(x, feat_in), dim=1))
+
+        disp_feat = self.disp_last_encoder(disp_warp)
+        feat = self.depth_decoder(torch.cat([x, disp_feat], dim=1))  # 256
+        feat = self.output_layer(feat * self.xscale) * self.outputscale
+
+        upmask = self.mask_decoder(x) * 0.25
+        return feat, upmask
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        # nn.init.constant_(self.output.weight, 0)
+        nn.init.constant_(self.depth_decoder[-1].bias, -0.5)
+
+
+class MPI_V3(nn.Module):
+    """
+    Takes in: rgb, flow_gradient, warpped disparity map
+    """
+    def __init__(self, mpi_layers):
+        super().__init__()
+        self.num_layers = mpi_layers
+        self.outcnl = 6
+        down = nn.MaxPool2d(2, ceil_mode=True)
+        self.down = down
+        self.up = up
+        self.backbone = nn.ModuleList([
+            conv(3, 32, 7),
+            conv(32, 32, 7),
+            down,
+            conv(32, 64, 5),
+            conv(64, 64, 5),
+            down,
+            conv(64, 128, 3),
+            conv(128, 128, 3),
+            down,
+            conv(128, 256, 3),
+            conv(256, 256, 3)
+        ])  # cnl = 256
+        self.disp_last_encoder = nn.Sequential(
+            conv(self.outcnl, 32, 3),
+            conv(32, 64, 3)
+        )
+        self.down1 = conv(256 + 128 * 2, 384, 3)
+        self.down1b = conv(384, 512, 3)
+        self.down2 = conv(512, 512, 3)
+        self.down2b = conv(512, 512, 3)
+        self.down3 = conv(512, 512, 3)
+        self.down3b = conv(512, 512, 3)
+        self.mid1 = conv(512, 512, 3)
+        self.mid2 = conv(512, 512, 3)
+        self.up3 = conv(1024, 512, 3)
+        self.up3b = conv(512, 512, 3)
+        self.up2 = conv(512 + 512, 512, 3)
+        self.up2b = conv(512, 384, 3)
+        self.up1 = conv(512 + 384, 512, 3)
+        self.up1b = conv(512, 256, 3)
+        self.post = conv(256 + 512, 512, 3)
+
+        self.mask_decoder = nn.Sequential(
+            conv(512, 512, 3),
+            conv(512, 64 * 9, 1, isReLU=False),  # 8 x 8 x 9
+        )
+        self.depth_decoder = nn.Sequential(
+            conv(512 + 64, 256, 3),
+            conv(256, 128, 3),
+            conv(128, 64, 3),
+            nn.Conv2d(64, 6, 3, padding=1)  # dts, dts
+        )
+        self.output_layer = nn.Sigmoid()
+        self.xscale = 2
+
+        self.register_buffer("xbias", torch.zeros(1, self.outcnl, 1, 1, dtype=torch.float32))
+        self.register_buffer("outputscale", torch.ones(1, self.outcnl, 1, 1, dtype=torch.float32))
+        # output channel: depth 0, thickness 1, scale 2, depth 3, thickness 4, scale 5
+        self.xbias[:, 2] = self.xbias[:, 5] = 2  # scale should be near to 1
+        self.outputscale[:, 1] = self.outputscale[:, 4] = 0.5  # thickness should be small
+        self.xbias[:, 0] = 0.5
+        self.xbias[:, 3] = -0.5
+        # self.xbias[:, 3] = 0.5
+        # self.xbias[:, 0] = -0.5
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, img, flow_net, disp_warp):
+        batchsz, _, hei, wid = img.shape
+        assert hei % 8 == 0 and wid % 8 == 0
+        im_feat = img
+        for layer in self.backbone:
+            im_feat = layer(im_feat)
+
+        feat_in = torch.cat([im_feat, flow_net], dim=1)
+        down1 = self.down1b(self.down1(self.down(feat_in)))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        x = self.up(self.mid2(self.mid1(self.down(down3))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
+        x = self.post(torch.cat(self.shapeto(x, feat_in), dim=1))
+
+        disp_feat = self.disp_last_encoder(disp_warp)
+        feat = self.depth_decoder(torch.cat([x, disp_feat], dim=1))  # 256
+        feat = self.output_layer(feat * 2 + self.xbias) * self.outputscale
+
+        upmask = self.mask_decoder(x) * 0.25
+        return feat, upmask
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.depth_decoder[-1].weight)
+        nn.init.constant_(self.depth_decoder[-1].bias, 0)
+
+
 def learned_upsample(content, mask):
     """ Upsample flow field [H/8, W/8, 2] -> [H, W, 2] using convex combination """
     N, C, H, W = content.shape
     mask = mask.view(N, 1, 9, 8, 8, H, W)
     mask = torch.softmax(mask, dim=2)
 
-    # content = torchf.pad(content, [1, 1, 1, 1], 'replicate')
-    up_flow = torchf.unfold(content, [3, 3], padding=1)
+    content = torchf.pad(content, [1, 1, 1, 1], 'replicate')
+    up_flow = torchf.unfold(content, [3, 3], padding=0)
     up_flow = up_flow.view(N, C, 9, 1, 1, H, W)
 
     up_flow = torch.sum(mask * up_flow, dim=2)

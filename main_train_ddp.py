@@ -31,25 +31,30 @@ cfg = {
 
     "trainset": "stereovideo_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Fullv4",
+    "model_name": "Fullv60HR_netflow",
     "modelloss_name": "fullv2",
     "batch_size": 1,
-    "num_epoch": 5000,  # actually it's num_iter
+    "num_epoch": 200,
     "savepth_iter_freq": 500,
     "lr": 1e-4,
     "check_point": {
-        "": "no.pth"
+        "MPI": "v62_pretrain_212056_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'vgg',
         "pixel_loss": 0.2,
-        "smooth_loss": 0.1,
+        "net_smth_loss_fg": 0.1,
+        "net_smth_loss_bg": 0.1,
         "depth_loss": 5,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
-        "mask_loss": 1,
+        "mask_warmup": 1,
+        "bgflow_warmup": 1,
+        "net_warmup": 0.5,
+        "aflow_fusefgpct": True,
+
         "tempdepth_loss": 1,
-        "temporal_loss_mode": "mse"
+        "temporal_loss_mode": "mse",
         # "splat_mode": "bilinear",
         # "dilate_mpfin": True,
         # "alpha2mpf": True,
@@ -68,24 +73,19 @@ cfg = {
 
 
 # TODO
-#   \problems
-#   >>> temporal consistency when training in large dataset
-#   >>> inpainting performance (pending to be test)
+#   \project
+#   >>> Try find a best setting for parameter maps
+#   >>> Try find a best setting for background inpainting
 #   \code
-#   >>> try slightly different settings in the current mpimodel
-#   >>> check other dataset for depth supervision
 #   >>> try a big temporal consistency term
-#   >>> single frame regularization
-#   >>> check reason for very big scale in Manne
-#   >>>
 #   >>> ready for the evaluating metric!!!!!
 
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "v4_raftnet_masksupervise"
-    cfg["comment"] = "full model of v2 pipeline trained on stereovideo dataset"
+    cfg["id"] = "Fullv60HR_netflow"
+    cfg["comment"] = "too lazy to write comment"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -99,6 +99,7 @@ def main(cfg):
         cfg["comment"] = "Dont't forget to change comment" * 100
         cfg["world_size"] = 2
         cfg["train_report_freq"] = 1
+        cfg["valid_freq"] = 20
     else:
         import warnings
         warnings.filterwarnings("ignore")

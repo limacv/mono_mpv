@@ -12,7 +12,7 @@ import cv2
 import os
 from glob import glob
 from . import MannequinChallenge_root, is_DEBUG, MannequinChallenge_skip_framenum
-from . import OutputSize as outSize
+from . import OutputSize, OutputSize_test
 from .colmap_wrapper import *
 from .Augmenter import DataAugmenter
 from .youtubedl_wrapper import run_youtubedl
@@ -260,8 +260,8 @@ class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
                          black_list=black_list,
                          ptnum=ptnum)
         self.name = f"MannequinChallenge_Img_{self.trainstr}"
-
-        self.augmenter = DataAugmenter(outSize, mode=mode)
+        Outsz = OutputSize if is_train else OutputSize_test
+        self.augmenter = DataAugmenter(Outsz, mode=mode)
 
     def __len__(self):
         return len(self.filebase_list)
@@ -414,7 +414,8 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
         self.name = f"MannequinChallenge_Video_{self.trainstr}"
         self.sequence_length = seq_len
         self.tar_margin = 1
-        self.augmenter = DataAugmenter(outSize, mode=mode)
+        Outsz = OutputSize if is_train else OutputSize_test
+        self.augmenter = DataAugmenter(Outsz, mode=mode)
         self.maxskip_framenum = max(2, max_skip)  # 1 means no skip
 
     def __len__(self):

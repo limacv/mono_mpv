@@ -20,16 +20,17 @@ def str2bool(s_):
     return s_
 
 
-path = "./log/checkpoint/v4_raftnet_masksupervise_162138_r0.pth"
+path = "./log/checkpoint/SV_baseline_frompaper_221551_r0.pth"
 # Adjust configurations here ############################################
 state_dict_path = {
-    '': "./log/checkpoint/v4_raftnet_masksupervise_162138_r0.pth",
+    '': "./log/checkpoint/SV_baseline_frompaper_221551_r0.pth",
     # "MPF.": "./log/checkpoint/mpf_bugfix_ord1smth_052107_r0.pth"
 }
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
 video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\pg6_Trim.mp4"
 # video_path = "Z:\\dataset\\StereoBlur_processed\\30fps\\HD720-02-15-49-26.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
@@ -50,7 +51,8 @@ save_infer_mpi = True and infer_single_frame
 save_newview = False
 save_disparity = True
 save_mpv = True
-save_mpf = False
+save_net = False
+regular_video = False
 # \Adjust configuration here ############################################
 
 out_prefix = "Z:\\tmp\\Visual"
@@ -59,13 +61,19 @@ if not os.path.exists(out_prefix):
 if "StereoBlur" in video_path:
     saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
                  + os.path.basename(video_path).split('.')[0] + ret_cfg
-else:
+elif "MannequinChallenge" in video_path:
     saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
                  + os.path.basename(os.path.dirname(video_path)).split('.')[0] + ret_cfg
+else:  # regular video
+    regular_video = True
+    saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
+                 + os.path.basename(video_path).split('.')[0]
 dispvideo_path = os.path.join(out_prefix, saveprefix + "_disparity.mp4")
 newviewsvideo_path = os.path.join(out_prefix, saveprefix + "_newview.mp4")
 mpiout_path = os.path.join(out_prefix, saveprefix)
 mpvout_path = os.path.join(out_prefix, saveprefix + ".mp4")
+if save_net:
+    ret_cfg += "ret_net"
 # state_dict = torch.load(state_dict_path[''], map_location='cuda:0')
 # torch.save({"state_dict": state_dict["state_dict"]}, state_dict_path)
 # if "state_dict" in state_dict:
@@ -79,7 +87,7 @@ cap = cv2.VideoCapture(video_path)
 dispout = cv2.VideoWriter()
 newview_out = cv2.VideoWriter() if save_newview else None
 mpvout = MPVWriter(mpvout_path)
-mpfout = MPFWriter(mpvout_path)
+netout = NetWriter(mpvout_path)
 # if infer_single_frame:
 #     cap.set(cv2.CAP_PROP_POS_FRAMES, 5)
 
@@ -108,9 +116,9 @@ with torch.no_grad():
         if mpi is None:
             continue
         if isinstance(mpi, tuple):
-            mpi, mpf = mpi
-        if save_mpf:
-            mpfout.write(mpi[0], mpf[0])
+            mpi, net = mpi
+        if save_net:
+            netout.write(net)
         if save_mpv:
             mpvout.write(mpi[0])
         depthes = make_depths(mpi.shape[1]).cuda()

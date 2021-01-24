@@ -12,7 +12,7 @@ import cv2
 import os
 from glob import glob
 from . import RealEstate10K_root, is_DEBUG, RealEstate10K_skip_framenum
-from . import OutputSize as outSize
+from . import OutputSize, OutputSize_test
 from .colmap_wrapper import *
 from .Augmenter import DataAugmenter
 from .youtubedl_wrapper import run_youtubedl
@@ -263,8 +263,8 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
                          black_list=black_list,
                          ptnum=ptnum)
         self.name = f"RealEstate10K_Img_{self.trainstr}"
-
-        self.augmenter = DataAugmenter(outSize, mode=mode)
+        Outsz = OutputSize if is_train else OutputSize_test
+        self.augmenter = DataAugmenter(Outsz, mode=mode)
 
     def __len__(self):
         return len(self.filebase_list)
@@ -417,7 +417,8 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         self.name = f"RealEstate10K_Video_{self.trainstr}"
         self.sequence_length = seq_len
         self.tar_margin = max(6 - seq_len, 1)
-        self.augmenter = DataAugmenter(outSize, mode=mode)
+        Outsz = OutputSize if is_train else OutputSize_test
+        self.augmenter = DataAugmenter(Outsz, mode=mode)
 
     def __len__(self):
         return len(self.filebase_list)

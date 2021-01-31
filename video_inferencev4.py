@@ -6,68 +6,54 @@ from models.flow_utils import *
 import torch.backends.cudnn
 
 
-def str2bool(s_):
-    try:
-        s_ = int(s_)
-    except ValueError:
-        try:
-            s_ = float(s_)
-        except ValueError:
-            if s_ == 'True':
-                s_ = True
-            elif s_ == 'False':
-                s_ = False
-    return s_
-
-
-path = "./log/checkpoint/v53LR_netflownet_191850_r0.pth"
-# Adjust configurations here ############################################
-state_dict_path = {
-    '': "./log/checkpoint/v53LR_netflownet_191850_r0.pth",
-    # "MPF.": "./log/checkpoint/mpf_bugfix_ord1smth_052107_r0.pth"
-}
+# Adjust configurations here ########################################################################################
+path = "./log/checkpoint/V6_l1p0_5s0_5d1tmsle_251856_r0.pth"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
-video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+video_path = "D:\\MSI_NB\\source\\data\\pg6_Trim.mp4"
 # video_path = "Z:\\dataset\\StereoBlur_processed\\30fps\\HD720-02-15-49-26.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
 
-# read config from state_dict
-cfg_str = torch.load(state_dict_path[''])["cfg"]
-loss_weights = [i for i in cfg_str.split('\n') if i.startswith("Loss: ")][0][6:].split(', ')
-loss_weights = {i.split(':')[0]: str2bool(i.split(':')[1]) for i in loss_weights}
-modelname = [i for i in cfg_str.split('\n') if i.startswith("Model: ")][0].split(', ')[0][7:]
+pipeline = smart_select_pipeline(path,
+                                  force_pipelinename="fullv4",
+                                  winsz=7)
 
-model = select_module(modelname).cuda()
-pipeline = PipelineV4(model, {"loss_weights": loss_weights,
-                              "winsz": 7})
-ret_cfg = "dbg"
+ret_cfg = "bgfrom01"
 
 save_infer_mpi = True
 save_disparity = True
 save_mpv = True
-# \Adjust configuration here ############################################
+save_net = True
+regular_video = False
+# \Adjust configuration here ########################################################################################
 
 out_prefix = "Z:\\tmp\\Visual"
 if not os.path.exists(out_prefix):
     out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
 if "StereoBlur" in video_path:
-    saveprefix = "ZV4" + os.path.basename(state_dict_path['']).split('.')[0] \
+    saveprefix = "ZV4" + os.path.basename(path).split('.')[0] \
                  + os.path.basename(video_path).split('.')[0] + ret_cfg
-else:
-    saveprefix = "ZV4" + os.path.basename(state_dict_path['']).split('.')[0] \
+elif "MannequinChallenge" in video_path:
+    saveprefix = "ZV4" + os.path.basename(path).split('.')[0] \
                  + os.path.basename(os.path.dirname(video_path)).split('.')[0] + ret_cfg
+else:  # regular video
+    regular_video = True
+    saveprefix = os.path.basename(path).split('.')[0] \
+                 + os.path.basename(video_path).split('.')[0]
 dispvideo_path = os.path.join(out_prefix, saveprefix + "_disparity.mp4")
 mpvout_path = os.path.join(out_prefix, saveprefix + ".mp4")
-smart_load_checkpoint('', {"check_point": state_dict_path}, model)
+if save_net:
+    ret_cfg += "ret_net"
 
 # ## ### #### ##### ###### ####### ######## ####### ###### ##### #### ### ## #
 
 cap = cv2.VideoCapture(video_path)
 dispout = cv2.VideoWriter()
 mpvout = MPVWriter(mpvout_path)
+netout = NetWriter(mpvout_path)
 
 frameidx = 0
 with torch.no_grad():
@@ -92,6 +78,10 @@ with torch.no_grad():
 
         if mpi is None:
             continue
+        if isinstance(mpi, tuple):
+            mpi, net = mpi
+        if save_net:
+            netout.write(net)
         if save_mpv:
             mpvout.write(mpi[0])
         depthes = make_depths(mpi.shape[1]).cuda()

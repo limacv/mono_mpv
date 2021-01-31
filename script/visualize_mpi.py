@@ -48,7 +48,7 @@ class MPIS:
 class MPRGBA(MPIS):
     def __init__(self):
         super().__init__()
-        self.gnwid, self.gnhei = 8, 3
+        self.gnwid, self.gnhei = 8, 4
 
     def load(self, videoname):
         alphaname = videoname.replace(".mp4", "_alpha.mp4")
@@ -80,7 +80,7 @@ class MPRGBA(MPIS):
         rgba = self.raw_list[i].type(torch.float32) / 255
         mpi = rgba.reshape(self.gnhei, self.hei, self.gnwid, self.wid, 4) \
             .permute(0, 2, 4, 1, 3) \
-            .reshape(self.layernum, 4, self.hei, self.wid)
+            .reshape(1, self.layernum, 4, self.hei, self.wid)
         return mpi
 
 
@@ -129,7 +129,7 @@ class MPNet(MPIS):
         return mpi
 
 
-videopath = "Z:\\tmp\\Visual"
+videopath = "./"
 
 parser = argparse.ArgumentParser(description="visualize the mpi")
 parser.add_argument("videoname")
@@ -178,7 +178,7 @@ if __name__ == "__main__":
                      [0.0, cosy, -siny, currentdy],
                      [sinx, cosx * siny, cosx * cosy, 0]]
                 ).type(torch.float32).cuda().unsqueeze(0)
-                view = render_newview(curmpi, source_pose, target_pose, intrin, repos.depthes)[0]
+                view = render_newview(curmpi, source_pose, target_pose, intrin, intrin, repos.depthes)[0]
 
             elif mode == "disp":
                 estimate_disparity_torch(curmpi.unsqueeze(0), repos.depthes)

@@ -6,26 +6,8 @@ from models.flow_utils import *
 import torch.backends.cudnn
 
 
-def str2bool(s_):
-    try:
-        s_ = int(s_)
-    except ValueError:
-        try:
-            s_ = float(s_)
-        except ValueError:
-            if s_ == 'True':
-                s_ = True
-            elif s_ == 'False':
-                s_ = False
-    return s_
-
-
-path = "./log/checkpoint/SV_baseline_frompaper_221551_r0.pth"
-# Adjust configurations here ############################################
-state_dict_path = {
-    '': "./log/checkpoint/SV_baseline_frompaper_221551_r0.pth",
-    # "MPF.": "./log/checkpoint/mpf_bugfix_ord1smth_052107_r0.pth"
-}
+# Adjust configurations here ########################################################################################
+path = "./log/checkpoint/V5_netwarm_scaleto1_300013_r0.pth"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
@@ -35,38 +17,29 @@ video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
 
-# read config from state_dict
-cfg_str = torch.load(state_dict_path[''])["cfg"]
-loss_weights = [i for i in cfg_str.split('\n') if i.startswith("Loss: ")][0][6:].split(', ')
-loss_weights = {i.split(':')[0]: str2bool(i.split(':')[1]) for i in loss_weights}
-modelname = [i for i in cfg_str.split('\n') if i.startswith("Model: ")][0].split(', ')[0][7:]
-modellossname = [i for i in cfg_str.split('\n') if i.startswith("Model: ")][0].split(', ')[1][11:]
+modelloss = smart_select_pipeline(path)
 
-model = select_module(modelname).cuda()
-modelloss = select_modelloss(modellossname)(model, {"loss_weights": loss_weights})
 ret_cfg = " "
-infer_single_frame = False
 
-save_infer_mpi = True and infer_single_frame
 save_newview = False
 save_disparity = True
 save_mpv = True
 save_net = False
 regular_video = False
-# \Adjust configuration here ############################################
+# \Adjust configuration here ########################################################################################
 
 out_prefix = "Z:\\tmp\\Visual"
 if not os.path.exists(out_prefix):
     out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
 if "StereoBlur" in video_path:
-    saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
+    saveprefix = os.path.basename(path).split('.')[0] \
                  + os.path.basename(video_path).split('.')[0] + ret_cfg
 elif "MannequinChallenge" in video_path:
-    saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
+    saveprefix = os.path.basename(path).split('.')[0] \
                  + os.path.basename(os.path.dirname(video_path)).split('.')[0] + ret_cfg
 else:  # regular video
     regular_video = True
-    saveprefix = os.path.basename(state_dict_path['']).split('.')[0] \
+    saveprefix = os.path.basename(path).split('.')[0] \
                  + os.path.basename(video_path).split('.')[0]
 dispvideo_path = os.path.join(out_prefix, saveprefix + "_disparity.mp4")
 newviewsvideo_path = os.path.join(out_prefix, saveprefix + "_newview.mp4")
@@ -74,12 +47,6 @@ mpiout_path = os.path.join(out_prefix, saveprefix)
 mpvout_path = os.path.join(out_prefix, saveprefix + ".mp4")
 if save_net:
     ret_cfg += "ret_net"
-# state_dict = torch.load(state_dict_path[''], map_location='cuda:0')
-# torch.save({"state_dict": state_dict["state_dict"]}, state_dict_path)
-# if "state_dict" in state_dict:
-#     state_dict = state_dict["state_dict"]
-# model.load_state_dict(state_dict)
-smart_load_checkpoint('', {"check_point": state_dict_path}, model)
 
 # ## ### #### ##### ###### ####### ######## ####### ###### ##### #### ### ## #
 
@@ -88,8 +55,6 @@ dispout = cv2.VideoWriter()
 newview_out = cv2.VideoWriter() if save_newview else None
 mpvout = MPVWriter(mpvout_path)
 netout = NetWriter(mpvout_path)
-# if infer_single_frame:
-#     cap.set(cv2.CAP_PROP_POS_FRAMES, 5)
 
 frameidx = 0
 with torch.no_grad():
@@ -141,17 +106,9 @@ with torch.no_grad():
                  [0.0, hei / 2, hei / 2],
                  [0.0, 0.0, 1.0]]
             ).type_as(mpi).unsqueeze(0)
-            view = render_newview(mpi, source_pose, target_pose, intrin, depthes)
+            view = render_newview(mpi, source_pose, target_pose, intrin, intrin, depthes)
             visview = (view * 255).type(torch.uint8).squeeze(0).permute(1, 2, 0).cpu().numpy()
             visview = cv2.cvtColor(visview, cv2.COLOR_RGB2BGR)
-
-        if infer_single_frame and frameidx == 5:
-            if save_infer_mpi:
-                save_mpi(mpi, mpiout_path)
-            cv2.imwrite(dispvideo_path + ".jpg", visdisp)
-            if save_newview:
-                cv2.imwrite(newviewsvideo_path + ".jpg", visview)
-            break
 
         if save_disparity:
             if not dispout.isOpened():

@@ -100,6 +100,13 @@ def train(cfg: dict):
             loss = loss.mean()
             loss_dict = {k: v.mean() for k, v in loss_dict.items()}
 
+            # debug usage
+            if loss_dict["scale"] > 1000:
+                print(f"RANK_{local_rank}:: detect large scale, "
+                      f"current base: {trainset.name}: {trainset._cur_file_base}")
+            elif loss_dict["scale"] < 1/1000:
+                print(f"RANK_{local_rank}:: detect small scale, "
+                      f"current base: {trainset.name}: {trainset._cur_file_base}")
             # first evaluate and then backward so that first evaluate is always the same
             optimizer.zero_grad()
             loss.backward()
@@ -123,10 +130,11 @@ def train(cfg: dict):
             # perform evaluation
             if step % validate_freq == 0:
                 val_dict, val_display = {}, None
+                vis_id = np.random.randint(0, len(evaluatedata))
                 for i, evaldatas in enumerate(evaluatedata):
-                    _val_dict = modelloss.module.valid_forward(*evaldatas, visualize=(i == 0))
+                    _val_dict = modelloss.module.valid_forward(*evaldatas, visualize=(i == vis_id))
 
-                    if i == 0:
+                    if i == vis_id:
                         for k in _val_dict.copy().keys():
                             if "vis_" in k:
                                 tensorboard.add_image(k, _val_dict[k], step, dataformats='HWC')

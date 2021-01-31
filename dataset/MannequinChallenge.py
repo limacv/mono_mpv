@@ -12,7 +12,7 @@ import cv2
 import os
 from glob import glob
 from . import MannequinChallenge_root, is_DEBUG, MannequinChallenge_skip_framenum
-from . import OutputSize, OutputSize_test
+from . import OutputSize, OutputSize_test, MaxPointNumberForce
 from .colmap_wrapper import *
 from .Augmenter import DataAugmenter
 from .youtubedl_wrapper import run_youtubedl
@@ -55,7 +55,7 @@ class MannequinChallenge_Base:
         if not os.path.exists(self.tmp_root):
             os.mkdir(self.tmp_root)
 
-        self.ptnum = ptnum
+        self.maxptnum = ptnum if ptnum > 0 else MaxPointNumberForce
         self.totensor = ToTensor()
         self._cur_file_base = ""
         self._curvideo_trim_path = ""
@@ -248,10 +248,10 @@ class MannequinChallenge_Base:
 
 
 class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
-    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=2000):
+    def __init__(self, is_train=True, black_list=True, mode='resize', ptnum=-1):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
-        mpimodel=  'none': do noting
+        model=  'none': do noting
                 'resize': resize to 512x512,
                 'pad': pad to multiple of 128, usually used in evaluation,
                 'crop': crop to 512x512 or multiple of 128
@@ -312,8 +312,7 @@ class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
             if framenum < 3:
                 print(f"MannequinChallenge: {file_base}.txt has less than 3 image, skip")
                 return None
-            stride = min(np.random.randint(3 // MannequinChallenge_skip_framenum + 1,
-                                           20 // MannequinChallenge_skip_framenum), framenum - 1)
+            stride = min(np.random.randint(1, 4), framenum - 1)
             startidx = np.random.randint(framenum - stride)
             endidx = startidx + stride
             refidx, taridx = (startidx, endidx) if np.random.randint(2) else (endidx, startidx)
@@ -382,7 +381,8 @@ class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
         ptindex = ptindex[int(0.01 * len(ptindex)):int(0.99 * len(ptindex))]
         point2ds = point2ds[ptindex]
         point2ds_depth = point2ds_depth[ptindex]
-        good_ptid = point2ds_depth > 0.01
+
+        good_ptid = point2ds_depth > 0.000001
         point2ds = point2ds[good_ptid]
         point2ds_depth = point2ds_depth[good_ptid]
 
@@ -390,9 +390,10 @@ class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
 
         # random sample point so that output fixed number of points
         ptnum = point2ds.shape[0]
-        ptsample = np.random.choice(ptnum, self.ptnum, replace=(ptnum < self.ptnum))
-        point2ds = point2ds[ptsample]
-        point2ds_depth = point2ds_depth[ptsample]
+        if ptnum > self.maxptnum:
+            ptsample = np.random.choice(ptnum, self.maxptnum, replace=False)
+            point2ds = point2ds[ptsample]
+            point2ds_depth = point2ds_depth[ptsample]
 
         return refimg, tarimg, \
                torch.tensor(refextrin), torch.tensor(tarextrin), \
@@ -400,7 +401,7 @@ class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
 
 
 class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
-    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=2000, seq_len=4, max_skip=1):
+    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=-1, seq_len=4, max_skip=1):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         mpimodel=  'none': do noting
@@ -413,7 +414,7 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
                          ptnum=ptnum)
         self.name = f"MannequinChallenge_Video_{self.trainstr}"
         self.sequence_length = seq_len
-        self.tar_margin = 1
+        self.tar_margin = 0
         Outsz = OutputSize if is_train else OutputSize_test
         self.augmenter = DataAugmenter(Outsz, mode=mode)
         self.maxskip_framenum = max(2, max_skip)  # 1 means no skip
@@ -474,7 +475,7 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
                                  min(refidxs[-1] + self.tar_margin + 1, framenum)))
             taridx = taridxs[np.random.randint(len(taridxs))]
         else:
-            refidxs, taridx = np.arange(1, 1 + self.sequence_length), 0
+            refidxs, taridx = np.arange(1, 1 + self.sequence_length), self.sequence_length // 2 + 1
 
         refimgs = []
         for idx in refidxs:
@@ -528,7 +529,13 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
 
             point3ds_camnorm = refextrin @ np.vstack([point3ds.T, np.ones((1, len(point3ds)), dtype=point3ds.dtype)])
             point2ds_depth = point3ds_camnorm[2]
-            good_ptid = point2ds_depth > 0.01
+
+            ptindex = np.argsort(point2ds_depth)
+            ptindex = ptindex[int(0.01 * len(ptindex)):int(0.99 * len(ptindex))]
+            point2ds = point2ds[ptindex]
+            point2ds_depth = point2ds_depth[ptindex]
+
+            good_ptid = point2ds_depth > 0.000001
             point2ds = point2ds[good_ptid]
             point2ds_depth = point2ds_depth[good_ptid]
 
@@ -536,15 +543,23 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
             if len(point2ds) < 100:
                 return None
             # random sample point so that output fixed number of points
-            ptnum = point2ds.shape[0]
-            ptsample = np.random.choice(ptnum, self.ptnum, replace=(ptnum < self.ptnum))
+            # ptnum = point2ds.shape[0]
+            # ptsample = np.random.choice(ptnum, self.maxptnum, replace=(ptnum < self.maxptnum))
 
-            pointxys.append(point2ds[ptsample])
-            pointzs.append(point2ds_depth[ptsample])
+            pointxys.append(point2ds)
+            pointzs.append(point2ds_depth)
+
+        # decide the number of points
+        ptnum = min([len(pts) for pts in pointzs] + [self.maxptnum])
+        pointxys1, pointzs1 = [], []
+        for point2ds, point2ds_depth in zip(pointxys, pointzs):
+            ptsample = np.random.choice(len(point2ds), ptnum, replace=False)
+            pointxys1.append(point2ds[ptsample])
+            pointzs1.append(point2ds_depth[ptsample])
 
         refextrins = np.stack(refextrins, axis=0)
-        pointxys = np.stack(pointxys, axis=0)
-        pointzs = np.stack(pointzs, axis=0)
+        pointxys = np.stack(pointxys1, axis=0)
+        pointzs = np.stack(pointzs1, axis=0)
 
         # target view parameters and intrinsic
         tarview = colimages[taridx + 1]

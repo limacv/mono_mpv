@@ -46,7 +46,7 @@ cfg = {
         "net_smth_loss_fg": 0.25,
         # "net_smth_loss_bg": 0.5,
         "depth_loss": 1,
-        "depth_loss_mode": "fine",
+        "depth_loss_mode": "coarse",
 
         "tempdepth_loss": 1,
         "temporal_loss_mode": "msle",
@@ -66,7 +66,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V5Joint_random_depthfine"
+    cfg["id"] = "V5Joint_random"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()
@@ -93,7 +93,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = np.random.randint(0, 10000)
+    seed = 5472  # np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

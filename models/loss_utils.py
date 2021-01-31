@@ -23,7 +23,7 @@ class ParamScheduler:
         assert len(milestones) == len(values), "scheduler::len(milestones) == len(values)"
         if isinstance(mode, List):
             assert len(mode) >= len(milestones) - 1, "scheduler::len(mode) >= len(milestones) - 1"
-        self.milestone = np.array(milestones, dtype=np.long)
+        self.milestone = np.array(milestones, dtype=np.longlong)
         self.values = values
         self.modes = mode[:(len(milestones) - 1)] if isinstance(mode, List) else [mode] * (len(milestones) - 1)
 

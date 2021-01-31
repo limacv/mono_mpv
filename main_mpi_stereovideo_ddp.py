@@ -20,8 +20,8 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 64,
-    "valid_freq": 1000,
+    "validate_num": -1,
+    "valid_freq": 200,
     "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
@@ -29,35 +29,37 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "m+r+s_seq",
-    "evalset": "m+r+s_seq",
-    "model_name": "Fullv5",
-    "modelloss_name": "fulljoint",
-    "batch_size": 1,
-    "num_epoch": 2000,
-    "savepth_iter_freq": 400,
-    "lr": 5e-5,
-    "check_point": {
-        "": "no.pth"
-    },
+    "trainset": "stereovideo_img",
+    "evalset": "stereovideo_seq",
+    "model_name": "MPINetv2",
+    "modelloss_name": "disp_img",
+    "batch_size": 2,
+    "num_epoch": 300,
+    "savepth_iter_freq": 300,
+    "lr": 2e-5,
+    "check_point": "mpinet_ori.pth",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "net_smth_loss_fg": 0.25,
-        # "net_smth_loss_bg": 0.5,
-        "depth_loss": 1,
-        "depth_loss_mode": "fine",
+        "smooth_loss": 0.5,
+        "depth_loss": 1,  # need to figure out
 
-        "tempdepth_loss": 1,
-        "temporal_loss_mode": "msle",
+        # "temporal_loss": 0.9,
+        # "pixel_std_loss": 0.5,
+        # "temporal_loss": 0.5,
+        # "splat_mode": "bilinear",
+        # "dilate_mpfin": True,
+        # "alpha2mpf": True,
 
-        "mask_warmup": 0.25,
-        "mask_warmup_milestone": [1e18, 2e18],
-        "bgflow_warmup": 1,
-        "bgflow_warmup_milestone": [4e3, 6e3],
-        "net_warmup": 0.5,
-        "net_warmup_milestone": [1e18, 2e18],
-        # "aflow_fusefgpct": False,
+        # "flow_epe": 1,
+        # "flow_smth": 0.1,
+        # "flow_smth_ord": 1,
+        # "flow_smth_bw": False
+        # "aflow_includeself": True,
+        # "sflow_loss": 0.1
+
+        # "sparse_loss": 0.1,
+        # "smooth_tar_loss": 0.5,
     },
 }
 
@@ -66,8 +68,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V5Joint_random_depthfine"
-    cfg["comment"] = "bg force nontransparency"
+    cfg["id"] = "raSV_finetune"
+    cfg["comment"] = "single frame method baseline (fine-tuning on my dataset)"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -78,7 +80,7 @@ def main(cfg):
     # please comment this
     if "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
         print("Debug Mode!!!", flush=True)
-        cfg["comment"] = "Dont't forget to change comment" * 50
+        cfg["comment"] = "Dont't forget to change comment" * 100
         cfg["world_size"] = 2
         cfg["train_report_freq"] = 1
         cfg["valid_freq"] = 20

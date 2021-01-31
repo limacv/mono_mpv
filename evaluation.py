@@ -89,7 +89,7 @@ with torch.no_grad():
                  [0.0, hei / 2, hei / 2],
                  [0.0, 0.0, 1.0]]
             ).type_as(mpi).unsqueeze(0)
-            view = render_newview(mpi, source_pose, target_pose, intrin, depthes)
+            view = render_newview(mpi, source_pose, target_pose, intrin, intrin, depthes)
             visview = (view * 255).type(torch.uint8).squeeze(0).permute(1, 2, 0).cpu().numpy()
             visview = cv2.cvtColor(visview, cv2.COLOR_RGB2BGR)
 

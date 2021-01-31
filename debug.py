@@ -1,19 +1,25 @@
 from utils import *
+import random
 
-# np.random.seed(66)
-# torch.manual_seed(66)
+seed = 3358  # np.random.randint(0, 10000)
+print(f"random seed = {seed}")
+torch.manual_seed(seed)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = True
+np.random.seed(seed)
+random.seed(seed)
 
 
 def main(kwargs):
     batchsz = kwargs["batchsz"]
-    model = select_module("Fullv60HR_netflow")
+    model = select_module(kwargs["modelname"])
 
     smart_load_checkpoint("./log/checkpoint/", kwargs, model)
 
     model.cuda()
-    modelloss = select_modelloss("fullv2")(model, kwargs)
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-4)
-    dataset = select_dataset("stereovideo_seq", True, {})
+    modelloss = select_modelloss(kwargs["pipelinename"])(model, kwargs)
+    optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-5)
+    dataset = select_dataset(kwargs["datasetname"], kwargs["istrain"], {})
     for i in range(int(14000)):
         datas_all = [[]] * 7
         for dev in range(batchsz):
@@ -21,26 +27,30 @@ def main(kwargs):
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
-        with torch.autograd.set_detect_anomaly(True):
+        if kwargs["istrain"]:
             loss_dict = modelloss(*datas, step=i)
             loss = loss_dict["loss"]
             loss = loss.mean()
             loss_dict = loss_dict["loss_dict"]
             optimizer.zero_grad()
             loss.backward()
-        _val_dict = modelloss.valid_forward(*datas, visualize=True)
-        optimizer.step()
-        loss_dict = {k: v.mean() for k, v in loss_dict.items()}
+            optimizer.step()
+            loss_dict = {k: v.mean() for k, v in loss_dict.items()}
 
-        # output iter infomation
-        loss_str = " | ".join([f"{k}:{v:.3f}" for k, v in loss_dict.items()])
-        print(f"loss:{loss:.3f} | {loss_str}", flush=True)
-        if i % 25 == 0:
-            datas = [d_[:batchsz] for d_ in datas]
+            # output iter infomation
+            loss_str = " | ".join([f"{k}:{v:.3f}" for k, v in loss_dict.items()])
+            print(f"loss:{loss:.3f} | {loss_str}", flush=True)
+        else:
             _val_dict = modelloss.valid_forward(*datas, visualize=True)
+            val_str = " | ".join([f"{k}: {v:.3f}" for k, v in _val_dict.items() if "val_" in k])
+            print(f"{val_str}")
 
-        if i % 100 == 0 and "savefile" in kwargs.keys():
-            torch.save(model.state_dict(), kwargs["savefile"])
+        # if i % 25 == 0:
+        #     datas = [d_[:batchsz] for d_ in datas]
+        #     _val_dict = modelloss.valid_forward(*datas, visualize=True)
+        #
+        # if i % 100 == 0 and "savefile" in kwargs.keys():
+        #     torch.save(model.state_dict(), kwargs["savefile"])
 
 
 # complete cfg:
@@ -55,43 +65,41 @@ def main(kwargs):
 
 
 main({
+    "modelname": "Fullv5",  # MPINetv2, Fullv4, Fullv6, Fullv5.Fullv5resnet
+    "pipelinename": "fulljoint",  # sv, disp_img, fullv2, fullsvv2, fulljoint
+    "datasetname": "mannequinchallenge_seq",
+    # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
+    # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
+    "istrain": False,
+    "check_point": {
+        # "": "mpinet_ori.pth",
+    },
+
     "device_ids": [0],
     # "device_ids": [0, 1, 2, 3, 4, 5, 6, 7],
-    "check_point": {
-        "MPI": "Fullv62_bugfix_211420_r0.pth",
-    },
-    "batchsz": 2,
+    "batchsz": 1,
     # "checkpoint": "./log/MPINet/mpinet_ori.pth",
     # "savefile": "./log/DBG_pretrain.pth",
     "logdir": "./log/run/debug_svscratch",
     "savefile": "./log/checkpoint/debug_svscratch.pth",
-    "loss_weights": {"pixel_loss": 1,
-                     "pixel_loss_cfg": "vgg",
-                     "smooth_loss": 0.5,
-                     "net_smth_loss": 0.1,
-                     "depth_loss": 0.1,
-                     "depth_loss_mode": "hat",
-                     "depth_loss_ord": 0.5,
-                     "depth_loss_rmresidual": True,
-                     "mask_warmup": 1,
-                     "net_warmup": 1,
-                     "bgflow_warmup": 1.,
-                     "mpi_flowgrad_in": False,
-                     "templ1_loss": 1,
-                     "tempdepth_loss": 0.01,
-                     "dilate_mpfin": False,
-                     "alpha2mpf": True,
-                     "aflow_fusefgpct": True,
-                     "sflow_mode": "backward",
-                     "pipe_optim_frame0": True,
-                     "aflow_residual": True,
-                     "aflow_includeself": False,
-                     "flow_epe": 0.1,
-                     "flow_smth": 0.1,
-                     # "sflow_loss": 0.1,
-                     # "smooth_flowgrad_loss": 0.1,
-                     "temporal_loss": 0.9,
-                     "temporal_loss_mode": "mse"},
+    "loss_weights": {"pixel_loss_cfg": 'l1',
+                     "pixel_loss": 1,
+                     "net_smth_loss_fg": 0.5,
+                     # "net_smth_loss_bg": 0.5,
+                     "depth_loss": 1,
+                     "depth_loss_mode": "coarse",
+
+                     "tempdepth_loss": 1,
+                     "temporal_loss_mode": "msle",
+
+                     "mask_warmup": 0.5,
+                     "mask_warmup_milestone": [1e18, 2e18],
+                     "bgflow_warmup": 1,
+                     "bgflow_warmup_milestone": [4e3, 6e3],
+                     "net_warmup": 0.5,
+                     "net_warmup_milestone": [1e18, 2e18],
+                     # "aflow_fusefgpct": False,
+                     },
 })
 # good data list
 # 01bfb80e5b8fe757

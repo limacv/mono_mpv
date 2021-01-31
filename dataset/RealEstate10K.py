@@ -12,7 +12,7 @@ import cv2
 import os
 from glob import glob
 from . import RealEstate10K_root, is_DEBUG, RealEstate10K_skip_framenum
-from . import OutputSize, OutputSize_test
+from . import OutputSize, OutputSize_test, MaxPointNumberForce
 from .colmap_wrapper import *
 from .Augmenter import DataAugmenter
 from .youtubedl_wrapper import run_youtubedl
@@ -55,7 +55,7 @@ class RealEstate10K_Base:
         if not os.path.exists(self.tmp_root):
             os.mkdir(self.tmp_root)
 
-        self.ptnum = ptnum
+        self.maxptnum = ptnum if ptnum > 0 else MaxPointNumberForce
         self.totensor = ToTensor()
         self._cur_file_base = ""
         self._curvideo_trim_path = ""
@@ -251,7 +251,7 @@ class RealEstate10K_Base:
 
 
 class RealEstate10K_Img(Dataset, RealEstate10K_Base):
-    def __init__(self, is_train=True, black_list=True, mode='resize', ptnum=2000):
+    def __init__(self, is_train=True, black_list=True, mode='resize', ptnum=-1):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         model=  'none': do noting
@@ -381,11 +381,12 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
         # point3ds_imgnorm = intrin @ point3ds_camnorm
         # point3ds_imgnorm /= point3ds_imgnorm[2]
 
-        # ptindex = np.argsort(point2ds_depth)
-        # ptindex = ptindex[int(0.01 * len(ptindex)):int(0.99 * len(ptindex))]
-        # point2ds = point2ds[ptindex]
-        # point2ds_depth = point2ds_depth[ptindex]
-        good_ptid = point2ds_depth > 0.01
+        ptindex = np.argsort(point2ds_depth)
+        ptindex = ptindex[int(0.01 * len(ptindex)):int(0.99 * len(ptindex))]
+        point2ds = point2ds[ptindex]
+        point2ds_depth = point2ds_depth[ptindex]
+
+        good_ptid = point2ds_depth > 0.000001
         point2ds = point2ds[good_ptid]
         point2ds_depth = point2ds_depth[good_ptid]
 
@@ -393,9 +394,10 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
 
         # random sample point so that output fixed number of points
         ptnum = point2ds.shape[0]
-        ptsample = np.random.choice(ptnum, self.ptnum, replace=(ptnum < self.ptnum))
-        point2ds = point2ds[ptsample]
-        point2ds_depth = point2ds_depth[ptsample]
+        if ptnum > self.maxptnum:
+            ptsample = np.random.choice(ptnum, self.maxptnum, replace=False)
+            point2ds = point2ds[ptsample]
+            point2ds_depth = point2ds_depth[ptsample]
 
         return refimg, tarimg, \
                torch.tensor(refextrin), torch.tensor(tarextrin), \
@@ -403,7 +405,7 @@ class RealEstate10K_Img(Dataset, RealEstate10K_Base):
 
 
 class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
-    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=2000, seq_len=4):
+    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=-1, seq_len=4, max_skip=1):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         mode=  'none': do noting
@@ -416,9 +418,10 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
                          ptnum=ptnum)
         self.name = f"RealEstate10K_Video_{self.trainstr}"
         self.sequence_length = seq_len
-        self.tar_margin = max(6 - seq_len, 1)
+        self.tar_margin = 2
         Outsz = OutputSize if is_train else OutputSize_test
         self.augmenter = DataAugmenter(Outsz, mode=mode)
+        self.maxskip_framenum = max(2, max_skip)  # 1 means no skip
 
     def __len__(self):
         return len(self.filebase_list)
@@ -453,9 +456,6 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         # ================================================
         # select index and read images
         # ================================================
-        if not self.pre_fetch_bybase(file_base):
-            return None
-
         file_base = os.path.basename(file_base).split('.')[0]
         video_trim_path = self.video_trim_path(file_base)
         col_model_root = self.colmap_model_path(file_base)
@@ -471,15 +471,15 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
             return None
 
         if self.trainstr == "train":
-            startid = np.random.randint(0, framenum - self.sequence_length)
-            refidxs = np.arange(startid, startid + self.sequence_length)
+            skipnum = np.random.randint(1, self.maxskip_framenum)
+            framenum_wid = (self.sequence_length - 1) * skipnum + 1
+            startid = np.random.randint(0, framenum - framenum_wid)
+            refidxs = np.arange(startid, startid + framenum_wid, skipnum)
             taridxs = list(range(max(startid - self.tar_margin, 0),
                                  min(refidxs[-1] + self.tar_margin + 1, framenum)))
-            # taridxs = list(range(max(startid - 2, 0), startid)) +\
-            #           list(range(refidxs[-1] + 1, min(refidxs[-1] + 3, framenum)))
             taridx = taridxs[np.random.randint(len(taridxs))]
         else:
-            refidxs, taridx = np.arange(1, 1 + self.sequence_length), 0
+            refidxs, taridx = np.arange(1, 1 + self.sequence_length), self.sequence_length // 2 + 1
 
         refimgs = []
         for idx in refidxs:
@@ -533,7 +533,13 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
 
             point3ds_camnorm = refextrin @ np.vstack([point3ds.T, np.ones((1, len(point3ds)), dtype=point3ds.dtype)])
             point2ds_depth = point3ds_camnorm[2]
-            good_ptid = point2ds_depth > 0.01
+
+            ptindex = np.argsort(point2ds_depth)
+            ptindex = ptindex[int(0.01 * len(ptindex)):int(0.99 * len(ptindex))]
+            point2ds = point2ds[ptindex]
+            point2ds_depth = point2ds_depth[ptindex]
+
+            good_ptid = point2ds_depth > 0.000001
             point2ds = point2ds[good_ptid]
             point2ds_depth = point2ds_depth[good_ptid]
 
@@ -541,15 +547,23 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
             if len(point2ds) < 100:
                 return None
             # random sample point so that output fixed number of points
-            ptnum = point2ds.shape[0]
-            ptsample = np.random.choice(ptnum, self.ptnum, replace=(ptnum < self.ptnum))
+            # ptnum = point2ds.shape[0]
+            # ptsample = np.random.choice(ptnum, self.maxptnum, replace=(ptnum < self.maxptnum))
 
-            pointxys.append(point2ds[ptsample])
-            pointzs.append(point2ds_depth[ptsample])
+            pointxys.append(point2ds)
+            pointzs.append(point2ds_depth)
+
+        # decide the number of points
+        ptnum = min([len(pts) for pts in pointzs] + [self.maxptnum])
+        pointxys1, pointzs1 = [], []
+        for point2ds, point2ds_depth in zip(pointxys, pointzs):
+            ptsample = np.random.choice(len(point2ds), ptnum, replace=False)
+            pointxys1.append(point2ds[ptsample])
+            pointzs1.append(point2ds_depth[ptsample])
 
         refextrins = np.stack(refextrins, axis=0)
-        pointxys = np.stack(pointxys, axis=0)
-        pointzs = np.stack(pointzs, axis=0)
+        pointxys = np.stack(pointxys1, axis=0)
+        pointzs = np.stack(pointzs1, axis=0)
 
         # target view parameters and intrinsic
         tarview = colimages[taridx + 1]

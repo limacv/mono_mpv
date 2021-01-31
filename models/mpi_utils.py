@@ -306,7 +306,8 @@ def compute_homography(src_extrin: torch.Tensor, src_intrin: torch.Tensor,
     return homo
 
 
-def render_newview(mpi: torch.Tensor, srcextrin: torch.Tensor, tarextrin: torch.Tensor, intrin: torch.Tensor,
+def render_newview(mpi: torch.Tensor, srcextrin: torch.Tensor, tarextrin: torch.Tensor,
+                   srcintrin: torch.Tensor, tarintrin: torch.Tensor,
                    depths: torch.Tensor, ret_mask=False, ret_dispmap=False) \
         -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor],
                  Tuple[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]]:
@@ -329,7 +330,7 @@ def render_newview(mpi: torch.Tensor, srcextrin: torch.Tensor, tarextrin: torch.
         # tarextrin = torch.tensor([np.cos(0.3), -np.sin(0.3), 0, 0,
         #                           np.sin(0.3), np.cos(0.3), 0, 0,
         #                           0, 0, 1, 1.5]).reshape(1, 3, 4).type_as(intrin)
-        homos = compute_homography(srcextrin, intrin, tarextrin, intrin,
+        homos = compute_homography(srcextrin, srcintrin, tarextrin, tarintrin,
                                    planenormal, distance)
     if not ret_dispmap:
         mpi_warp = warp_homography(homos, mpi)
@@ -542,14 +543,32 @@ def matplot_img(img):
 def matplot_net(net):
     import matplotlib.pyplot as plt
     plt.figure()
-    if net.dim() != 4 and net.shape[1] != 6:
+    if net.dim() != 4:
         assert True, "not a net"
     net = net[0]
-    net = torch.cat([
-        torch.cat([net[0], net[1], net[2]], dim=-1),
-        torch.cat([net[3], net[4], net[5]], dim=-1),
-    ], dim=-2)
+    if net.shape[0] == 6:
+        net = torch.cat([
+            torch.cat([net[0], net[1], net[2]], dim=-1),
+            torch.cat([net[3], net[4], net[5]], dim=-1),
+        ], dim=-2)
+    elif net.shape[0] == 4:
+        net = torch.cat([
+            torch.cat([net[0], net[1]], dim=-1),
+            torch.cat([net[2], net[3]], dim=-1),
+        ], dim=-2)
+    else:
+        assert True, "not a net"
     img = net.detach().cpu().numpy()
+    plt.imshow(img)
+    plt.show()
+
+
+def matplot_upmask(upmask, dim=0):
+    import matplotlib.pyplot as plt
+    bsz, c, hei, wid = upmask.shape
+    assert c == 8*8*9, "incorrect channel numebr"
+    img = upmask.detach().reshape(bsz, 9, 8, 8, hei, wid)[0, dim]\
+        .permute(2, 0, 3, 1).reshape(hei * 8, wid * 8).cpu().numpy()
     plt.imshow(img)
     plt.show()
 

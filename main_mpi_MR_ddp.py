@@ -20,8 +20,8 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": -1,
-    "valid_freq": 200,
+    "validate_num": 32,
+    "valid_freq": 500,
     "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
@@ -29,21 +29,21 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "stereovideo_img",
-    "evalset": "stereovideo_seq",
+    "trainset": "realestate10k_img",
+    "evalset": "realestate10k_seq",
     "model_name": "MPINetv2",
-    "modelloss_name": "disp_img",
+    "modelloss_name": "sv",
     "batch_size": 2,
-    "num_epoch": 300,
-    "savepth_iter_freq": 500,
-    "lr": 2e-5,
-    "check_point": "mpinet_ori.pth",
+    "num_epoch": 1000,
+    "savepth_iter_freq": 300,
+    "lr": 3e-5,
+    "check_point": "no.pth",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "smooth_loss": 0.5,
-        "depth_loss": 0.1,
-
+        "depth_loss": 0.2,  # need to figure out
+        
         # "temporal_loss": 0.9,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
@@ -68,7 +68,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "SV_baseline_frompaper"
+    cfg["id"] = "raSV_pretrain_Ronlyrmsmth"
     cfg["comment"] = "single frame method baseline (fine-tuning on my dataset)"
 
     parser = argparse.ArgumentParser()
@@ -95,11 +95,14 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    torch.manual_seed(0)
+    seed = 2276  # np.random.randint(0, 10000)
+    print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
+    cfg["comment"] += f", random seed = {seed}"
+    torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
-    np.random.seed(0)
-    random.seed(0)
+    np.random.seed(seed)
+    random.seed(seed)
     torch.distributed.init_process_group('nccl', world_size=cfg["world_size"], init_method='env://')
 
     trainer.train(cfg)

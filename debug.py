@@ -70,7 +70,7 @@ main({
     "datasetname": "mannequinchallenge_seq",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
-    "istrain": False,
+    "istrain": True,
     "check_point": {
         # "": "mpinet_ori.pth",
     },
@@ -91,7 +91,7 @@ main({
 
                      "tempdepth_loss": 1,
                      "temporal_loss_mode": "msle",
-
+                     "tempdepth_loss_milestone": [2e3, 4e3],
                      "mask_warmup": 0.5,
                      "mask_warmup_milestone": [1e18, 2e18],
                      "bgflow_warmup": 1,

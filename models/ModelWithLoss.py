@@ -25,7 +25,7 @@ This class is a model container provide interface between
 '''
 
 SCALE_EPS = 0
-SCALE_SCALE = 1.001
+SCALE_SCALE = 1.01
 
 
 class ModelandSVLoss(nn.Module):
@@ -618,12 +618,18 @@ class PipelineV2(nn.Module):
         )
         net_warmup_val = self.loss_weight["net_warmup"] if "net_warmup" in self.loss_weight.keys() else 0
         net_warmup_milestone = self.loss_weight.pop("net_warmup_milestone", [5e3, 8e3])
+
         self.net_warmup_scheduler = ParamScheduler(
             milestones=net_warmup_milestone,
             values=[net_warmup_val, 0]
         )
+        tempdepth_loss_milestone = self.loss_weight.pop("tempdepth_loss_milestone", [5e3, 10e3])
+        self.temp_scheduler = ParamScheduler(
+            milestones=tempdepth_loss_milestone,
+            values=[0, 1]
+        )
         self.smth_scheduler = ParamScheduler(
-            milestones=[2e3, 4e3],
+            milestones=[4e3, 6e3],
             values=[0, 1]
         )
 
@@ -904,7 +910,8 @@ class PipelineV2(nn.Module):
             # print(f"disp_warp: min {disp_warp.min()}, max {disp_warp.max()}")
             # print(f"disp_warp: min {disp.min()}, max {disp.max()}")
             disp_warp = torch.max(disp_warp, torch.tensor(0.000001).type_as(disp_warp))
-            temporal_scale += torch.pow(torch.log(disp_warp / disp), 2).mean()
+            disp = torch.max(disp, torch.tensor(0.000001).type_as(disp))
+            temporal_scale += torch.pow(torch.log(disp / disp_warp), 2).mean()
         temporal /= len(disp_list)
         temporal_scale /= len(disp_list)
         val_dict["val_t_mae"] = temporal
@@ -1246,6 +1253,7 @@ class PipelineV2(nn.Module):
                 else:
                     loss_dict["depth"] += diff.detach()
 
+        temp_schedule = self.temp_scheduler.get_value(step)
         if "tempdepth_loss" in self.loss_weight.keys():
             temporal = torch.tensor(0.).type_as(refims)
             for net, net_warp in zip(net_out, intermediates["net_warp"]):
@@ -1255,14 +1263,15 @@ class PipelineV2(nn.Module):
                 elif self.temporal_loss_mode == "msle":
                     # scheme 1: msle
                     net_warp = torch.max(net_warp, torch.tensor(0.000001).type_as(net_warp))
-                    diff = (torch.log(net_warp / net).abs()).mean()
+                    net = torch.max(net, torch.tensor(0.000001).type_as(net_warp))
+                    diff = (torch.log(net / net_warp).abs()).mean()
                 else:
                     raise NotImplementedError(f"PipelineV2::temporal_loss_mode "
                                               f"{self.temporal_loss_mode} not recognized")
                 temporal += diff
 
             temporal /= len(net_out)
-            final_loss += (temporal * self.loss_weight["tempdepth_loss"])
+            final_loss += (temporal * self.loss_weight["tempdepth_loss"] * temp_schedule)
             loss_dict["tempdepth"] = temporal.detach()
 
         if "bgflowsmth_loss" in self.loss_weight.keys():
@@ -1397,7 +1406,8 @@ class PipelineV2SV(PipelineV2):
                 # print(f"disp_warp: min {disp_warp.min()}, max {disp_warp.max()}")
                 # print(f"disp_warp: min {disp.min()}, max {disp.max()}")
                 disp_warp = torch.max(disp_warp, torch.tensor(0.000001).type_as(disp_warp))
-                temporal_scale += torch.pow(torch.log(disp_warp / disp), 2).mean()
+                disp = torch.max(disp, torch.tensor(0.000001).type_as(disp))
+                temporal_scale += torch.pow(torch.log(disp / disp_warp), 2).mean()
             temporal = temporal / len(disp_list)
             temporal_scale /= len(disp_list)
             val_dict["val_t_mae"] = temporal
@@ -1529,6 +1539,7 @@ class PipelineV2SV(PipelineV2):
                 else:
                     loss_dict["depth"] += diff.detach()
 
+        temp_schedule = self.temp_scheduler.get_value(step)
         if "tempdepth_loss" in self.loss_weight.keys():
             temporal = torch.tensor(0.).type_as(refims)
             for net, net_warp in zip(net_out, intermediates["net_warp"]):
@@ -1538,14 +1549,15 @@ class PipelineV2SV(PipelineV2):
                 elif self.temporal_loss_mode == "msle":
                     # scheme 1: msle
                     net_warp = torch.max(net_warp, torch.tensor(0.000001).type_as(net_warp))
-                    diff = (torch.log(net_warp / net).abs()).mean()
+                    net = torch.max(net, torch.tensor(0.000001).type_as(net))
+                    diff = (torch.log(net / net_warp).abs()).mean()
                 else:
                     raise NotImplementedError(f"PipelineV2::temporal_loss_mode "
                                               f"{self.temporal_loss_mode} not recognized")
                 temporal += diff
 
             temporal /= len(net_out)
-            final_loss += (temporal * self.loss_weight["tempdepth_loss"])
+            final_loss += (temporal * self.loss_weight["tempdepth_loss"] * temp_schedule)
             loss_dict["tempdepth"] = temporal.detach()
 
         if "mask_warmup" in self.loss_weight.keys():

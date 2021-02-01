@@ -36,21 +36,22 @@ cfg = {
     "batch_size": 1,
     "num_epoch": 400,
     "savepth_iter_freq": 400,
-    "lr": 1e-4,
+    "lr": 2e-5,
     "check_point": {
         "": "no.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "net_smth_loss_fg": 0.5,
+        "net_smth_loss_fg": 0.25,
         # "net_smth_loss_bg": 0.5,
         "depth_loss": 1,
 
-        "tempdepth_loss": 1,
-        "temporal_loss_mode": "msle",
+        # "tempdepth_loss": 1,
+        # "temporal_loss_mode": "msle",
+        # "tempdepth_loss_milestone": [5e3, 10e3],
 
-        "mask_warmup": 1,
+        "mask_warmup": 0.25,
         "mask_warmup_milestone": [1e18, 2e18],
         "bgflow_warmup": 1,
         "bgflow_warmup_milestone": [4e3, 6e3],
@@ -63,7 +64,6 @@ cfg = {
 
 # TODO
 #   \current problem:
-#   >>> mask issue, the mask didn't converge when training in large dataset => warmup become a loss
 #   >>> transparency issue: the transparency tend to be 0.5, which is not good
 #   \project
 #   >>> find best way for parameterization the alpha planes
@@ -79,7 +79,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V5_netwarm_scaleto1"
+    cfg["id"] = "V5_scale1_01"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()

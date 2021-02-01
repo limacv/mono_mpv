@@ -31,7 +31,7 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "m+r+s_seq",
-    "model_name": "Fullv5",
+    "model_name": "Fullv5resnet",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 2000,
@@ -46,10 +46,11 @@ cfg = {
         "net_smth_loss_fg": 0.25,
         # "net_smth_loss_bg": 0.5,
         "depth_loss": 1,
-        "depth_loss_mode": "coarse",
+        "depth_loss_mode": "fine",
 
-        "tempdepth_loss": 1,
-        "temporal_loss_mode": "msle",
+        # "tempdepth_loss": 1,
+        # "temporal_loss_mode": "msle",
+        # "tempdepth_loss_milestone": [5e3, 10e3],
 
         "mask_warmup": 0.25,
         "mask_warmup_milestone": [1e18, 2e18],
@@ -66,7 +67,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V5Joint_random"
+    cfg["id"] = "V5Joint_notemp_scale1_01"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()
@@ -93,7 +94,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = 5472  # np.random.randint(0, 10000)
+    seed = np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

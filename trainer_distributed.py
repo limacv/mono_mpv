@@ -122,8 +122,8 @@ def train(cfg: dict):
                 time_per_iter = (time.time() - start_time) / train_report_freq
                 # output iter infomation
                 loss_str = " | ".join([f"{k}:{v:.3f}" for k, v in loss_dict.items()])
-                print(f"    Local Rank: {local_rank}:")
-                print(f"    iter {iternum}/{len(trainingdata)}::loss:{loss:.3f} | {loss_str} "
+                print(f"    Local Rank: {local_rank}:"
+                      f" iter {iternum}/{len(trainingdata)}::loss:{loss:.3f} | {loss_str} "
                       f"| time:{time_per_iter:.1f}s", flush=True)
                 start_time = time.time()
 

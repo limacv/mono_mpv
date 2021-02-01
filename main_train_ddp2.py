@@ -50,6 +50,7 @@ cfg = {
 
         "tempdepth_loss": 1,
         "temporal_loss_mode": "msle",
+        "tempdepth_loss_milestone": [5e3, 10e3],
 
         "mask_warmup": 0.25,
         "mask_warmup_milestone": [1e18, 2e18],
@@ -66,7 +67,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V5Joint_random_depthfine"
+    cfg["id"] = "V5Joint_depthfinetempsched"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()

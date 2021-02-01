@@ -1188,7 +1188,7 @@ class MPI_V5(nn.Module):
         feat = self.depth_decoder(torch.cat([x, disp_feat], dim=1))  # 256
         params = feat * self.xscale + self.xbias
         params = torch.cat([
-            params[:, 0:1] ** 2,
+            params[:, 0:1].abs(),
             self.output_layer(params[:, 1:])
                             ], dim=1)
 

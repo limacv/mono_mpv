@@ -15,13 +15,13 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run/",
+    "tensorboard_logdir": "run1/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": -1,
-    "valid_freq": 300,
+    "validate_num": 64,
+    "valid_freq": 500,
     "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
@@ -29,14 +29,14 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "stereovideo_seq",
-    "evalset": "stereovideo_seq",
+    "trainset": "m+r+s_seq",
+    "evalset": "m+r+s_seq",
     "model_name": "Fullv5",
-    "modelloss_name": "fullv2",
+    "modelloss_name": "fulljoint",
     "batch_size": 1,
-    "num_epoch": 400,
+    "num_epoch": 2000,
     "savepth_iter_freq": 400,
-    "lr": 2e-5,
+    "lr": 5e-5,
     "check_point": {
         "": "no.pth"
     },
@@ -47,6 +47,7 @@ cfg = {
         # "net_smth_loss_bg": 0.5,
         "depth_loss": 1,
 
+        "alpha_thick_in_disparity": False,
         # "tempdepth_loss": 1,
         # "temporal_loss_mode": "msle",
         # "tempdepth_loss_milestone": [5e3, 10e3],
@@ -65,10 +66,7 @@ cfg = {
 # TODO
 #   \current problem:
 #   >>> transparency issue: the transparency tend to be 0.5, which is not good
-#   \project
-#   >>> find best way for parameterization the alpha planes
-#   >>> find a best parameter for single view baseline (still temporal loss to test)
-#   >>> find best parameter for pretrain & fine-tuning
+#       >> find best way for parameterization the alpha planes
 #   >>> check whether recurrent necessary / temporal loss weight
 #   \evalutaion
 #   >>> evaluator for MyDatasetClass
@@ -79,7 +77,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V5_scale1_01"
+    cfg["id"] = "V5Ori_aindepth_s105"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()
@@ -106,7 +104,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = 6108  # np.random.randint(0, 10000)
+    seed = np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

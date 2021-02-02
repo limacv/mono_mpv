@@ -21,7 +21,7 @@ cfg = {
 
     "write_validate_result": True,
     "validate_num": 64,
-    "valid_freq": 1000,
+    "valid_freq": 500,
     "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
@@ -38,7 +38,7 @@ cfg = {
     "savepth_iter_freq": 400,
     "lr": 5e-5,
     "check_point": {
-        "": "no.pth"
+        "": "V5Joint_notemp_scale1_05_011601_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
@@ -46,11 +46,11 @@ cfg = {
         "net_smth_loss_fg": 0.25,
         # "net_smth_loss_bg": 0.5,
         "depth_loss": 1,
-        "depth_loss_mode": "fine",
 
-        # "tempdepth_loss": 1,
-        # "temporal_loss_mode": "msle",
-        # "tempdepth_loss_milestone": [5e3, 10e3],
+        "alpha_thick_in_disparity": True,
+        "tempdepth_loss": 1,
+        "temporal_loss_mode": "msle",
+        "tempdepth_loss_milestone": [1e3, 5e3],
 
         "mask_warmup": 0.25,
         "mask_warmup_milestone": [1e18, 2e18],
@@ -67,7 +67,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V5Joint_notemp_scale1_01"
+    cfg["id"] = "V5Joint_temp_s105"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()

@@ -1,6 +1,7 @@
 import os
 import sys
 
+COMPUTER_NAME = "xgpu"
 RealEstate10K_root = "/home/lmaag/xgpu-scratch/mali_data/RealEstate10K/"
 RealEstate10K_skip_framenum = 3
 
@@ -27,6 +28,7 @@ youtubedl_path = "youtube-dl"
 is_DEBUG = False  # (getattr(sys, 'gettrace', None) is not None)
 
 if 'COMPUTERNAME' in os.environ.keys() and os.environ['COMPUTERNAME'] == "MSI":
+    COMPUTER_NAME = "msi"
     colmap_path = "D:\\MSI_NB\\source\\util\\COLMAP-3.6-exe\\COLMAP.bat"
     youtubedl_path = "C:\\Users\\MSI_NB\\AppData\\Roaming\\Python\\Python37\\Scripts\\youtube-dl.exe"
     OutputSize = (184, 296)
@@ -47,6 +49,7 @@ if 'COMPUTERNAME' in os.environ.keys() and os.environ['COMPUTERNAME'] == "MSI":
     is_DEBUG = True
 
 elif "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
+    COMPUTER_NAME = "jrchan"
     RealEstate10K_root = "/home/jrchan/MALi/dataset/RealEstate10K_test"
     MannequinChallenge_root = "/home/jrchan/MALi/dataset/MannequinChallenge"
     StereoBlur_root = "/home/jrchan/MALi/dataset/StereoBlur_test"

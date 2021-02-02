@@ -180,6 +180,12 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": None,
             "AppearanceFlow": AFNet_HR_netflowin(netcnl=4)
         })
+    elif "Fullv5Dual" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_V5Dual(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin(netcnl=6)
+        })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
@@ -333,4 +339,8 @@ def smart_select_pipeline(checkpoint, force_modelname="auto", force_pipelinename
 def select_evalset(name: str, **kwargs):
     if "NvidiaNovelView" == name:
         return NvidiaNovelView(**kwargs)
+    elif "StereoVideo" == name:
+        return StereoVideo_Eval(**kwargs)
+    else:
+        raise RuntimeError(f"{name} not recognized")
 

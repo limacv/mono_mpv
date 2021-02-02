@@ -31,7 +31,7 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "m+r+s_seq",
-    "model_name": "Fullv5resnet",
+    "model_name": "Fullv5",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 2000,
@@ -67,7 +67,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V5resnetJoint_notemp_scale1_01"
+    cfg["id"] = "V5noresJoint_notemp_scale1_05"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()

@@ -25,7 +25,7 @@ This class is a model container provide interface between
 '''
 
 SCALE_EPS = 0
-SCALE_SCALE = 1.01
+SCALE_SCALE = 1.05
 
 
 class ModelandSVLoss(nn.Module):
@@ -562,7 +562,7 @@ class PipelineV2(nn.Module):
 
         # adjustable config
         self.pipe_optim_frame0 = self.loss_weight.pop("pipe_optim_frame0", False)
-        self.mpi_flowgrad_in = self.loss_weight.pop("mpi_flowgrad_in", True)
+        self.alpha_thick_in_disparity = self.loss_weight.pop("alpha_thick_in_disparity", True)
         self.aflow_fusefgpct = self.loss_weight.pop("aflow_fusefgpct", False)
         self.aflow_includeself = self.loss_weight.pop("aflow_includeself", False)
         self.depth_loss_rmresidual = self.loss_weight.pop("depth_loss_rmresidual", True)
@@ -572,12 +572,13 @@ class PipelineV2(nn.Module):
 
         print(f"PipelineV2 activated config:\n"
               f"pipe_optim_frame0: {self.pipe_optim_frame0}\n"
-              f"mpi_flowgrad_in: {self.mpi_flowgrad_in}\n"
+              f"alpha_thick_in_disparity: {self.alpha_thick_in_disparity}\n"
               f"aflow_includeself: {self.aflow_includeself}\n"
               f"depth_loss_rmresidual: {self.depth_loss_rmresidual}\n"
               f"temporal_loss_mode: {self.temporal_loss_mode}\n"
               f"aflow_fusefgpct: {self.aflow_fusefgpct}\n"
-              f"depth_loss_mode: {self.depth_loss_mode}\n")
+              f"depth_loss_mode: {self.depth_loss_mode}\n"
+              f"")
 
         # optical flow estimator
         if not hasattr(self, "flow_estim"):
@@ -992,19 +993,34 @@ class PipelineV2(nn.Module):
             alpha = torch.clamp(alpha, 0, 1)
         elif isinstance(self.mpimodel, MPI_V5):
             # scheme1, in disparity space
-            x = torch.reciprocal(make_depths(layernum)).reshape(1, layernum, 1, 1).type_as(netout)
             sigma1, disp1, thick1, disp2 = torch.split(netout, 1, dim=1)
-            alpha1 = self.volume2alpha(x, disp1, thick1, sigma1)
-            alpha2 = self.volume2alpha(x, disp2, torch.tensor(1).type_as(thick1))
+            if self.alpha_thick_in_disparity:
+                x = torch.reciprocal(make_depths(layernum)).reshape(1, layernum, 1, 1).type_as(netout)
+                alpha1 = self.volume2alpha(x, disp1, thick1, sigma1)
+                alpha2 = self.volume2alpha(x, disp2, torch.tensor(1).type_as(thick1))
+            else:
+                x = make_depths(layernum).reshape(1, layernum, 1, 1).type_as(netout)
+                disp_min, disp_max = torch.reciprocal(x[0, 0]), torch.reciprocal(x[0, -1])
+                disp1 = disp1 * (disp_max - disp_min) + disp_min
+                disp2 = disp2 * (disp_max - disp_min) + disp_min
+                alpha1 = self.volume2alphaindepth(x, disp1, thick1, sigma1)
+                alpha2 = self.volume2alphaindepth(x, disp2, torch.tensor(1).type_as(thick1))
             alpha = torch.clamp(alpha1 + alpha2, 0, 1)
-            # scheme2: in depth space
-            # x = make_depths(layernum).reshape(1, layernum, 1, 1).type_as(netout)
-            # sigma1, disp1, thick1, disp2 = torch.split(netout, 1, dim=1)
-            # disp1 = torch.clamp(disp1, 1./default_d_far, 1./default_d_near)
-            # disp2 = torch.clamp(disp2, 1./default_d_far, 1./default_d_near)
-            # alpha1 = self.volume2alphaindepth(x, disp1, thick1, sigma1)
-            # alpha2 = self.volume2alphaindepth(x, disp2, torch.tensor(1).type_as(thick1))
-            # alpha = torch.clamp(alpha1 + alpha2, 0, 1)
+        elif isinstance(self.mpimodel, MPI_V5Dual):
+            # scheme1, in disparity space
+            sigma1, disp1, thick1, sigma2, disp2, thick2 = torch.split(netout, 1, dim=1)
+            if self.alpha_thick_in_disparity:
+                x = torch.reciprocal(make_depths(layernum)).reshape(1, layernum, 1, 1).type_as(netout)
+                alpha1 = self.volume2alpha(x, disp1, thick1, sigma1)
+                alpha2 = self.volume2alpha(x, disp2, thick2, sigma2)
+            else:
+                x = make_depths(layernum).reshape(1, layernum, 1, 1).type_as(netout)
+                disp_min, disp_max = torch.reciprocal(x[0, 0]), torch.reciprocal(x[0, -1])
+                disp1 = disp1 * (disp_max - disp_min) + disp_min
+                disp2 = disp2 * (disp_max - disp_min) + disp_min
+                alpha1 = self.volume2alphaindepth(x, disp1, thick1, sigma1)
+                alpha2 = self.volume2alphaindepth(x, disp2, thick2, sigma2)
+            alpha = torch.clamp(alpha1 + alpha2, 0, 1)
         else:
             raise RuntimeError(f"Pipelinev2::incompatiable mpimodel: {type(self.mpimodel)}")
 
@@ -1021,13 +1037,13 @@ class PipelineV2(nn.Module):
         dt = t[:, 1:] - t[:, :-1]
         return - torch.exp(-dt * sigma * 50) + 1
 
-    def volume2alphaindepth(self, x, disp, thickindisp, sigma=4):
+    def volume2alphaindepth(self, x, disp, thickindisp, sigma=1):
         depth0 = torch.reciprocal(disp)
         thickindisp = torch.min(disp - 1. / default_d_far, thickindisp)
         t = x - depth0
         t = torch.min(torch.relu(t), thickindisp * torch.reciprocal(disp - thickindisp) * depth0)
         dt = t[:, :-1] - t[:, 1:]
-        return - torch.exp(-dt * sigma * 10) + 1
+        return - torch.exp(-dt * sigma * 20) + 1
 
     def square2alpha(self, x, depth, thick, scale=1):
         denorm = torch.tensor(self.mpimodel.num_layers - 1).type_as(x)
@@ -1319,6 +1335,11 @@ class PipelineV2(nn.Module):
                 # scaleto1 = torch.topk(net_out[:, 0].reshape(-1), int(widori / 8 * heiori / 8 * 0.1), sorted=False)[0]
                 # scaleto1 = (-scaleto1 + 4).abs().mean()
                 net_warmup = bglfg
+            elif isinstance(self.mpimodel, MPI_V5Dual):
+                bglfg = torchf.relu(net_out[:, 4] - net_out[:, 1] + net_out[:, 2]).mean()
+                # scaleto1 = torch.topk(net_out[:, 0].reshape(-1), int(widori / 8 * heiori / 8 * 0.1), sorted=False)[0]
+                # scaleto1 = (-scaleto1 + 4).abs().mean()
+                net_warmup = bglfg
             else:
                 net_warmup = 0
             weight = self.net_warmup_scheduler.get_value(step)
@@ -1598,6 +1619,11 @@ class PipelineV2SV(PipelineV2):
                 net_warmup = (bglfg + scaleto1) / 2
             elif isinstance(self.mpimodel, MPI_V5):
                 bglfg = torchf.relu(net_out[:, 3] - net_out[:, 1] + net_out[:, 2]).mean()
+                # scaleto1 = torch.topk(net_out[:, 0].reshape(-1), int(widori / 8 * heiori / 8 * 0.1), sorted=False)[0]
+                # scaleto1 = (-scaleto1 + 4).abs().mean()
+                net_warmup = bglfg
+            elif isinstance(self.mpimodel, MPI_V5Dual):
+                bglfg = torchf.relu(net_out[:, 4] - net_out[:, 1] + net_out[:, 2]).mean()
                 # scaleto1 = torch.topk(net_out[:, 0].reshape(-1), int(widori / 8 * heiori / 8 * 0.1), sorted=False)[0]
                 # scaleto1 = (-scaleto1 + 4).abs().mean()
                 net_warmup = bglfg

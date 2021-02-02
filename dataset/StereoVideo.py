@@ -13,7 +13,7 @@ from glob import glob
 from . import StereoVideo_root, is_DEBUG, OutputSize, StereoVideo_test_pct, OutputSize_test
 from .colmap_wrapper import *
 from .cv2disparity import compute_disparity_uncertainty
-from .Augmenter import DataAugmenter
+from .Augmenter import DataAugmenter, DataAdaptor
 import sys
 sys.path.append('..')
 from models.mpi_utils import *
@@ -332,3 +332,77 @@ class StereoVideo_Seq(Dataset, StereoVideo_Base):
 
         return refimg, tarimg, disps, uncertainty_maps, torch.cat([isleft, torch.tensor([shift])]).type(torch.float32)
 
+
+class StereoVideo_Eval(StereoVideo_Base):
+    def __init__(self, resolution=(540, 960), maxskip=1, seq_len=25, **kwargs):
+        super().__init__(is_train=False)
+        self.name = f"StereoVideo Evaluation Dataset"
+        self.adaptor = DataAdaptor(resolution)
+        self.maxskip = maxskip
+        self.seq_len = seq_len
+        print(f"{self.name}\n"
+              f"total {len(self)} videos/scenes\n"
+              f"resolution={resolution}, maxskip={maxskip}, seq_len={seq_len}")
+
+    def __len__(self):
+        return len(self.filebase_list)
+
+    def __getitem__(self, item):
+        basename = self.filebase_list[item]
+        print(f"{item}/{len(self)}::{basename}...")
+        return self.getitem_bybase(basename)
+
+    def getitem_bybase(self, filebase):
+        ret = {
+            "scene_name": filebase,
+            "in_imgs": [],
+            "gt_disparity": [],
+            "gt_imgs": []
+        }
+        videofile = self.getfullvideopath(filebase)
+        cap = cv2.VideoCapture(videofile)
+        if not cap.isOpened():
+            raise RuntimeError(f"{self.name}::{filebase}:cannot open video file {filebase}.mp4")
+
+        framenum = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if framenum < self.seq_len:
+            raise RuntimeError(f"{self.name}::{filebase}:too little frame, expect {self.seq_len} but got {framenum}")
+
+        skip = min(self.maxskip, (framenum - 1) // (self.seq_len - 1) - 1)
+        window_wid = (skip + 1) * (self.seq_len - 1) + 1
+        startidx = (framenum - window_wid) // 2
+        idxs = np.arange(startidx, startidx + window_wid, skip + 1)
+        hei = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        wid = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) // 2
+        self.adaptor.random_generate((hei, wid))
+
+        for idx in idxs:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            isok, img = cap.read()
+            if not (isok and len(img) > 0):
+                raise RuntimeError(f"{self.name}::{filebase}:cannot read frame {idx} in {filebase}, "
+                                   f"which is said to have {framenum} frames")
+
+            # read and split the left and right view
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            hei, wid, _ = img.shape
+
+            wid //= 2
+            imgl, imgr = img[:, :wid], img[:, wid:]
+            imgl = self.adaptor.apply_img(imgl)
+            imgr = self.adaptor.apply_img(imgr)
+            ret["in_imgs"].append(self.totensor(imgl))
+            ret["gt_imgs"].append(self.totensor(imgr))
+
+            disp_path = self.getdisparitypath(filebase, isleft=True, frameidx=idx)
+            if not os.path.exists(disp_path):
+                raise RuntimeError(f"{self.name}::{filebase}:choose to use npy but doesn't find {disp_path}")
+            disp = np.load(disp_path, allow_pickle=True)
+            disp = np.where(disp > np.finfo(np.half).min,
+                            disp,
+                            np.finfo(np.float32).min).astype(np.float32)
+            disp = self.adaptor.apply_disparity(disp, interpolation='nearest')
+            ret["gt_disparity"].append(torch.tensor(disp).type(torch.float32))
+
+        cap.release()
+        return ret

@@ -88,7 +88,7 @@ main({
                      # "net_smth_loss_bg": 0.5,
                      "depth_loss": 1,
                      "depth_loss_mode": "coarse",
-
+                     "alpha_thick_in_disparity": False,
                      "tempdepth_loss": 1,
                      "temporal_loss_mode": "msle",
                      "tempdepth_loss_milestone": [2e3, 4e3],

@@ -157,3 +157,23 @@ class DataAugmenter:
 
     def apply_disparity_scale(self, disp):
         return disp * np.array(self.outwid / self.cur_crop_wid, dtype=np.float32)
+
+
+class DataAdaptor(DataAugmenter):
+    def __init__(self, outshape, crop_margin=0.05):
+        super().__init__(outshape, mode="crop", ratio_tol=1., resize_tol=1.)
+        self.crop_margin = crop_margin
+
+    def random_generate(self, in_shape):
+        """
+        instead of generating crop parameter randomly, generate based on in_shape
+        """
+        self.cur_inhei, self.cur_inwid = in_shape
+        assert self.mode == "crop"
+
+        self.cur_crop_ratio = 1
+        self.cur_crop_top = int(self.cur_inhei * self.crop_margin)
+        self.cur_crop_left = int(self.cur_inwid * self.crop_margin)
+        self.cur_crop_hei = self.cur_inhei - 2 * self.cur_crop_top
+        self.cur_crop_wid = self.cur_inwid - 2 * self.cur_crop_left
+        return

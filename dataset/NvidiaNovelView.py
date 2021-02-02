@@ -11,17 +11,16 @@ import cv2
 import os
 from glob import glob
 from . import NvidiaNovelView_root, is_DEBUG
-from .Augmenter import DataAugmenter
+from .Augmenter import DataAugmenter, DataAdaptor
 import sys
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 
 class NvidiaNovelView:
-    def __init__(self, resolution=(540, 960), max_baseline=4):
+    def __init__(self, resolution=(540, 960), max_baseline=4, **kwargs):
         """
         resolution: resize output to the resolution
-
         """
         self.root = os.path.abspath(NvidiaNovelView_root)
         self.name = "Nvidia Novel View Synthesis Dataset"
@@ -29,8 +28,11 @@ class NvidiaNovelView:
 
         item_list = sorted(glob(os.path.join(self.root, "*")))
         self.scene_list = [self.getbasename(_p) for _p in item_list]
-        self.adaptor = DataAugmenter(resolution, "resize")
+        self.adaptor = DataAdaptor(resolution)
         self.max_baseline = max_baseline
+        print(f"{self.name}\n"
+              f"total {len(self)} videos/scenes\n"
+              f"resolution={resolution}, max_baseline={max_baseline}")
 
     @staticmethod
     def getbasename(path):
@@ -65,10 +67,12 @@ class NvidiaNovelView:
 
     def __getitem__(self, item):
         basename = self.scene_list[item]
+        print(f"{item}/{len(self)}::{basename}...")
         return self.getitem_bybase(basename)
 
     def getitem_bybase(self, base):
         ret = {
+            "scene_name": base,
             "in_imgs": [],
             "in_poses": [],
             "gt_poses": [],

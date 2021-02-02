@@ -7,17 +7,18 @@ import torch.backends.cudnn
 
 
 # Adjust configurations here ########################################################################################
-path = "./log/checkpoint/V5Joint_random_notemp_311931_r0.pth"
+path = "./log/checkpoint/V5Joint_notemp_scale1_05_011601_r0.pth"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-06-15-23-27.mp4"
-video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\pg6_Trim.mp4"
+video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim.mp4"
 # video_path = "Z:\\dataset\\StereoBlur_processed\\30fps\\HD720-02-15-49-26.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
 
-modelloss = smart_select_pipeline(path)
+modelloss = smart_select_pipeline(path, "MPINetv2", "disp_img")
 
 ret_cfg = " "
 
@@ -34,7 +35,7 @@ if not os.path.exists(out_prefix):
 if "StereoBlur" in video_path:
     saveprefix = os.path.basename(path).split('.')[0] \
                  + os.path.basename(video_path).split('.')[0] + ret_cfg
-elif "MannequinChallenge" in video_path:
+elif "MannequinChallenge" in video_path or "RealEstate10K" in video_path:
     saveprefix = os.path.basename(path).split('.')[0] \
                  + os.path.basename(os.path.dirname(video_path)).split('.')[0] + ret_cfg
 else:  # regular video

@@ -65,9 +65,9 @@ def main(kwargs):
 
 
 main({
-    "modelname": "Fullv5",  # MPINetv2, Fullv4, Fullv6, Fullv5.Fullv5resnet
+    "modelname": "Fullv5Dualnorec",  # MPINetv2, Fullv4, Fullv6, Fullv5.Fullv5resnet
     "pipelinename": "fulljoint",  # sv, disp_img, fullv2, fullsvv2, fulljoint
-    "datasetname": "mannequinchallenge_seq",
+    "datasetname": "realestate10k_seq",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
     "istrain": True,
@@ -84,6 +84,7 @@ main({
     "savefile": "./log/checkpoint/debug_svscratch.pth",
     "loss_weights": {"pixel_loss_cfg": 'l1',
                      "pixel_loss": 1,
+                     "scale_mode": "mean",
                      "net_smth_loss_fg": 0.5,
                      # "net_smth_loss_bg": 0.5,
                      "depth_loss": 1,

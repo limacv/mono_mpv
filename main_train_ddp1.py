@@ -20,8 +20,8 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": -1,
-    "valid_freq": 300,
+    "validate_num": 32,
+    "valid_freq": 500,
     "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
@@ -29,14 +29,14 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "stereovideo_seq",
-    "evalset": "stereovideo_seq",
-    "model_name": "Fullv4",
-    "modelloss_name": "fullv2",
+    "trainset": "m+r+s_seq",
+    "evalset": "m+r+s_seq",
+    "model_name": "Fullv5Dualnorec",
+    "modelloss_name": "fulljoint",
     "batch_size": 1,
-    "num_epoch": 400,
+    "num_epoch": 2000,
     "savepth_iter_freq": 400,
-    "lr": 1e-4,
+    "lr": 5e-5,
     "check_point": {
         "": "no.pth"
     },
@@ -47,14 +47,18 @@ cfg = {
         # "net_smth_loss_bg": 0.5,
         "depth_loss": 1,
 
-        "tempdepth_loss": 1,
-        "temporal_loss_mode": "msle",
+        "alpha_thick_in_disparity": False,
+        "scale_mode": "random",
+        "scale_scaling": 1.05,
+        # "tempdepth_loss": 1,
+        # "temporal_loss_mode": "msle",
+        # "tempdepth_loss_milestone": [5e3, 10e3],
 
-        "mask_warmup": 1,
-        "mask_warmup_milestone": [4e3, 6e3],
+        "mask_warmup": 0.25,
+        "mask_warmup_milestone": [1e18, 2e18],
         "bgflow_warmup": 1,
         "bgflow_warmup_milestone": [4e3, 6e3],
-        "net_warmup": 0.2,
+        "net_warmup": 0.5,
         "net_warmup_milestone": [1e18, 2e18],
         # "aflow_fusefgpct": False,
     },
@@ -65,7 +69,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "zV4_netwarm_scaleto1"
+    cfg["id"] = "V5Dualnorec_scale105random"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()
@@ -92,7 +96,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = 6108  # np.random.randint(0, 10000)
+    seed = 6555  # np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

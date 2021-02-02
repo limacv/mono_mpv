@@ -15,12 +15,12 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run1/",
+    "tensorboard_logdir": "run/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 64,
+    "validate_num": 32,
     "valid_freq": 500,
     "train_report_freq": 5,
 
@@ -31,7 +31,7 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "m+r+s_seq",
-    "model_name": "Fullv5",
+    "model_name": "Fullv5Dualnorec",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 2000,
@@ -43,11 +43,13 @@ cfg = {
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "net_smth_loss_fg": 0.25,
+        "net_smth_loss_fg": 0.5,
         # "net_smth_loss_bg": 0.5,
         "depth_loss": 1,
 
         "alpha_thick_in_disparity": False,
+        "scale_mode": "mean",
+        "scale_scaling": 1.05,
         # "tempdepth_loss": 1,
         # "temporal_loss_mode": "msle",
         # "tempdepth_loss_milestone": [5e3, 10e3],
@@ -77,7 +79,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V5Ori_aindepth_s105"
+    cfg["id"] = "V5Dualnorec_scale105mean"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()
@@ -104,7 +106,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = np.random.randint(0, 10000)
+    seed = 6555  # np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

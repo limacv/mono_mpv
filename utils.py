@@ -180,9 +180,21 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": None,
             "AppearanceFlow": AFNet_HR_netflowin(netcnl=4)
         })
+    elif "Fullv5norec" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_V5(plane_num, recurrent=False),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin(netcnl=4)
+        })
     elif "Fullv5Dual" == name:
         return nn.ModuleDict({
             "MPI": MPI_V5Dual(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin(netcnl=6)
+        })
+    elif "Fullv5Dualnorec" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_V5Dual(plane_num, recurrent=False),
             "SceneFlow": None,
             "AppearanceFlow": AFNet_HR_netflowin(netcnl=6)
         })

@@ -1075,13 +1075,14 @@ class MPI_V5(nn.Module):
     """
     Predict sigma, d, t, d
     """
-    def __init__(self, mpi_layers, backbone='cnn'):
+    def __init__(self, mpi_layers, backbone='cnn', recurrent=True):
         super().__init__()
         self.num_layers = mpi_layers
         self.outcnl = 4
         down = nn.MaxPool2d(2, ceil_mode=True)
         self.down = down
         self.up = up
+        self.recurrent = recurrent
         self.imfeat_cnl = 256
         if backbone == 'cnn':
             self.backbone = nn.ModuleList([
@@ -1123,10 +1124,15 @@ class MPI_V5(nn.Module):
             ])  # cnl = 256
         else:
             raise RuntimeError(f"backbone name {backbone} not recognized")
-        self.disp_last_encoder = nn.Sequential(
-            conv(self.outcnl, 32, 3),
-            conv(32, 64, 3)
-        )
+        if recurrent:
+            self.disp_last_encoder = nn.Sequential(
+                conv(self.outcnl, 32, 3),
+                conv(32, 64, 3)
+            )
+            decoder_cnl = 512 + 64
+        else:
+            self.disp_last_encoder = None
+            decoder_cnl = 512
         self.down1 = conv(self.imfeat_cnl + 128 * 2, 384, 3)
         self.down1b = conv(384, 512, 3)
         self.down2 = conv(512, 512, 3)
@@ -1148,7 +1154,7 @@ class MPI_V5(nn.Module):
             nn.Conv2d(512, 64 * 9, 1)
         )
         self.depth_decoder = nn.Sequential(
-            nn.Conv2d(512 + 64, 512, 3, padding=1),
+            nn.Conv2d(decoder_cnl, 512, 3, padding=1),
             nn.ReLU(True),
             nn.Conv2d(512, 256, 3, padding=1, groups=self.outcnl),
             nn.ReLU(True),
@@ -1184,8 +1190,12 @@ class MPI_V5(nn.Module):
         x = self.up(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
         x = self.post(torch.cat(self.shapeto(x, feat_in), dim=1))
 
-        disp_feat = self.disp_last_encoder(disp_warp)
-        feat = self.depth_decoder(torch.cat([x, disp_feat], dim=1))  # 256
+        if self.recurrent:
+            disp_feat = self.disp_last_encoder(disp_warp)
+            feat = self.depth_decoder(torch.cat([x, disp_feat], dim=1))  # 256
+        else:
+            feat = self.depth_decoder(x)  # 256
+
         params = feat * self.xscale + self.xbias
         params = torch.cat([
             params[:, 0:1].abs(),
@@ -1210,10 +1220,11 @@ class MPI_V5Dual(nn.Module):
     """
     Predict sigma, d, t, d
     """
-    def __init__(self, mpi_layers, backbone='cnn'):
+    def __init__(self, mpi_layers, backbone='cnn', recurrent=True):
         super().__init__()
         self.num_layers = mpi_layers
         self.outcnl = 6
+        self.recurrent = recurrent
         down = nn.MaxPool2d(2, ceil_mode=True)
         self.down = down
         self.up = up
@@ -1258,10 +1269,16 @@ class MPI_V5Dual(nn.Module):
             ])  # cnl = 256
         else:
             raise RuntimeError(f"backbone name {backbone} not recognized")
-        self.disp_last_encoder = nn.Sequential(
-            conv(self.outcnl, 32, 3),
-            conv(32, 64, 3)
-        )
+        if recurrent:
+            self.disp_last_encoder = nn.Sequential(
+                conv(self.outcnl, 32, 3),
+                conv(32, 64, 3)
+            )
+            decoder_cnl = 512 + 64
+        else:
+            self.disp_last_encoder = None
+            decoder_cnl = 512
+
         self.down1 = conv(self.imfeat_cnl + 128 * 2, 384, 3)
         self.down1b = conv(384, 512, 3)
         self.down2 = conv(512, 512, 3)
@@ -1283,7 +1300,7 @@ class MPI_V5Dual(nn.Module):
             nn.Conv2d(512, 64 * 9, 1)
         )
         self.depth_decoder = nn.Sequential(
-            nn.Conv2d(512 + 64, 512, 3, padding=1),
+            nn.Conv2d(decoder_cnl, 512, 3, padding=1),
             nn.ReLU(True),
             nn.Conv2d(512, 258, 3, padding=1, groups=2),
             nn.ReLU(True),
@@ -1320,14 +1337,16 @@ class MPI_V5Dual(nn.Module):
         x = self.up(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
         x = self.post(torch.cat(self.shapeto(x, feat_in), dim=1))
 
-        disp_feat = self.disp_last_encoder(disp_warp)
-        feat = self.depth_decoder(torch.cat([x, disp_feat], dim=1))  # 256
+        if self.recurrent:
+            disp_feat = self.disp_last_encoder(disp_warp)
+            feat = self.depth_decoder(torch.cat([x, disp_feat], dim=1))  # 256
+        else:
+            feat = self.depth_decoder(x)  # 256
         params = feat * self.xscale + self.xbias
         params = torch.cat([
             params[:, 0:1].abs(),
             self.output_layer(params[:, 1:])
                             ], dim=1)
-
         upmask = self.mask_decoder(x) * 0.25
         return params, upmask
 

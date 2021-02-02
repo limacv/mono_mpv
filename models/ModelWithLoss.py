@@ -18,6 +18,7 @@ from .flow_utils import *
 from .hourglass import Hourglass
 from collections import deque
 from .img_utils import *
+
 '''
 This class is a model container provide interface between
                                             1. dataset <-> model
@@ -253,7 +254,7 @@ class ModelandSVLoss(nn.Module):
         # estimate depth map and sample sparse point depth
         depth = make_depths(32).type_as(mpi).unsqueeze(0).repeat(batchsz, 1)
         disparity = estimate_disparity_torch(mpi, depth, blendweight=blend_weight)
-        ptdis_e = torchf.grid_sample(disparity.unsqueeze(1), pt2ds.unsqueeze(1), align_corners=True)\
+        ptdis_e = torchf.grid_sample(disparity.unsqueeze(1), pt2ds.unsqueeze(1), align_corners=True) \
             .squeeze(1).squeeze(1)
 
         # with torch.no_grad():  # compute scale
@@ -565,7 +566,8 @@ class PipelineV2(nn.Module):
         self.alpha_thick_in_disparity = self.loss_weight.pop("alpha_thick_in_disparity", True)
         self.aflow_fusefgpct = self.loss_weight.pop("aflow_fusefgpct", False)
         self.aflow_includeself = self.loss_weight.pop("aflow_includeself", False)
-        self.depth_loss_rmresidual = self.loss_weight.pop("depth_loss_rmresidual", True)
+        self.scale_scaling = self.loss_weight.pop("scale_scaling", SCALE_SCALE)
+        self.scale_mode = self.loss_weight.pop("scale_mode", "first")  # first / mean / random
         self.temporal_loss_mode = self.loss_weight.pop("temporal_loss_mode", "msle")
         self.depth_loss_mode = self.loss_weight.pop("depth_loss_mode",
                                                     "fine")  # fine, coarse, direct_fine, direct_coarse
@@ -574,7 +576,8 @@ class PipelineV2(nn.Module):
               f"pipe_optim_frame0: {self.pipe_optim_frame0}\n"
               f"alpha_thick_in_disparity: {self.alpha_thick_in_disparity}\n"
               f"aflow_includeself: {self.aflow_includeself}\n"
-              f"depth_loss_rmresidual: {self.depth_loss_rmresidual}\n"
+              f"scale_scaling: {self.scale_scaling}\n"
+              f"scale_mode: {self.scale_mode}\n"
               f"temporal_loss_mode: {self.temporal_loss_mode}\n"
               f"aflow_fusefgpct: {self.aflow_fusefgpct}\n"
               f"depth_loss_mode: {self.depth_loss_mode}\n"
@@ -844,6 +847,7 @@ class PipelineV2(nn.Module):
 
         return mpi_out, net_out, upmask_out, disp_out
 
+    @torch.no_grad()
     def valid_forward(self, *args: torch.Tensor, **kwargs):
         args = [_t.cuda() for _t in args]
         self.eval()
@@ -855,23 +859,22 @@ class PipelineV2(nn.Module):
         layernum = self.mpimodel.num_layers
         depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
 
-        with torch.no_grad():
-            intermediate = {"disp0": None, "disp_warp": [], "imbg": None}
-            mpi_list, net_list, upmask_list, disp_list = self.forward_multiframes(refims, None, intermediate)
-            disp0 = intermediate["disp0"]
-            disp_warp_list = intermediate["disp_warp"]
-            imbg = intermediate["imbg"]
+        intermediate = {"disp0": None, "disp_warp": [], "imbg": None}
+        mpi_list, net_list, upmask_list, disp_list = self.forward_multiframes(refims, None, intermediate)
+        disp0 = intermediate["disp0"]
+        disp_warp_list = intermediate["disp_warp"]
+        imbg = intermediate["imbg"]
 
-            disp_diff0 = disp0 / (torch.abs(disp_gts[:, 0] - shift_gt.reshape(batchsz, 1, 1)) + 0.0001)
-            # estimate disparity to ground truth
-            scale = torch.exp((torch.log(disp_diff0) * certainty_maps[:, 0]).sum(dim=[-1, -2]) / certainty_norm[:, 0])
-            disparities = torch.reciprocal(depth * scale.reshape(-1, 1) * -isleft.reshape(-1, 1)) \
-                          + shift_gt.reshape(-1, 1)
-            # render target view
-            tarviews = [
-                shift_newview(mpi_, -disparities)
-                for mpi_ in mpi_list
-            ]
+        disp_diff0 = disp0 / (torch.abs(disp_gts[:, 0] - shift_gt.reshape(batchsz, 1, 1)) + 0.0001)
+        # estimate disparity to ground truth
+        scale = torch.exp((torch.log(disp_diff0) * certainty_maps[:, 0]).sum(dim=[-1, -2]) / certainty_norm[:, 0])
+        disparities = torch.reciprocal(depth * scale.reshape(-1, 1) * -isleft.reshape(-1, 1)) \
+                      + shift_gt.reshape(-1, 1)
+        # render target view
+        tarviews = [
+            shift_newview(mpi_, -disparities)
+            for mpi_ in mpi_list
+        ]
 
         val_dict = {}
         # Photometric metric====================
@@ -1085,9 +1088,9 @@ class PipelineV2(nn.Module):
         else:
             offset = self.offset_bhw2_d8
         content_warp = warp_flow(
-                  content=content,
-                  flow=flowb,
-                  offset=offset
+            content=content,
+            flow=flowb,
+            offset=offset
         )
         occ = warp_flow(flowf, flowb, offset=offset) + flowb
         occ_norm = torch.norm(occ, dim=1, keepdim=True)
@@ -1193,9 +1196,22 @@ class PipelineV2(nn.Module):
             disp_out[i] / (torch.abs(disp_gts[:, i] - shift_gt.reshape(batchsz, 1, 1)) + 0.000001)
             for i in range(framenum - 2)
         ]
-        # currently use first frame to compute scale and shift
-        scale = torch.exp((torch.log(disp_diffs[0]) * certainty_maps[:, 0]).sum(dim=[-1, -2]) / certainty_norm[:, 0])
-        scale = scale * SCALE_SCALE + SCALE_EPS
+        if self.scale_mode == "first":
+            scale = torch.exp((torch.log(disp_diffs[0]) * certainty_maps[:, 0]).sum(dim=[-1, -2])
+                              / certainty_norm[:, 0])
+        elif self.scale_mode == "mean":
+            scale = [
+                torch.exp((torch.log(disp_diffs[i]) * certainty_maps[:, i]).sum(dim=[-1, -2]) / certainty_norm[:, i])
+                for i in range(framenum - 2)
+            ]
+            scale = torch.stack(scale, dim=1).mean(dim=1)
+        elif self.scale_mode == "random":
+            i = np.random.randint(0, framenum - 2)
+            scale = torch.exp((torch.log(disp_diffs[i]) * certainty_maps[:, i]).sum(dim=[-1, -2])
+                              / certainty_norm[:, i])
+        else:
+            raise RuntimeError(f"PipelineV2::unrecognized scale mode {self.scale_mode}")
+        scale = scale * self.scale_scaling + SCALE_EPS
         # disparity in ground truth space
         disparities = torch.reciprocal(depth * scale.reshape(-1, 1) * -isleft.reshape(-1, 1)) + shift_gt.reshape(-1, 1)
         # render target view
@@ -1355,6 +1371,7 @@ class PipelineV2SV(PipelineV2):
     def __init__(self, models: nn.Module, cfg: dict):
         super().__init__(models, cfg)
 
+    @torch.no_grad()
     def valid_forward(self, *args: torch.Tensor, **kwargs):
         args = [_t.cuda() for _t in args]
         self.eval()
@@ -1363,76 +1380,75 @@ class PipelineV2SV(PipelineV2):
         layernum = self.mpimodel.num_layers
         depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
 
-        with torch.no_grad():
-            intermediate = {"disp0": None, "disp_warp": [], "imbg": None}
-            mpi_list, net_list, upmask_list, disp_list = self.forward_multiframes(refims, None, intermediate)
-            disp0 = intermediate["disp0"]
-            disp_warp_list = intermediate["disp_warp"]
-            imbg = intermediate["imbg"]
+        intermediate = {"disp0": None, "disp_warp": [], "imbg": None}
+        mpi_list, net_list, upmask_list, disp_list = self.forward_multiframes(refims, None, intermediate)
+        disp0 = intermediate["disp0"]
+        disp_warp_list = intermediate["disp_warp"]
+        imbg = intermediate["imbg"]
 
-            ptdisp_es0 = torchf.grid_sample(disp0.unsqueeze(1), pt2ds[:, 0:1], align_corners=True).reshape(batchsz, -1)
-            scale = torch.exp(torch.log(ptdisp_es0 * ptzs_gts[:, 0]).mean(dim=-1, keepdim=True))
-            depth = depth * scale.reshape(-1, 1)
+        ptdisp_es0 = torchf.grid_sample(disp0.unsqueeze(1), pt2ds[:, 0:1], align_corners=True).reshape(batchsz, -1)
+        scale = torch.exp(torch.log(ptdisp_es0 * ptzs_gts[:, 0]).mean(dim=-1, keepdim=True))
+        depth = depth * scale.reshape(-1, 1)
 
-            # render target view
-            tarviews = [
-                render_newview(
-                    mpi=mpi_list[i],
-                    srcextrin=refextrins[:, i + 1],
-                    tarextrin=tarextrin,
-                    srcintrin=intrin,
-                    tarintrin=intrin,
-                    depths=depth,
-                    ret_mask=False
-                )
-                for i in range(len(mpi_list))
-            ]
+        # render target view
+        tarviews = [
+            render_newview(
+                mpi=mpi_list[i],
+                srcextrin=refextrins[:, i + 1],
+                tarextrin=tarextrin,
+                srcintrin=intrin,
+                tarintrin=intrin,
+                depths=depth,
+                ret_mask=False
+            )
+            for i in range(len(mpi_list))
+        ]
 
-            val_dict = {}
-            # Photometric metric====================
-            tarviews = torch.stack(tarviews, dim=1)
-            targts = tarims.unsqueeze(1).expand_as(tarviews)
-            metrics = ["psnr", "ssim"]
-            for metric in metrics:
-                error = compute_img_metric(
-                    targts.reshape(-1, 3, heiori, widori),
-                    tarviews.reshape(-1, 3, heiori, widori),
-                    metric=metric
-                )
-                val_dict[f"val_{metric}"] = error
+        val_dict = {}
+        # Photometric metric====================
+        tarviews = torch.stack(tarviews, dim=1)
+        targts = tarims.unsqueeze(1).expand_as(tarviews)
+        metrics = ["psnr", "ssim"]
+        for metric in metrics:
+            error = compute_img_metric(
+                targts.reshape(-1, 3, heiori, widori),
+                tarviews.reshape(-1, 3, heiori, widori),
+                metric=metric
+            )
+            val_dict[f"val_{metric}"] = error
 
-            disp_es = [
-                torchf.grid_sample(disp_list[i].unsqueeze(1),
-                                   pt2ds[:, i + 1:i + 2],
-                                   align_corners=True).reshape(batchsz, -1)
-                for i in range(len(disp_list))
-            ]
-            disp_es = torch.stack(disp_es, dim=1)
-            z_gt = ptzs_gts[:, 1:-1]
-            thresh = np.log(1.25) ** 2
-            diff = (disp_es / scale.reshape(batchsz, -1, 1) - 1 / z_gt).abs().mean()
-            diff_scale = torch.log(disp_es * z_gt / scale.reshape(-1, 1))
-            diff_scale = torch.pow(diff_scale, 2)
-            inliner_pct = (diff_scale < thresh).type(torch.float32).sum() / diff_scale.nelement()
-            diff_scale = diff_scale.mean()
-            val_dict["val_d_mae"] = diff
-            val_dict["val_d_msle"] = diff_scale
-            val_dict["val_d_goodpct"] = inliner_pct
+        disp_es = [
+            torchf.grid_sample(disp_list[i].unsqueeze(1),
+                               pt2ds[:, i + 1:i + 2],
+                               align_corners=True).reshape(batchsz, -1)
+            for i in range(len(disp_list))
+        ]
+        disp_es = torch.stack(disp_es, dim=1)
+        z_gt = ptzs_gts[:, 1:-1]
+        thresh = np.log(1.25) ** 2
+        diff = (disp_es / scale.reshape(batchsz, -1, 1) - 1 / z_gt).abs().mean()
+        diff_scale = torch.log(disp_es * z_gt / scale.reshape(-1, 1))
+        diff_scale = torch.pow(diff_scale, 2)
+        inliner_pct = (diff_scale < thresh).type(torch.float32).sum() / diff_scale.nelement()
+        diff_scale = diff_scale.mean()
+        val_dict["val_d_mae"] = diff
+        val_dict["val_d_msle"] = diff_scale
+        val_dict["val_d_goodpct"] = inliner_pct
 
-            # depth temporal consistency loss==============
-            temporal = torch.tensor(0.).type_as(refims)
-            temporal_scale = torch.tensor(0.).type_as(refims)
-            for disp, disp_warp in zip(disp_list, disp_warp_list):
-                temporal += ((torch.abs(disp.unsqueeze(1) - disp_warp)) / scale.reshape(batchsz, 1, 1, 1)).mean()
-                # print(f"disp_warp: min {disp_warp.min()}, max {disp_warp.max()}")
-                # print(f"disp_warp: min {disp.min()}, max {disp.max()}")
-                disp_warp = torch.max(disp_warp, torch.tensor(0.000001).type_as(disp_warp))
-                disp = torch.max(disp, torch.tensor(0.000001).type_as(disp))
-                temporal_scale += torch.pow(torch.log(disp / disp_warp), 2).mean()
-            temporal = temporal / len(disp_list)
-            temporal_scale /= len(disp_list)
-            val_dict["val_t_mae"] = temporal
-            val_dict["val_t_msle"] = temporal_scale
+        # depth temporal consistency loss==============
+        temporal = torch.tensor(0.).type_as(refims)
+        temporal_scale = torch.tensor(0.).type_as(refims)
+        for disp, disp_warp in zip(disp_list, disp_warp_list):
+            temporal += ((torch.abs(disp.unsqueeze(1) - disp_warp)) / scale.reshape(batchsz, 1, 1, 1)).mean()
+            # print(f"disp_warp: min {disp_warp.min()}, max {disp_warp.max()}")
+            # print(f"disp_warp: min {disp.min()}, max {disp.max()}")
+            disp_warp = torch.max(disp_warp, torch.tensor(0.000001).type_as(disp_warp))
+            disp = torch.max(disp, torch.tensor(0.000001).type_as(disp))
+            temporal_scale += torch.pow(torch.log(disp / disp_warp), 2).mean()
+        temporal = temporal / len(disp_list)
+        temporal_scale /= len(disp_list)
+        val_dict["val_t_mae"] = temporal
+        val_dict["val_t_msle"] = temporal_scale
 
         if "visualize" in kwargs.keys() and kwargs["visualize"]:
             val_dict["vis_disp"] = draw_dense_disp(disp_list[1], 1)
@@ -1483,8 +1499,23 @@ class PipelineV2SV(PipelineV2):
             raise NotImplementedError(f"not implemented")
         else:
             raise RuntimeError(f"PipelineV2SV::depth_loss_mode = {self.depth_loss_mode} not recognized")
-        # currently use first frame to compute scale
-        scale = torch.exp(torch.log(ptdis_es[0] * ptzs_gts[:, 0]).mean(dim=-1, keepdim=True)) * SCALE_SCALE + SCALE_EPS
+
+        # currently use first frame to compute scale and shift
+        if self.scale_mode == "first":
+            scale = torch.exp(torch.log(ptdis_es[0] * ptzs_gts[:, 0]).mean(dim=-1, keepdim=True))
+        elif self.scale_mode == "mean":
+            scale = [
+                torch.exp(torch.log(ptdis_es[i] * ptzs_gts[:, i]).mean(dim=-1, keepdim=True))
+                for i in range(framenum - 2)
+            ]
+            scale = torch.stack(scale, dim=1).mean(dim=1)
+        elif self.scale_mode == "random":
+            i = np.random.randint(0, framenum - 2)
+            scale = torch.exp(torch.log(ptdis_es[i] * ptzs_gts[:, i]).mean(dim=-1, keepdim=True))
+        else:
+            raise RuntimeError(f"PipelineV2::unrecognized scale mode {self.scale_mode}")
+
+        scale = scale * self.scale_scaling + SCALE_EPS
         depth = depth * scale.reshape(-1, 1)
         # render target view
         tarviews = [
@@ -1750,7 +1781,7 @@ class PipelineV3(PipelineV2):
 
             if self.kf1_cache.isinvalid():
                 net_warp = self.flowfwarp_warp(self.estimate_flow(0, -1), self.estimate_flow(-1, 0),
-                                                self.kf0_cache.net)
+                                               self.kf0_cache.net)
                 flow_list = [self.estimate_flow(-1, i) for i in [0, -len(self.img_window) // 2]]
                 img_list = [self.img_window[i] for i in [0, -len(self.img_window) // 2]]
                 alpha, net, upmask = self.forwardmpi(None, self.img_window[-1], flow_list, net_warp)

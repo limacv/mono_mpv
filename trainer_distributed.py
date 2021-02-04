@@ -24,10 +24,10 @@ def train(cfg: dict):
 
     # figuring dispout all the path
     log_prefix = cfg["log_prefix"]
+    unique_id = os.environ["SLURM_JOBID"] if "SLURM_JOBID" in os.environ.keys() else datetime.now().strftime('%d%H%M')
     if "id" in cfg.keys():
-        unique_id = f"{cfg['id']}_{datetime.now().strftime('%d%H%M')}"
-    else:
-        unique_id = datetime.now().strftime("%m%d_%H%M%S")
+        unique_id = f"{cfg['id']}_{unique_id}"
+
     mpi_save_path = os.path.join(log_prefix, cfg["mpi_outdir"], f"{unique_id}")
     checkpoint_path = os.path.join(log_prefix, cfg["checkpoint_dir"])
     tensorboard_log_prefix = os.path.join(log_prefix, cfg["tensorboard_logdir"])

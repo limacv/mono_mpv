@@ -65,9 +65,9 @@ def main(kwargs):
 
 
 main({
-    "modelname": "Fullv5Dualnorec",  # MPINetv2, Fullv4, Fullv6, Fullv5.Fullv5resnet
-    "pipelinename": "fulljoint",  # sv, disp_img, fullv2, fullsvv2, fulljoint
-    "datasetname": "realestate10k_seq",
+    "modelname": "V5Nset2",  # MPINetv2, Fullv4, Fullv6, Fullv5.Fullv5resnet, V5Nset[res]N
+    "pipelinename": "fulljoint",  # sv, disp_img, fullv2, fullsvv2, fulljoint, svjoint
+    "datasetname": "stereovideo_seq",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
     "istrain": True,
@@ -90,8 +90,6 @@ main({
                      "depth_loss": 1,
                      "depth_loss_mode": "coarse",
                      "alpha_thick_in_disparity": False,
-                     "tempdepth_loss": 1,
-                     "temporal_loss_mode": "msle",
                      "tempdepth_loss_milestone": [2e3, 4e3],
                      "mask_warmup": 0.5,
                      "mask_warmup_milestone": [1e18, 2e18],
@@ -100,6 +98,11 @@ main({
                      "net_warmup": 0.5,
                      "net_warmup_milestone": [1e18, 2e18],
                      # "aflow_fusefgpct": False,
+
+                     "net_smth_loss": 1,
+                     "tempnewview_mode": "biflow",
+                     "tempnewview_loss": 1,
+                     "net_std": 0.2,
                      },
 })
 # good data list

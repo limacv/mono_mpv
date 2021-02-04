@@ -21,7 +21,7 @@ cfg = {
 
     "write_validate_result": True,
     "validate_num": 32,
-    "valid_freq": 500,
+    "valid_freq": 1000,
     "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
@@ -29,21 +29,21 @@ cfg = {
     "id": "",
     "comment": "",
 
-    "trainset": "realestate10k_img",
-    "evalset": "realestate10k_seq",
+    "trainset": "m+r+s_seq",
+    "evalset": "m+r+s_seq",
     "model_name": "MPINetv2",
-    "modelloss_name": "sv",
-    "batch_size": 2,
-    "num_epoch": 1000,
-    "savepth_iter_freq": 300,
-    "lr": 3e-5,
-    "check_point": "no.pth",
+    "modelloss_name": "svjoint",
+    "batch_size": 1,
+    "num_epoch": 2000,
+    "savepth_iter_freq": 500,
+    "lr": 2e-5,
+    "check_point": "no",  # "mpinet_ori.pth",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "smooth_loss": 0.5,
-        "depth_loss": 0.2,  # need to figure out
-        
+        "depth_loss": 1,  # need to figure out
+
         # "temporal_loss": 0.9,
         # "pixel_std_loss": 0.5,
         # "temporal_loss": 0.5,
@@ -68,7 +68,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "raSV_pretrain_Ronlyrmsmth"
+    cfg["id"] = "raSV_scratch_s103"
     cfg["comment"] = "single frame method baseline (fine-tuning on my dataset)"
 
     parser = argparse.ArgumentParser()
@@ -95,7 +95,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = 2276  # np.random.randint(0, 10000)
+    seed = np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

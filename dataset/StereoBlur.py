@@ -39,8 +39,6 @@ class StereoBlur_Base:
         return os.path.join(self.root, self.trainstr, f"{base_name}.mp4")
 
     def getdisparitypath(self, base_name, isleft, frameidx):
-        # todo: now that train & test set has save content, so disparity is the same. Please modify after I've done
-        #   all the tests
         if isleft:
             return os.path.join(self.root, "train_disp", base_name, "left", f"{frameidx:05d}.npy")
         else:

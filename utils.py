@@ -198,6 +198,14 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": None,
             "AppearanceFlow": AFNet_HR_netflowin(netcnl=6)
         })
+    elif "V5Nset" in name:
+        num_set = int(name[-1:])
+        backbonename = "resnet" if "res" in name else "cnn"
+        return nn.ModuleDict({
+            "MPI": MPI_V5Nset(plane_num, backbonename, num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin(netcnl=num_set * 3)
+        })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
@@ -208,6 +216,8 @@ def select_modelloss(name: str):
         return ModelandSVLoss
     elif "disp_img" == name:
         return ModelandDispLoss
+    elif "svjoint" == name:
+        return ModelandLossJoint
     elif "fullv2" == name:
         return PipelineV2
     elif "fullsvv2" == name:
@@ -252,14 +262,14 @@ def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
         dataset = ConcatDatasetMy([
             MannequinChallenge_Img(istrain, mode=mode),
             RealEstate10K_Img(istrain, mode=mode)
-        ], [1, 0.05])
+        ], [1, 0.02])
         dataset.name = "mannequin+realestate_img"
         return dataset
     elif "mannequin+realestate_seq" in name:
         dataset = ConcatDatasetMy([
             MannequinChallenge_Seq(istrain, seq_len=seq_len, mode=mode),
             RealEstate10K_Seq(istrain, seq_len=seq_len, mode=mode)
-        ], [1, 0.05])
+        ], [1, 0.02])
         dataset.name = "mannequin+realestate_seq"
         return dataset
     elif "m+r+s_seq" in name:
@@ -267,7 +277,7 @@ def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
             MannequinChallenge_Seq(istrain, seq_len=seq_len, mode=mode),
             RealEstate10K_Seq(istrain, seq_len=seq_len, mode=mode),
             StereoVideo_Seq(istrain, seq_len=seq_len, mode=mode)
-        ], frequency=[1, 0.05, 1])
+        ], frequency=[1, 0.02, 1])
         dataset.name = "manne+realestate+stereovideo_seq"
         return dataset
     else:

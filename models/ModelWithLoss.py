@@ -26,7 +26,7 @@ This class is a model container provide interface between
 '''
 
 SCALE_EPS = 0
-SCALE_SCALE = 1.05
+SCALE_SCALE = 1.03
 
 
 class ModelandSVLoss(nn.Module):
@@ -241,7 +241,16 @@ class ModelandSVLoss(nn.Module):
     def forward(self, *args: torch.Tensor, **kwargs):
         # tocuda and unzip
         args = [_t.cuda() for _t in args]
-        refim, tarim, refextrin, tarextrin, intrin, pt2ds, ptzs_gt = args
+        refims, tarims, refextrins, tarextrins, intrin, pt2dses, ptzs_gts = args
+        batchsz, framenum, _, heiori, widori = refims.shape
+        refim = refims.squeeze(0)
+        tarim = tarims.expand_as(refim)
+        refextrin = refextrins.squeeze(0)
+        tarextrin = tarextrins.expand_as(refextrin)
+        pt2ds = pt2dses.squeeze(0)
+        ptzs_gt = ptzs_gts.squeeze(0)
+        intrin = intrin.repeat(framenum, 1, 1)
+
         batchsz, _, heiori, widori = refim.shape
         netout = self.model(refim)
 
@@ -475,7 +484,15 @@ class ModelandDispLoss(nn.Module):
     def forward(self, *args: torch.Tensor, **kwargs):
         # tocuda and unzip
         args = [_t.cuda() for _t in args]
-        refim, tarim, disp_gt, certainty_map, isleft = args
+        refims, tarims, disp_gts, certainty_maps, isleft = args
+        refim = refims.squeeze(0)
+        tarim = tarims.squeeze(0)
+        disp_gt = disp_gts.squeeze(0)
+        certainty_map = certainty_maps.squeeze(0)
+        framenum = refim.shape[0]
+        isleft = isleft.repeat(framenum, 1)
+
+        # refim, tarim, disp_gt, certainty_map, isleft = args
         shift_gt = isleft[:, 1]
         isleft = isleft[:, 0]
         certainty_norm = certainty_map.sum(dim=[-1, -2])
@@ -540,6 +557,34 @@ class ModelandDispLoss(nn.Module):
         return {"loss": final_loss, "loss_dict": loss_dict}
 
 
+class ModelandLossJoint(nn.Module):
+    def __init__(self, models: nn.Module, cfg: dict):
+        super().__init__()
+        self.pipeline_disp = ModelandDispLoss(models, cfg)
+        cfg["loss_weights"]["depth_loss"] /= 5
+        self.pipeline_sv = ModelandSVLoss(models, cfg)
+        del self.pipeline_sv.flow_estim
+        del self.pipeline_sv.photo_loss
+        self.pipeline_sv.flow_estim = self.pipeline_disp.flow_estim
+        self.pipeline_sv.photo_loss = self.pipeline_disp.photo_loss
+
+    def valid_forward(self, *args, **kwargs):
+        if len(args) == 5:
+            return self.pipeline_disp.valid_forward(*args, **kwargs)
+        elif len(args) == 7:
+            return self.pipeline_sv.valid_forward(*args, **kwargs)
+        else:
+            raise RuntimeError()
+
+    def forward(self, *args, **kwargs):
+        if len(args) == 5:
+            return self.pipeline_disp.forward(*args, **kwargs)
+        elif len(args) == 7:
+            return self.pipeline_sv.forward(*args, **kwargs)
+        else:
+            raise RuntimeError()
+
+
 class PipelineV2(nn.Module):
     """
     The entire pipeline using backward warping
@@ -562,23 +607,22 @@ class PipelineV2(nn.Module):
         # self.splat_func = forward_scatter_withweight
 
         # adjustable config
-        self.pipe_optim_frame0 = self.loss_weight.pop("pipe_optim_frame0", False)
-        self.alpha_thick_in_disparity = self.loss_weight.pop("alpha_thick_in_disparity", True)
+        self.alpha_thick_in_disparity = self.loss_weight.pop("alpha_thick_in_disparity", False)
         self.aflow_fusefgpct = self.loss_weight.pop("aflow_fusefgpct", False)
         self.aflow_includeself = self.loss_weight.pop("aflow_includeself", False)
         self.scale_scaling = self.loss_weight.pop("scale_scaling", SCALE_SCALE)
-        self.scale_mode = self.loss_weight.pop("scale_mode", "first")  # first / mean / random
-        self.temporal_loss_mode = self.loss_weight.pop("temporal_loss_mode", "msle")
+        self.scale_mode = self.loss_weight.pop("scale_mode", "random")  # first / mean / random
         self.depth_loss_mode = self.loss_weight.pop("depth_loss_mode",
                                                     "fine")  # fine, coarse, direct_fine, direct_coarse
+        self.tempnewview_mode = self.loss_weight.pop("tempnewview_mode",  # biflow / imwarp
+                                                     "imwarp")
 
         print(f"PipelineV2 activated config:\n"
-              f"pipe_optim_frame0: {self.pipe_optim_frame0}\n"
               f"alpha_thick_in_disparity: {self.alpha_thick_in_disparity}\n"
               f"aflow_includeself: {self.aflow_includeself}\n"
               f"scale_scaling: {self.scale_scaling}\n"
               f"scale_mode: {self.scale_mode}\n"
-              f"temporal_loss_mode: {self.temporal_loss_mode}\n"
+              f"tempnewview_mode: {self.tempnewview_mode}\n"
               f"aflow_fusefgpct: {self.aflow_fusefgpct}\n"
               f"depth_loss_mode: {self.depth_loss_mode}\n"
               f"")
@@ -626,11 +670,6 @@ class PipelineV2(nn.Module):
         self.net_warmup_scheduler = ParamScheduler(
             milestones=net_warmup_milestone,
             values=[net_warmup_val, 0]
-        )
-        tempdepth_loss_milestone = self.loss_weight.pop("tempdepth_loss_milestone", [5e3, 10e3])
-        self.temp_scheduler = ParamScheduler(
-            milestones=tempdepth_loss_milestone,
-            values=[0, 1]
         )
         self.smth_scheduler = ParamScheduler(
             milestones=[4e3, 6e3],
@@ -739,20 +778,19 @@ class PipelineV2(nn.Module):
         batchsz, framenum, _, heiori, widori = refims.shape
         layernum = self.mpimodel.num_layers
         self.prepareoffset(widori, heiori)
-        bfnum_1 = batchsz * (framenum - 1)
         bfnum_2 = batchsz * (framenum - 2)
         # All are [B x Frame [x cnl] x H x W]
         with torch.no_grad():
             # the flow in /8 resolution
-            flows_f, flows_f_upmask, flows_f_net = self.flow_estim(refims[:, :-1].reshape(bfnum_1, 3, heiori, widori),
-                                                                   refims[:, 1:].reshape(bfnum_1, 3, heiori, widori),
+            flows_f, flows_f_upmask, flows_f_net = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
+                                                                   refims[:, 2:].reshape(bfnum_2, 3, heiori, widori),
                                                                    ret_upmask=True)
             flows_b, flows_b_upmask, flows_b_net = self.flow_estim(refims[:, 1:-1].reshape(bfnum_2, 3, heiori, widori),
                                                                    refims[:, :-2].reshape(bfnum_2, 3, heiori, widori),
                                                                    ret_upmask=True)
-            flows_f = flows_f.reshape(batchsz, framenum - 1, 2, heiori // 8, widori // 8)
-            flows_f_upmask = flows_f_upmask.reshape(batchsz, framenum - 1, -1, heiori // 8, widori // 8)
-            flows_f_net = flows_f_net.reshape(batchsz, framenum - 1, -1, heiori // 8, widori // 8)
+            flows_f = flows_f.reshape(batchsz, framenum - 2, 2, heiori // 8, widori // 8)
+            flows_f_upmask = flows_f_upmask.reshape(batchsz, framenum - 2, -1, heiori // 8, widori // 8)
+            flows_f_net = flows_f_net.reshape(batchsz, framenum - 2, -1, heiori // 8, widori // 8)
             flows_b = flows_b.reshape(batchsz, framenum - 2, 2, heiori // 8, widori // 8)
             flows_b_upmask = flows_b_upmask.reshape(batchsz, framenum - 2, -1, heiori // 8, widori // 8)
             flows_b_net = flows_b_net.reshape(batchsz, framenum - 2, -1, heiori // 8, widori // 8)
@@ -763,28 +801,31 @@ class PipelineV2(nn.Module):
         disp_out = []
         # estimate depth map and sample sparse point depth
         depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
-        # for the first frame, process it specially
-        with torch.set_grad_enabled(self.pipe_optim_frame0 and step is not None):
-            alpha, net, upmask = self.forwardmpi(
-                None,
-                refims[:, 0],
-                [flows_f_net[:, 0]],
-                None
-            )
-
-            disp0 = estimate_disparity_torch(alpha.unsqueeze(2), depth)
-            net_warp = self.forwardsf(flows_f[:, 0], flows_b[:, 0], net)
 
         if intermediates is not None:
-            if "net_warp" in intermediates.keys():
-                intermediates["net_warp"].append(net_warp)
-            if "disp_warp" in intermediates.keys():
-                disp0_warp = self.flowfwarp_warp(upsample_flow(flows_f[:, 0], flows_f_upmask[:, 0]),
-                                                 upsample_flow(flows_b[:, 0], flows_b_upmask[:, 0]),
-                                                 disp0.unsqueeze(1))
-                intermediates["disp_warp"].append(disp0_warp)
             if "disp0" in intermediates.keys():
-                intermediates["disp0"] = disp0
+                with torch.no_grad():
+                    flows_f0, flows_f_upmask0, flows_f_net0 = \
+                        self.flow_estim(refims[:, 0], refims[:, 1], ret_upmask=True)
+                    alpha, net, upmask = self.forwardmpi(
+                        None,
+                        refims[:, 0],
+                        [flows_f_net0],
+                        None
+                    )
+                    disp0 = estimate_disparity_torch(alpha.unsqueeze(2), depth)
+                    intermediates["disp0"] = disp0
+
+                if "net_warp" in intermediates.keys():
+                    net_warp = self.forwardsf(flows_f0, flows_b[:, 0], net)
+                    intermediates["net_warp"].append(net_warp)
+
+                if "disp_warp" in intermediates.keys():
+                    disp0_warp = self.flowfwarp_warp(upsample_flow(flows_f0, flows_f_upmask0),
+                                                     upsample_flow(flows_b[:, 0], flows_b_upmask[:, 0]),
+                                                     disp0.unsqueeze(1))
+                    intermediates["disp_warp"].append(disp0_warp)
+
             if "flows_b_upmask" in intermediates.keys():
                 intermediates["flows_b_upmask"] = flows_b_upmask
 
@@ -792,14 +833,14 @@ class PipelineV2(nn.Module):
             alpha, net, upmask = self.forwardmpi(
                 intermediates,
                 refims[:, frameidx],
-                [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx]],
-                net_warp
+                [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx - 1]],
+                None
             )
             disp, blend_weight = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
 
-            flow_list = [flows_b[:, frameidx - 1], flows_f[:, frameidx]]
-            flow_net_list = [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx]]
-            flow_mask_list = [flows_b_upmask[:, frameidx - 1], flows_f_upmask[:, frameidx]]
+            flow_list = [flows_b[:, frameidx - 1], flows_f[:, frameidx - 1]]
+            flow_net_list = [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx - 1]]
+            flow_mask_list = [flows_b_upmask[:, frameidx - 1], flows_f_upmask[:, frameidx - 1]]
             image_list = [refims[:, frameidx - 1], refims[:, frameidx + 1]]
             if self.aflow_includeself:
                 image_list.append(refims[:, frameidx])
@@ -828,20 +869,23 @@ class PipelineV2(nn.Module):
 
             if frameidx >= framenum - 2:
                 break
-            net_warp = self.forwardsf(
-                flowf=flows_f[:, frameidx],
-                flowb=flows_b[:, frameidx],
-                net=net
-            )
 
             if intermediates is not None:
                 if "net_warp" in intermediates.keys():
+                    net_warp = self.forwardsf(
+                        flowf=flows_f[:, frameidx - 1],
+                        flowb=flows_b[:, frameidx],
+                        net=net
+                    )
                     intermediates["net_warp"].append(net_warp)
+
                 if "disp_warp" in intermediates.keys():
-                    disp_warp = self.flowfwarp_warp(upsample_flow(flows_f[:, frameidx], flows_f_upmask[:, frameidx]),
-                                                    upsample_flow(flows_b[:, frameidx], flows_b_upmask[:, frameidx]),
-                                                    disp.unsqueeze(1))
+                    disp_warp = self.flowfwarp_warp(
+                        upsample_flow(flows_f[:, frameidx - 1], flows_f_upmask[:, frameidx - 1]),
+                        upsample_flow(flows_b[:, frameidx], flows_b_upmask[:, frameidx]),
+                        disp.unsqueeze(1))
                     intermediates["disp_warp"].append(disp_warp)
+
                 if "imbg" in intermediates.keys():
                     intermediates["imbg"] = imbg
 
@@ -953,9 +997,9 @@ class PipelineV2(nn.Module):
         """
         batchsz, cnl, hei, wid = img.shape
 
-        if net_warp is None:
-            net_cnl = self.mpimodel.outcnl
-            net_warp = torch.zeros(batchsz, net_cnl, hei // 8, wid // 8).type_as(img)
+        # if net_warp is None and (not hasattr(self.mpimodel, "recurrent") or self.mpimodel.recurrent):
+        #     net_cnl = self.mpimodel.outcnl
+        #     net_warp = torch.zeros(batchsz, net_cnl, hei // 8, wid // 8).type_as(img)
 
         # randomly drop one flow net if training
         if len(flow_net_list) == 1:
@@ -1016,14 +1060,25 @@ class PipelineV2(nn.Module):
                 x = torch.reciprocal(make_depths(layernum)).reshape(1, layernum, 1, 1).type_as(netout)
                 alpha1 = self.volume2alpha(x, disp1, thick1, sigma1)
                 alpha2 = self.volume2alpha(x, disp2, thick2, sigma2)
+                alpha = torch.clamp(alpha1 + alpha2, 0, 1)
             else:
                 x = make_depths(layernum).reshape(1, layernum, 1, 1).type_as(netout)
                 disp_min, disp_max = torch.reciprocal(x[0, 0]), torch.reciprocal(x[0, -1])
                 disp1 = disp1 * (disp_max - disp_min) + disp_min
                 disp2 = disp2 * (disp_max - disp_min) + disp_min
-                alpha1 = self.volume2alphaindepth(x, disp1, thick1, sigma1)
-                alpha2 = self.volume2alphaindepth(x, disp2, thick2, sigma2)
-            alpha = torch.clamp(alpha1 + alpha2, 0, 1)
+                alpha = self.params2alpha(x, disp1, disp2, thick1, thick2, sigma1, sigma2)
+                # alpha1 = self.volume2alphaindepth(x, disp1, thick1, sigma1)
+                # alpha2 = self.volume2alphaindepth(x, disp2, thick2, sigma2)
+                # alpha = torch.clamp(alpha1 + alpha2, 0, 1)
+        elif isinstance(self.mpimodel, MPI_V5Nset):
+            sigma, disp, thick = torch.split(netout, self.mpimodel.num_set, dim=1)
+            x = make_depths(layernum).reshape(1, 1, layernum, 1, 1).type_as(netout)
+            disp_min, disp_max = 1 / default_d_far, 1 / default_d_near
+            disp = disp * (disp_max - disp_min) + disp_min
+            alpha = self.multiparams2alpha(x,
+                                           disp.unsqueeze(2),
+                                           thick.unsqueeze(2),
+                                           sigma.unsqueeze(2))
         else:
             raise RuntimeError(f"Pipelinev2::incompatiable mpimodel: {type(self.mpimodel)}")
 
@@ -1041,12 +1096,35 @@ class PipelineV2(nn.Module):
         return - torch.exp(-dt * sigma * 50) + 1
 
     def volume2alphaindepth(self, x, disp, thickindisp, sigma=1):
-        depth0 = torch.reciprocal(disp)
         thickindisp = torch.min(disp - 1. / default_d_far, thickindisp)
+        depth0 = torch.reciprocal(disp)
         t = x - depth0
         t = torch.min(torch.relu(t), thickindisp * torch.reciprocal(disp - thickindisp) * depth0)
         dt = t[:, :-1] - t[:, 1:]
         return - torch.exp(-dt * sigma * 20) + 1
+
+    @staticmethod
+    def multiparams2alpha(x, ds, th, sig):
+        th = torch.min(ds - 1. / default_d_far, th)
+        de = torch.reciprocal(ds)
+        y = x - de
+        y = torch.min(torch.relu(y), th * torch.reciprocal(ds - th) * de)
+        dy = y[:, :, :-1] - y[:, :, 1:]
+        expo = -(dy * sig).sum(dim=1)
+        return -torch.exp(expo * 5) + 1
+
+    def params2alpha(self, x, ds1, ds2, t1, t2, s1, s2):
+        t1 = torch.min(ds1 - 1. / default_d_far, t1)
+        t2 = torch.min(ds2 - 1. / default_d_far, t2)
+        de1 = torch.reciprocal(ds1)
+        de2 = torch.reciprocal(ds2)
+        x1 = x - de1
+        x2 = x - de2
+        x1 = torch.min(torch.relu(x1), t1 * torch.reciprocal(ds1 - t1) * de1)
+        x2 = torch.min(torch.relu(x2), t2 * torch.reciprocal(ds2 - t2) * de2)
+        dx1 = x1[:, :-1] - x1[:, 1:]
+        dx2 = x2[:, :-1] - x2[:, 1:]
+        return -torch.exp(-(dx1 * s1 + dx2 * s2) * 10) + 1
 
     def square2alpha(self, x, depth, thick, scale=1):
         denorm = torch.tensor(self.mpimodel.num_layers - 1).type_as(x)
@@ -1184,7 +1262,6 @@ class PipelineV2(nn.Module):
 
         intermediates = {
             "flows_b_upmask": None,
-            "net_warp": [],
             "bgflow_fgflow": [],
             "net_up": []
         }
@@ -1249,6 +1326,23 @@ class PipelineV2(nn.Module):
                 else:
                     loss_dict["smth"] += smth_loss.detach()
 
+            if "net_smth_loss" in self.loss_weight.keys():
+                net = intermediates["net_up"][mpiframeidx]
+                num_cnl = net.shape[1]
+                bias = torch.ones(1, num_cnl, 1, 1).type_as(net)
+                bias[:, :(num_cnl // 3)] *= 0.5
+                net_smth_loss = smooth_grad(
+                    net * bias,
+                    refims[:, mpiframeidx + 1]
+                )
+                net_smth_loss = net_smth_loss.mean()
+
+                final_loss += (net_smth_loss * self.loss_weight["net_smth_loss"] * smth_schedule)
+                if "netsmth" not in loss_dict.keys():
+                    loss_dict["netsmth"] = net_smth_loss.detach()
+                else:
+                    loss_dict["netsmth"] += net_smth_loss.detach()
+
             if "net_smth_loss_fg" in self.loss_weight.keys():
                 net = intermediates["net_up"][mpiframeidx]
                 layerfg = net[:, :3] * torch.tensor([0.2, 1, 1]).reshape(1, 3, 1, 1).type_as(net)
@@ -1266,9 +1360,12 @@ class PipelineV2(nn.Module):
 
             if "net_smth_loss_bg" in self.loss_weight.keys():
                 net = intermediates["net_up"][mpiframeidx]
-                layerbg = net[:, 3:]
-                bg_gx, bg_gy = gradient(layerbg)
-                bg_smth_loss = (bg_gx.abs() + bg_gy.abs()).mean()
+                layerbg = net[:, 3:] * torch.tensor([0.2, 1, 1]).reshape(1, 3, 1, 1).type_as(net)
+                bg_smth_loss = smooth_grad(
+                    layerbg,
+                    refims[:, mpiframeidx + 1]
+                )
+                bg_smth_loss = bg_smth_loss.mean()
 
                 final_loss += (bg_smth_loss * self.loss_weight["net_smth_loss_bg"] * smth_schedule)
                 if "netbgsmth" not in loss_dict.keys():
@@ -1285,29 +1382,41 @@ class PipelineV2(nn.Module):
                 else:
                     loss_dict["depth"] += diff.detach()
 
-        temp_schedule = self.temp_scheduler.get_value(step)
         if "tempdepth_loss" in self.loss_weight.keys():
-            temporal = torch.tensor(0.).type_as(refims)
-            for net, net_warp in zip(net_out, intermediates["net_warp"]):
-                if self.temporal_loss_mode == "mse":
-                    # scheme 0: mae
-                    diff = ((net - net_warp).abs()).mean()
-                elif self.temporal_loss_mode == "msle":
-                    # scheme 1: msle
-                    net_warp = torch.max(net_warp, torch.tensor(0.000001).type_as(net_warp))
-                    net = torch.max(net, torch.tensor(0.000001).type_as(net_warp))
-                    diff = (torch.log(net / net_warp).abs()).mean()
-                else:
-                    raise NotImplementedError(f"PipelineV2::temporal_loss_mode "
-                                              f"{self.temporal_loss_mode} not recognized")
-                temporal += diff
-
-            temporal /= len(net_out)
-            final_loss += (temporal * self.loss_weight["tempdepth_loss"] * temp_schedule)
-            loss_dict["tempdepth"] = temporal.detach()
+            raise NotImplementedError(f"PipelineV2::tempdepth loss is no more used")
 
         if "bgflowsmth_loss" in self.loss_weight.keys():
             raise NotImplementedError(f"PipelineV2:: bgflow_smooth loss is no use")
+
+        if "tempnewview_loss" in self.loss_weight.keys():
+            bfnum = batchsz * (framenum - 3)
+            tarviews = torch.stack(tarviews, dim=1)
+            tarviews0 = tarviews[:, :-1].reshape(bfnum, 3, heiori, widori)
+            tarviews1 = tarviews[:, 1:].reshape(bfnum, 3, heiori, widori)
+            tarviewgts0 = tarims[:, :-2].reshape(bfnum, 3, heiori, widori)
+            tarviewgts1 = tarims[:, 1:-1].reshape(bfnum, 3, heiori, widori)
+            with torch.no_grad():
+                nvflows_b, nvflows_b_upmask, _ = self.flow_estim(tarviewgts1, tarviewgts0, ret_upmask=True)
+                nvflows_b = upsample_flow(nvflows_b, nvflows_b_upmask)
+
+            if self.tempnewview_mode == "imwarp":
+                tarviewgts1_warp = warp_flow(tarviewgts0, nvflows_b, offset=self.offset_bhw2)
+                weight = (tarviewgts1_warp - tarviewgts1).abs().mean(dim=1, keepdim=True)
+                weight = torch.clamp(torch.exp(-weight * 10 + 0.5), 0, 1)
+            elif self.tempnewview_mode == "biflow":
+                with torch.no_grad():
+                    nvflows_f, nvflows_f_upmask, _ = self.flow_estim(tarviewgts0, tarviewgts1, ret_upmask=True)
+                    nvflows_f = upsample_flow(nvflows_f, nvflows_f_upmask)
+                    occ_b = warp_flow(nvflows_f, nvflows_b, offset=self.offset_bhw2) + nvflows_b
+                    weight = torch.norm(occ_b, dim=1, keepdim=True)
+                    weight = torch.clamp(torch.exp(-weight * 2 + 0.5), 0, 1)
+            else:
+                raise RuntimeError(f"PipelineV2::unrecognized tempnewview_mode: {self.tempnewview_mode}")
+
+            tarviews1_warp = warp_flow(tarviews0, nvflows_b, offset=self.offset_bhw2)
+            diff = ((tarviews1_warp - tarviews1).abs() * weight).mean()
+            final_loss += (self.loss_weight["tempnewview_loss"] * diff)
+            loss_dict["temp_nv"] = diff.detach()
 
         # Warmup
         if "mask_warmup" in self.loss_weight.keys():
@@ -1357,10 +1466,17 @@ class PipelineV2(nn.Module):
                 # scaleto1 = (-scaleto1 + 4).abs().mean()
                 net_warmup = bglfg
             else:
-                net_warmup = 0
+                net_warmup = torch.tensor([0.]).type_as(refims)
             weight = self.net_warmup_scheduler.get_value(step)
             final_loss += (weight * net_warmup)
             loss_dict["net_warmup"] = net_warmup.detach()
+
+        if "net_std" in self.loss_weight.keys():
+            disp = net_out.reshape(batchsz * (framenum - 2), 4, -1)[:, 1]
+            disp_std = torch.std(disp, dim=-1, unbiased=False).mean()
+            net_std = - disp_std + 0.5
+            final_loss += (net_std * self.loss_weight["net_std"])
+            loss_dict["net_std"] = net_std.detach()
 
         final_loss = final_loss.unsqueeze(0)
         loss_dict = {k: v.unsqueeze(0) for k, v in loss_dict.items()}
@@ -1473,7 +1589,6 @@ class PipelineV2SV(PipelineV2):
 
         intermediates = {
             "flows_b_upmask": None,
-            "net_warp": [],
             "bgflow_fgflow": [],
             "net_up": []
         }
@@ -1513,7 +1628,7 @@ class PipelineV2SV(PipelineV2):
             i = np.random.randint(0, framenum - 2)
             scale = torch.exp(torch.log(ptdis_es[i] * ptzs_gts[:, i]).mean(dim=-1, keepdim=True))
         else:
-            raise RuntimeError(f"PipelineV2::unrecognized scale mode {self.scale_mode}")
+            raise RuntimeError(f"PipelineSVV2::unrecognized scale mode {self.scale_mode}")
 
         scale = scale * self.scale_scaling + SCALE_EPS
         depth = depth * scale.reshape(-1, 1)
@@ -1555,6 +1670,23 @@ class PipelineV2SV(PipelineV2):
             if "smooth_flowgrad_loss" in self.loss_weight.keys():
                 raise NotImplementedError("PipelineSV2:: flowgrad_loss is no more used")
 
+            if "net_smth_loss" in self.loss_weight.keys():
+                net = intermediates["net_up"][mpiframeidx]
+                num_cnl = net.shape[1]
+                bias = torch.ones(1, num_cnl, 1, 1).type_as(net)
+                bias[:, :(num_cnl // 3)] *= 0.5
+                net_smth_loss = smooth_grad(
+                    net * bias,
+                    refims[:, mpiframeidx + 1]
+                )
+                net_smth_loss = net_smth_loss.mean()
+
+                final_loss += (net_smth_loss * self.loss_weight["net_smth_loss"] * smth_schedule)
+                if "netsmth" not in loss_dict.keys():
+                    loss_dict["netsmth"] = net_smth_loss.detach()
+                else:
+                    loss_dict["netsmth"] += net_smth_loss.detach()
+
             if "net_smth_loss_fg" in self.loss_weight.keys():
                 net = intermediates["net_up"][mpiframeidx]
                 layerfg = net[:, :3] * torch.tensor([0.2, 1, 1]).reshape(1, 3, 1, 1).type_as(net)
@@ -1591,26 +1723,15 @@ class PipelineV2SV(PipelineV2):
                 else:
                     loss_dict["depth"] += diff.detach()
 
-        temp_schedule = self.temp_scheduler.get_value(step)
         if "tempdepth_loss" in self.loss_weight.keys():
-            temporal = torch.tensor(0.).type_as(refims)
-            for net, net_warp in zip(net_out, intermediates["net_warp"]):
-                if self.temporal_loss_mode == "mse":
-                    # scheme 0: mae
-                    diff = ((net - net_warp).abs()).mean()
-                elif self.temporal_loss_mode == "msle":
-                    # scheme 1: msle
-                    net_warp = torch.max(net_warp, torch.tensor(0.000001).type_as(net_warp))
-                    net = torch.max(net, torch.tensor(0.000001).type_as(net))
-                    diff = (torch.log(net / net_warp).abs()).mean()
-                else:
-                    raise NotImplementedError(f"PipelineV2::temporal_loss_mode "
-                                              f"{self.temporal_loss_mode} not recognized")
-                temporal += diff
+            raise NotImplementedError(f"PipelineSVV2::tempdepth loss is no more used")
 
-            temporal /= len(net_out)
-            final_loss += (temporal * self.loss_weight["tempdepth_loss"] * temp_schedule)
-            loss_dict["tempdepth"] = temporal.detach()
+        if "tempnewview_loss" in self.loss_weight.keys():
+            tarviews = torch.stack(tarviews, dim=1)
+            meanview = tarviews.mean(dim=1, keepdim=True)
+            view_std = (tarviews - meanview).abs().mean()
+            final_loss += (view_std * self.loss_weight["tempnewview_loss"])
+            loss_dict["temp_nv"] = view_std.detach()
 
         if "mask_warmup" in self.loss_weight.keys():
             mask_loss = torch.tensor(0.).type_as(refims)
@@ -1663,6 +1784,13 @@ class PipelineV2SV(PipelineV2):
             weight = self.net_warmup_scheduler.get_value(step)
             final_loss += (weight * net_warmup)
             loss_dict["net_warmup"] = net_warmup.detach()
+
+        if "net_std" in self.loss_weight.keys():
+            disp = net_out.reshape(batchsz * (framenum - 2), 4, -1)[:, 1]
+            disp_std = torch.std(disp, dim=-1, unbiased=False).mean()
+            net_std = - disp_std + 0.5
+            final_loss += (net_std * self.loss_weight["net_std"])
+            loss_dict["net_std"] = net_std.detach()
 
         final_loss = final_loss.unsqueeze(0)
         loss_dict = {k: v.unsqueeze(0) for k, v in loss_dict.items()}

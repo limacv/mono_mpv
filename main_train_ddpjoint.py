@@ -20,8 +20,8 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 64,
-    "valid_freq": 500,
+    "validate_num": 32,
+    "valid_freq": 700,
     "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
@@ -31,34 +31,36 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "m+r+s_seq",
-    "model_name": "Fullv5resnet",
+    "model_name": "Fullv5Dualnorec",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 2000,
     "savepth_iter_freq": 400,
-    "lr": 5e-5,
+    "lr": 1e-4,
     "check_point": {
-        "": "V5Joint_notemp_scale1_05_011601_r0.pth"
+        "": "no.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "net_smth_loss_fg": 0.25,
-        # "net_smth_loss_bg": 0.5,
+        "net_smth_loss_bg": 0.25,
         "depth_loss": 1,
 
-        "alpha_thick_in_disparity": True,
-        "tempdepth_loss": 1,
-        "temporal_loss_mode": "msle",
-        "tempdepth_loss_milestone": [1e3, 5e3],
+        "scale_mode": "random",
+        "scale_scaling": 1.04,
 
-        "mask_warmup": 0.25,
+        "mask_warmup": 0.2,
         "mask_warmup_milestone": [1e18, 2e18],
         "bgflow_warmup": 1,
-        "bgflow_warmup_milestone": [4e3, 6e3],
-        "net_warmup": 0.5,
-        "net_warmup_milestone": [1e18, 2e18],
+        "bgflow_warmup_milestone": [2e3, 4e3],
+        # "net_warmup": 0,
+        # "net_warmup_milestone": [1e18, 2e18],
         # "aflow_fusefgpct": False,
+
+        # "tempnewview_mode": "biflow",
+        # "tempnewview_loss": 0,
+        # "net_std": 0,
     },
 }
 
@@ -67,7 +69,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V5Joint_temp_s105"
+    cfg["id"] = "V5Dual_fgbgsame"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()

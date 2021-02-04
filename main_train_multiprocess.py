@@ -56,11 +56,6 @@ cfg = {
 }
 
 
-# TODO:
-#  >>> should add other metric
-#  >>> the new dataset
-
-
 def main(cfg):
     # the settings for debug
     if 'COMPUTERNAME' in os.environ.keys() and os.environ['COMPUTERNAME'] == "MSI":

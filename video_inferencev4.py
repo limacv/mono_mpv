@@ -7,12 +7,14 @@ import torch.backends.cudnn
 
 
 # Adjust configurations here ########################################################################################
-path = "./log/checkpoint/V6_l1p0_5s0_5d1tmsle_251856_r0.pth"
+path = "./log/checkpoint/V52setcnn_121011_r0.pth"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
-# video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
-video_path = "D:\\MSI_NB\\source\\data\\pg6_Trim.mp4"
+video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-05-16-39-56.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\pg6_Trim.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\tumrgbd_Trim.mp4"
 # video_path = "Z:\\dataset\\StereoBlur_processed\\30fps\\HD720-02-15-49-26.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
@@ -41,7 +43,7 @@ elif "MannequinChallenge" in video_path:
                  + os.path.basename(os.path.dirname(video_path)).split('.')[0] + ret_cfg
 else:  # regular video
     regular_video = True
-    saveprefix = os.path.basename(path).split('.')[0] \
+    saveprefix = "ZV4" + os.path.basename(path).split('.')[0] \
                  + os.path.basename(video_path).split('.')[0]
 dispvideo_path = os.path.join(out_prefix, saveprefix + "_disparity.mp4")
 mpvout_path = os.path.join(out_prefix, saveprefix + ".mp4")

@@ -31,14 +31,14 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "m+r+s_seq",
-    "model_name": "V5Nset3",
+    "model_name": "V5Nset2",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 2000,
     "savepth_iter_freq": 400,
-    "lr": 1e-4,
+    "lr": 2e-5,
     "check_point": {
-        "": "no.pth"
+        "": "V52setcnn_wmask_121012_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
@@ -49,16 +49,17 @@ cfg = {
         "scale_mode": "random",
         "scale_scaling": 1.04,
 
-        "mask_warmup": 0.2,
+        "upmask_magaware": True,
+        "mask_warmup": 2,
         "mask_warmup_milestone": [1e18, 2e18],
-        "bgflow_warmup": 1,
-        "bgflow_warmup_milestone": [2e3, 4e3],
+        # "bgflow_warmup": 1,
+        # "bgflow_warmup_milestone": [2e3, 4e3],
         # "net_warmup": 0,
         # "net_warmup_milestone": [1e18, 2e18],
         # "aflow_fusefgpct": False,
 
-        # "tempnewview_mode": "biflow",
-        # "tempnewview_loss": 0,
+        "tempnewview_mode": "biflow",
+        "tempnewview_loss": 0,
     },
 }
 
@@ -67,7 +68,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V53setcnn"
+    cfg["id"] = "V52setcnn_wmaskbig"
     cfg["comment"] = "bg force nontransparency"
 
     parser = argparse.ArgumentParser()

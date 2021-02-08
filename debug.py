@@ -23,7 +23,7 @@ def main(kwargs):
     for i in range(int(14000)):
         datas_all = [[]] * 7
         for dev in range(batchsz):
-            datas = dataset[0]
+            datas = dataset[6]
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
@@ -72,7 +72,7 @@ main({
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
     "istrain": True,
     "check_point": {
-        # "": "mpinet_ori.pth",
+        "": "V52setcnn_121011_r0.pth",
     },
 
     "device_ids": [0],
@@ -84,8 +84,8 @@ main({
     "savefile": "./log/checkpoint/debug_svscratch.pth",
     "loss_weights": {"pixel_loss_cfg": 'l1',
                      "pixel_loss": 1,
-                     "scale_mode": "mean",
-                     "net_smth_loss_fg": 0.5,
+                     "scale_mode": "adaptive",
+                     # "net_smth_loss_fg": 0.5,
                      # "net_smth_loss_bg": 0.5,
                      "depth_loss": 1,
                      "depth_loss_mode": "coarse",
@@ -103,6 +103,7 @@ main({
                      "tempnewview_mode": "biflow",
                      "tempnewview_loss": 1,
                      "net_std": 0.2,
+                     "upmask_magaware": True
                      },
 })
 # good data list

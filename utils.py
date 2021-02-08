@@ -262,14 +262,14 @@ def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
         dataset = ConcatDatasetMy([
             MannequinChallenge_Img(istrain, mode=mode),
             RealEstate10K_Img(istrain, mode=mode)
-        ], [1, 0.02])
+        ], [1, 0.025])
         dataset.name = "mannequin+realestate_img"
         return dataset
     elif "mannequin+realestate_seq" in name:
         dataset = ConcatDatasetMy([
             MannequinChallenge_Seq(istrain, seq_len=seq_len, mode=mode),
             RealEstate10K_Seq(istrain, seq_len=seq_len, mode=mode)
-        ], [1, 0.02])
+        ], [1, 0.025])
         dataset.name = "mannequin+realestate_seq"
         return dataset
     elif "m+r+s_seq" in name:
@@ -277,7 +277,7 @@ def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
             MannequinChallenge_Seq(istrain, seq_len=seq_len, mode=mode),
             RealEstate10K_Seq(istrain, seq_len=seq_len, mode=mode),
             StereoVideo_Seq(istrain, seq_len=seq_len, mode=mode)
-        ], frequency=[1, 0.02, 1])
+        ], frequency=[1, 0.025, 1])
         dataset.name = "manne+realestate+stereovideo_seq"
         return dataset
     else:
@@ -329,7 +329,7 @@ def smart_load_checkpoint(root, cfg, model: nn.Module):
             print(f"load checkpoint {path} with config: \n{check_point['cfg']}\n")
     model.load_state_dict(newstate_dict)
     print(f"load state dict, epoch starting from: {begin_epoch}")
-    return 0  # begin_epoch
+    return begin_epoch
 
 
 def smart_select_pipeline(checkpoint, force_modelname="auto", force_pipelinename="auto", **kwargs):

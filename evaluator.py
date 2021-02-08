@@ -22,7 +22,7 @@ class MetricCounter:
             self.metrics_num[name] += count
         else:
             self.metrics[name] = val
-            self.metrics_num[name] += count
+            self.metrics_num[name] = count
 
     def __add__(self, other: 'MetricCounter'):
         for k, v in other.metrics.items():
@@ -30,8 +30,8 @@ class MetricCounter:
         return self
 
     def make_table(self):
-        s_ = "metric\t|\tvalue\t|\tcount\n" \
-             + '\n'.join([f"{k}\t|\t{v / self.metrics_num[k]:.4f}\t|\t{self.metrics_num[k]}"
+        s_ = f"{'metric': ^20}|{'value': ^10}|\tcount\n" \
+             + '\n'.join([f"{k: ^20}|{v / self.metrics_num[k]: ^10.4f}|\t{self.metrics_num[k]}"
                           for k, v in self.metrics.items()])
         return s_
 
@@ -55,17 +55,19 @@ def evaluation(cfg):
     checkpointcfg = checkpoint["cfg"] if "cfg" in checkpoint.keys() else "no cfg"
     del checkpoint
 
+    eval_crop_margin = cfg.pop("eval_crop_margin", 0)
+
     saveroot = cfg["saveroot"]
     save_persceneinfo = cfg["save_perscene"]
     save_tarviews = cfg["save_tarviews"]
     save_disparity = cfg["save_disparity"]
     if saveroot == "auto":
-        saveroot = "/home/lmaag/xgpu-scratch/PI/psander/mali_data/Visual"
+        saveroot = "/home/lmaag/xgpu-scratch/mali_data/Visual"
         if COMPUTER_NAME == "msi":
             saveroot = "Z:\\tmp\\Visual"
             if not os.path.exists(saveroot):
                 saveroot = "D:\\MSI_NB\\source\\data\\Visual"
-        saveroot = os.path.join(saveroot, f"{datasetname}_{modelname}_{pipelinename}")
+        saveroot = os.path.join(saveroot, f"{datasetname}_{os.path.basename(checkpointname).split('.')[0]}")
     mkdir_ifnotexist(saveroot)
 
     header = f"""
@@ -77,6 +79,7 @@ def evaluation(cfg):
 | checkpoint: {checkpointname}
 |       with config: {checkpointcfg}
 | inference_cfg: {', '.join([f'{k}: {v}' for k, v in ret_cfg.items()])}
+| evaluate_cfg: eval_crop_margin={eval_crop_margin}
 +===================================================\n
     """
     print(header, flush=True)
@@ -96,15 +99,25 @@ def evaluation(cfg):
 
     EVAL_DICT = MetricCounter()
     for datas in dataset:
+    # with torch.no_grad():
+    #     datas = dataset[13]
         scene_name = datas['scene_name']
         EVAL_DICT_PERSCENE = MetricCounter()
         newviews_save = []
         disparitys_save = []
-        depths_raw = make_depths(32).cuda()
+        depths_raw = make_depths(32)
         dd = None
-        for frameidx, refimg in enumerate(datas["in_imgs"]):
-            mpi = pipeline.infer_forward(refimg.unsqueeze(0).cuda(), ret_cfg)
 
+        if hasattr(pipeline, "infer_multiple"):
+            mpis = pipeline.infer_multiple(datas["in_imgs"])
+        else:
+            mpis = []
+            for refimg in datas["in_imgs"]:
+                mpi = pipeline.infer_forward(refimg.unsqueeze(0).cuda(), ret_cfg)
+                mpis.append(mpi.cpu())
+
+        assert len(mpis) == len(datas["in_imgs"])
+        for frameidx, mpi in enumerate(mpis):
             # ===========================================
             # estimate the scale & shift and estimate disparity map
             # ===========================================
@@ -112,16 +125,17 @@ def evaluation(cfg):
                 disp_raw = estimate_disparity_torch(mpi, depths_raw).squeeze(0)
 
                 if "gt_depth" in datas.keys():  # semi-dense depth map
-                    gt_depth = datas["gt_depth"][frameidx].cuda()
+                    gt_depth = datas["gt_depth"][frameidx]
                     valid_mask = torch.logical_and(-1e3 < gt_depth, gt_depth < 1e3)
                     gt_depth[torch.logical_not(valid_mask)] = 1e3
 
                     scale = torch.exp((torch.log(disp_raw * gt_depth) * valid_mask.type_as(disp_raw)).sum(dim=[-1, -2]) \
                                       / valid_mask.sum(dim=[-1, -2]))
-                    dd = depths_raw * scale
+                    dde = depths_raw * scale
+                    dd = torch.reciprocal(dde)
 
                 elif "gt_disparity" in datas.keys():  # semi-dense disparity map
-                    gt_disparity = datas["gt_disparity"][frameidx].cuda()
+                    gt_disparity = datas["gt_disparity"][frameidx]
                     valid_mask = torch.logical_and(-1e3 < gt_disparity, gt_disparity < 1e3)
                     gt_disparity[torch.logical_not(valid_mask)] = 1e3
                     if SCALE_AND_SHIFT_INVARIANT:
@@ -141,6 +155,7 @@ def evaluation(cfg):
                         scale = torch.exp((torch.log(disp_diff) * valid_mask).sum(dim=[-1, -2])
                                           / valid_mask.sum(dim=[-1, -2]))
                         dd = torch.reciprocal(depths_raw * -scale) + shift_gt
+                    dde = torch.reciprocal(dd)
 
                 elif "gt_sparsedepth" in datas.keys():  # sparse depth point
                     raise NotImplementedError()
@@ -159,37 +174,76 @@ def evaluation(cfg):
                 newviews_save.append([])
                 for tarpose, tarviewgt in zip(datas["gt_poses"][frameidx], datas["gt_imgs"][frameidx]):
                     tarview = render_newview(mpi,
-                                             refpose[0].unsqueeze(0).cuda(),
-                                             tarpose[0].unsqueeze(0).cuda(),
-                                             refpose[1].unsqueeze(0).cuda(),
-                                             tarpose[1].unsqueeze(0).cuda(),
-                                             depths_raw)
-
+                                             refpose[0].unsqueeze(0),
+                                             tarpose[0].unsqueeze(0),
+                                             refpose[1].unsqueeze(0),
+                                             tarpose[1].unsqueeze(0),
+                                             dde)
+                    tarview = torch.clamp(tarview, 0, 1)
+                    tarviewgt = torch.clamp(tarviewgt, 0, 1).unsqueeze(0)
                     for metric_name in ["ssim", "psnr", "mse"]:
-                        val = compute_img_metric(tarview, tarviewgt, metric_name, margin=0)
-                        EVAL_DICT_PERSCENE.collect(metric_name, val)
+                        val = compute_img_metric(tarview, tarviewgt, metric_name, margin=eval_crop_margin)
+                        EVAL_DICT_PERSCENE.collect(metric_name, float(val))
 
                     newviews_save[-1].append(tarviewgt.cpu())
             elif "gt_disparity" in datas.keys():  # only shift left or right
                 tarview = shift_newview(mpi, -dd)
-                tarviewgt = datas["gt_imgs"][frameidx]
-                for metric_name in ["ssim", "psnr", "mse"]:
-                    val = compute_img_metric(tarview, tarviewgt, metric_name, margin=0)
-                    EVAL_DICT_PERSCENE.collect(metric_name, val)
+                tarviewgt = datas["gt_imgs"][frameidx].unsqueeze(0)
+                tarview = torch.clamp(tarview, 0, 1)
+                tarviewgt = torch.clamp(tarviewgt, 0, 1)
 
-                newviews_save.append(tarviewgt.cpu())
+                for metric_name in ["ssim", "psnr", "mse"]:
+                    val = compute_img_metric(tarview, tarviewgt, metric_name, margin=eval_crop_margin)
+                    EVAL_DICT_PERSCENE.collect(metric_name, float(val))
+
+                newviews_save.append(tarview.cpu())
             else:
                 raise RuntimeError(f"Evaluator::Cannot find any gt views")
 
             # ===========================================
             # Depth quality
             # ===========================================
-            disp_raw = estimate_disparity_torch(mpi, depths_raw).squeeze(0)
+            disp_raw = estimate_disparity_torch(mpi, depths_raw).squeeze(0).cpu()
             disparitys_save.append(disp_raw)
+            disp_cor = estimate_disparity_torch(mpi, dde).squeeze(0)
+            if "gt_depth" in datas.keys():  # semi-dense depth map
+                gt_depth = datas["gt_depth"][frameidx]
+                valid_mask = torch.logical_and(-1e3 < gt_depth, gt_depth < 1e3)
+                gt_depth[torch.logical_not(valid_mask)] = 1e3
+                diff = (torch.reciprocal(gt_depth) - disp_cor).abs()[valid_mask].mean()
+                diff_scale = torch.log10((disp_cor * gt_depth).abs()) ** 2
+                thresh = np.log10(1.25) ** 2  # log(1.25) ** 2
+                inliner_num = ((diff_scale < thresh) * valid_mask).sum()
+                diff_scale = diff_scale[valid_mask].mean()
+
+                EVAL_DICT_PERSCENE.collect("disp_mae", float(diff))
+                EVAL_DICT_PERSCENE.collect("disp_msle", float(diff_scale))
+                EVAL_DICT_PERSCENE.collect("disp_goodpct", float(inliner_num), int(valid_mask.sum()))
+
+            elif "gt_disparity" in datas.keys():  # semi-dense disparity map
+                gt_disparity = datas["gt_disparity"][frameidx]
+                valid_mask = torch.logical_and(-1e3 < gt_disparity, gt_disparity < 1e3)
+                gt_disparity[torch.logical_not(valid_mask)] = 1e3
+
+                diff = ((disp_cor - gt_disparity).abs() * valid_mask).sum() / valid_mask.sum()
+                diff_scale = torch.log10(((disp_cor - shift_gt) / (gt_disparity - shift_gt)).abs())
+                diff_scale = (torch.pow(diff_scale, 2) * valid_mask).sum() / valid_mask.sum()
+                thresh = np.log10(1.25) ** 2  # log(1.25) ** 2
+                inliner_num = ((diff_scale < thresh) * valid_mask).sum()
+
+                EVAL_DICT_PERSCENE.collect("disp_mae", float(diff))
+                EVAL_DICT_PERSCENE.collect("disp_msle", float(diff_scale))
+                EVAL_DICT_PERSCENE.collect("disp_goodpct", float(inliner_num), int(valid_mask.sum()))
+
+            elif "gt_sparsedepth" in datas.keys():  # sparse depth point
+                raise NotImplementedError()
+            else:
+                raise RuntimeError(f"Evaluator::Cannot find any depth ground truth")
 
             # ===========================================
             # Depth temporal consistency
             # ===========================================
+            pass  # TODO
 
         # end of per-scene processing
         # ===================================================================
@@ -203,22 +257,26 @@ def evaluation(cfg):
                 f.writelines(result_str)
 
         saveroot_perscene = os.path.join(saveroot, f"{scene_name}")
+        mkdir_ifnotexist(saveroot_perscene)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        if save_tarviews and isinstance(newviews_save[0], np.ndarray):
+        if save_tarviews and isinstance(newviews_save[0], torch.Tensor):
             videoname = os.path.join(saveroot_perscene, f"novelviews.mp4")
-            wido, heio = newviews_save[0].shape[:2]
+            heio, wido = newviews_save[0].shape[-2:]
             writer = cv2.VideoWriter()
-            writer.open(videoname, fourcc, 15, (heio, wido), isColor=True)
+            writer.open(videoname, fourcc, 15, (wido, heio), isColor=True)
             for img in newviews_save:
+                img = (img[0].permute(1, 2, 0) * 255).type(torch.uint8).numpy()
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                 writer.write(img)
             writer.release()
             print(f"{videoname} saved!")
         if save_disparity:
             videoname = os.path.join(saveroot_perscene, f"disparitymaps.mp4")
-            wido, heio = disparitys_save[0].shape[:2]
+            heio, wido = disparitys_save[0].shape[:2]
             writer = cv2.VideoWriter()
-            writer.open(videoname, fourcc, 15, (heio, wido), isColor=True)
+            writer.open(videoname, fourcc, 15, (wido, heio), isColor=True)
             for img in disparitys_save:
+                img = (img * 255).type(torch.uint8).numpy()
                 img = cv2.applyColorMap(img, cv2.COLORMAP_HOT)
                 writer.write(img)
             writer.release()

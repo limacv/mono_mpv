@@ -8,7 +8,7 @@ class DataAugmenter:
     __init__() -> generate() -> apply_*()
     """
 
-    def __init__(self, outshape, mode="crop", ratio_tol=1.1, resize_tol=1.):
+    def __init__(self, outshape, mode="crop", ratio_tol=1.1, resize_tol=0.7):
         """
         outshape: (height, weight)
         mode="crop", "resize"

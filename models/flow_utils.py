@@ -355,8 +355,7 @@ def forward_scatter_mpi_nearest(flow01: torch.Tensor, mpi: torch.Tensor):
 class FlowEstimator(nn.Module):
     def __init__(self, small=True, weight_name="small"):
         super().__init__()
-        self.model = RAFTNet(small=small)
-        self.model.cuda()
+        self.model = RAFTNet(small=small).cuda()
         state_dict = torch.load(RAFT_path[weight_name], map_location="cuda:0")
         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
         self.model.load_state_dict(state_dict)

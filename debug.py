@@ -16,9 +16,9 @@ def main(kwargs):
 
     smart_load_checkpoint("./log/checkpoint/", kwargs, model)
 
-    model.cuda()
     modelloss = select_modelloss(kwargs["pipelinename"])(model, kwargs)
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-5)
+    optimizer.param_groups[0]["lr"] = 1
     dataset = select_dataset(kwargs["datasetname"], kwargs["istrain"], {})
     for i in range(int(14000)):
         datas_all = [[]] * 7
@@ -65,14 +65,14 @@ def main(kwargs):
 
 
 main({
-    "modelname": "V5Nset2",  # MPINetv2, Fullv4, Fullv6, Fullv5.Fullv5resnet, V5Nset[res]N
+    "modelname": "V6Nset2",  # MPINetv2, Fullv4, Fullv6, Fullv5.Fullv5resnet, V5Nset[res]N
     "pipelinename": "fulljoint",  # sv, disp_img, fullv2, fullsvv2, fulljoint, svjoint
-    "datasetname": "stereovideo_seq",
+    "datasetname": "realestate10k_seq",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
     "istrain": True,
     "check_point": {
-        "": "V52setcnn_121011_r0.pth",
+        # "": "mpinet_ori.pth",
     },
 
     "device_ids": [0],

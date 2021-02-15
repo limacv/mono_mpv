@@ -1,12 +1,10 @@
-import os
-from typing import Sequence
-from collections import Counter
+import multiprocessing as mp
 from utils import *
 from models.mpi_utils import *
-from models.flow_utils import *
-from models.img_utils import *
+# from models.flow_utils import *
+# from models.img_utils import *
+from datetime import datetime
 from dataset import COMPUTER_NAME
-
 
 SCALE_AND_SHIFT_INVARIANT = False
 
@@ -30,77 +28,43 @@ class MetricCounter:
         return self
 
     def make_table(self):
-        s_ = f"{'metric': ^20}|{'value': ^10}|\tcount\n" \
+        s_ = f"\n{'metric': ^20}|{'value': ^10}|\tcount\n" \
              + '\n'.join([f"{k: ^20}|{v / self.metrics_num[k]: ^10.4f}|\t{self.metrics_num[k]}"
                           for k, v in self.metrics.items()])
         return s_
 
 
 @torch.no_grad()
-def evaluation(cfg):
-    datasetname = cfg["dataset"]
-    datasetcfg = cfg["datasetcfg"]
-    dataset = select_evalset(datasetname, **datasetcfg)
-
-    checkpointname = cfg.pop("checkpoint", "")
-    modelname = cfg.pop("model", "auto")
-    pipelinename = cfg.pop("pipeline", "auto")
-    ret_cfg = cfg.pop("infer_cfg", {})
-    pipeline = smart_select_pipeline(
-        checkpoint=checkpointname,
-        force_modelname=modelname,
-        force_pipelinename=pipelinename,
-    )
-    checkpoint = torch.load(checkpointname)
-    checkpointcfg = checkpoint["cfg"] if "cfg" in checkpoint.keys() else "no cfg"
-    del checkpoint
-
+def evaluation_one(dataset, cudaid, pipeline, cfg):
+    print(f"rank {cudaid} start working")
+    num_process = cfg["num_process"]
+    ret_cfg = cfg.pop("infer_cfg", "")
     eval_crop_margin = cfg.pop("eval_crop_margin", 0)
 
     saveroot = cfg["saveroot"]
     save_persceneinfo = cfg["save_perscene"]
     save_tarviews = cfg["save_tarviews"]
     save_disparity = cfg["save_disparity"]
-    if saveroot == "auto":
-        saveroot = "/home/lmaag/xgpu-scratch/mali_data/Visual"
-        if COMPUTER_NAME == "msi":
-            saveroot = "Z:\\tmp\\Visual"
-            if not os.path.exists(saveroot):
-                saveroot = "D:\\MSI_NB\\source\\data\\Visual"
-        saveroot = os.path.join(saveroot, f"{datasetname}_{os.path.basename(checkpointname).split('.')[0]}")
-    mkdir_ifnotexist(saveroot)
-
-    header = f"""
-+===================================
-| Dataset: {dataset.name}
-|       with config: {', '.join([f'{k}: {v}' for k, v in datasetcfg.items()])}
-| Model: {modelname}
-| Pipeline: {pipelinename}
-| checkpoint: {checkpointname}
-|       with config: {checkpointcfg}
-| inference_cfg: {', '.join([f'{k}: {v}' for k, v in ret_cfg.items()])}
-| evaluate_cfg: eval_crop_margin={eval_crop_margin}
-+===================================================\n
-    """
-    print(header, flush=True)
-
     # For estimating the temporal performance
+    torch.cuda.set_device(cudaid)
+
+    pipeline = pipeline.cuda()
     if hasattr(pipeline, "flow_estim"):
         flow_estim = pipeline.flow_estim
     else:
-        flow_estim = RAFTNet(False)
+        print(f"load RAFTNet")
+        flow_estim = RAFTNet(False).cuda()
         flow_estim.eval()
-        flow_estim.cuda()
         state_dict = torch.load(RAFT_path["sintel"], map_location='cpu')
         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
         flow_estim.load_state_dict(state_dict)
         for param in flow_estim.parameters():
             param.requires_grad = False
 
-    EVAL_DICT = MetricCounter()
-    for datas in dataset:
-    # with torch.no_grad():
-    #     datas = dataset[13]
+    SELF_EVAL_DICT = MetricCounter()
+    idxes = np.arange(cudaid, len(dataset), num_process)
+    for sceneid in idxes:
+        datas = dataset[sceneid]
         scene_name = datas['scene_name']
         EVAL_DICT_PERSCENE = MetricCounter()
         newviews_save = []
@@ -109,7 +73,7 @@ def evaluation(cfg):
         dd = None
 
         if hasattr(pipeline, "infer_multiple"):
-            mpis = pipeline.infer_multiple(datas["in_imgs"])
+            mpis = pipeline.infer_multiple(datas["in_imgs"], ret_cfg)
         else:
             mpis = []
             for refimg in datas["in_imgs"]:
@@ -226,10 +190,10 @@ def evaluation(cfg):
                 gt_disparity[torch.logical_not(valid_mask)] = 1e3
 
                 diff = ((disp_cor - gt_disparity).abs() * valid_mask).sum() / valid_mask.sum()
-                diff_scale = torch.log10(((disp_cor - shift_gt) / (gt_disparity - shift_gt)).abs())
-                diff_scale = (torch.pow(diff_scale, 2) * valid_mask).sum() / valid_mask.sum()
-                thresh = np.log10(1.25) ** 2  # log(1.25) ** 2
+                diff_scale = torch.log10(((disp_cor - shift_gt) / (gt_disparity - shift_gt)).abs()) ** 2
+                thresh = np.log10(1.25) ** 2  # log10(1.25) ** 2
                 inliner_num = ((diff_scale < thresh) * valid_mask).sum()
+                diff_scale = (diff_scale * valid_mask).sum() / valid_mask.sum()
 
                 EVAL_DICT_PERSCENE.collect("disp_mae", float(diff))
                 EVAL_DICT_PERSCENE.collect("disp_msle", float(diff_scale))
@@ -250,7 +214,7 @@ def evaluation(cfg):
         # Save informations
         # ===================================================================
         persceneinfo_path = os.path.join(saveroot, f"perscene_{scene_name}.txt")
-        result_str = f"evaluation result of {scene_name}:\n" + EVAL_DICT_PERSCENE.make_table()
+        result_str = f"RANK_{cudaid}:evaluation result of {scene_name}:\n" + EVAL_DICT_PERSCENE.make_table()
         print(result_str, flush=True)
         if save_persceneinfo:
             with open(persceneinfo_path, 'w') as f:
@@ -283,10 +247,96 @@ def evaluation(cfg):
             print(f"{videoname} saved!")
 
         # collect per-scene info
-        EVAL_DICT = EVAL_DICT + EVAL_DICT_PERSCENE
+        SELF_EVAL_DICT = SELF_EVAL_DICT + EVAL_DICT_PERSCENE
+    return SELF_EVAL_DICT
 
+
+# warpper for error detection
+def process_one(*args):
+    try:
+        ret = evaluation_one(*args)
+    except Exception as e:
+        print(f"Error!!!!!!!!!!!!!!!!!!!!!!!!!\n {e}", flush=True)
+        ret = None
+
+    return ret
+
+
+# global dict store dataset-level metric
+EVAL_DICT = MetricCounter()
+
+
+def print_callback(ret_dict):
+    global EVAL_DICT
+    # collect per-scene info
+    EVAL_DICT = EVAL_DICT + ret_dict
+
+
+def evaluation(cfg):
+    num_process = cfg["num_process"]
+    datasetname = cfg["dataset"]
+    datasetcfg = cfg["datasetcfg"]
+    dataset = select_evalset(datasetname, **datasetcfg)
+
+    checkpointname = cfg.pop("checkpoint", "")
+    modelname = cfg.pop("model", "auto")
+    pipelinename = cfg.pop("pipeline", "auto")
+    ret_cfg = cfg.pop("infer_cfg", "")
+    pipeline = smart_select_pipeline(
+        checkpoint=checkpointname,
+        force_modelname=modelname,
+        force_pipelinename=pipelinename,
+    ).cpu()
+    checkpoint = torch.load(checkpointname)
+    checkpointcfg = checkpoint["cfg"] if "cfg" in checkpoint.keys() else "no cfg"
+    del checkpoint
+
+    eval_crop_margin = cfg.pop("eval_crop_margin", 0)
+
+    saveroot = cfg["saveroot"]
+    if saveroot == "auto":
+        saveroot = "/home/lmaag/xgpu-scratch/mali_data/Visual"
+        if COMPUTER_NAME == "msi":
+            saveroot = "Z:\\tmp\\Visual"
+            if not os.path.exists(saveroot):
+                saveroot = "D:\\MSI_NB\\source\\data\\Visual"
+        saveroot = os.path.join(saveroot, f"{datasetname}_{os.path.basename(checkpointname).split('.')[0]}")
+    mkdir_ifnotexist(saveroot)
+    cfg["saveroot"] = saveroot
+
+    header = f"""
++===================================
+| Dataset: {dataset.name}
+|       with config: {', '.join([f'{k}: {v}' for k, v in datasetcfg.items()])}
+| Date: {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}
+| Model: {modelname}
+| Pipeline: {pipelinename}
+| checkpoint: {checkpointname}
+|       with config: {checkpointcfg}
+| inference_cfg: {ret_cfg}
+| evaluate_cfg: eval_crop_margin={eval_crop_margin}
++===================================================\n
+    """
+    print(header, flush=True)
+
+    # start evalutate
+    torch.cuda.empty_cache()
+    mp.set_start_method('spawn')
+
+    pool = mp.Pool(num_process)
+    print(f"num_process, {num_process}")
+    for i in range(num_process):
+        print(f"launch process {i}")
+        pool.apply_async(process_one,
+                         (dataset, i, pipeline, cfg.copy()),
+                         callback=print_callback)
+    pool.close()
+    pool.join()
     # end of the entire dataset processing
+    global EVAL_DICT
     print(f"Successfully processing all {len(dataset)} scenes/videos")
+    print(header)
+    print(EVAL_DICT.make_table())
     info_path = os.path.join(saveroot, "all_results.txt")
     with open(info_path, 'w') as f:
         f.writelines(header)

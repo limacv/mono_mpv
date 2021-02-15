@@ -55,7 +55,7 @@ class NvidiaNovelView:
         path = os.path.join(self.root, base_name, "calibration", f"cam{cami:02d}")
         assert os.path.exists(path), f"{self.name}::cannot find {path}"
         return path
-
+    
     def getviewgtpath(self, base_name, cami, timei):
         assert 0 < cami <= 12 and 0 < timei <= 12
         path = os.path.join(self.root, base_name, "multiview_GT", f"{timei:08d}", f"cam{cami:02d}.jpg")

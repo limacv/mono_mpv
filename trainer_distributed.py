@@ -62,6 +62,14 @@ def train(cfg: dict):
                               pin_memory=True, drop_last=True,
                               sampler=distributedSampler)
 
+    lr_milestones = cfg.pop("lr_milestones", None)
+    lr_values = cfg.pop("lr_values", None)
+    lr_scheduler = ParamScheduler(
+        milestones=lr_milestones,
+        values=lr_values
+    ) if lr_milestones is not None and lr_values is not None else None
+    lr_cur = lr
+
     loss_str = ', '.join([f'{k}:{v}' for k, v in cfg['loss_weights'].items()])
     cfg_str = f"\n-------------------------------------------------\n" \
               f"|Name: {log_dir}|\n" \
@@ -93,6 +101,10 @@ def train(cfg: dict):
         distributedSampler.set_epoch(epoch)
         for iternum, datas in enumerate(trainingdata):
             step = len(trainingdata) * epoch + iternum
+            if lr_scheduler is not None:
+                lr_cur = lr_scheduler.get_value(step) * lr
+                optimizer.param_groups[0]["lr"] = lr_cur
+
             # one epoch
             loss_dict = modelloss(*datas, step=step)
             loss = loss_dict["loss"]
@@ -116,6 +128,8 @@ def train(cfg: dict):
             tensorboard.add_scalar("final_loss", float(loss), step)
             for lossname, lossval in loss_dict.items():
                 tensorboard.add_scalar(lossname, lossval, step)
+            if lr_scheduler is not None:
+                tensorboard.add_scalar("lr", lr_cur, step)
 
             # output loss message
             if step % train_report_freq == 0:
@@ -123,7 +137,7 @@ def train(cfg: dict):
                 # output iter infomation
                 loss_str = " | ".join([f"{k}:{v:.3f}" for k, v in loss_dict.items()])
                 print(f"    Local Rank: {local_rank}:"
-                      f" iter {iternum}/{len(trainingdata)}::loss:{loss:.3f} | {loss_str} "
+                      f" iter {iternum}/{len(trainingdata)}::loss:{loss:.3f} | {loss_str} | lr:{lr_cur:.3f} "
                       f"| time:{time_per_iter:.1f}s", flush=True)
                 start_time = time.time()
 

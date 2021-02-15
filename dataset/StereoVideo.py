@@ -337,6 +337,7 @@ class StereoVideo_Eval(StereoVideo_Base):
     def __init__(self, resolution=(540, 960), maxskip=1, seq_len=25, **kwargs):
         super().__init__(is_train=False)
         self.name = f"StereoVideo Evaluation Dataset"
+        self.trainstr = "eval"
         self.adaptor = DataAdaptor(resolution)
         self.maxskip = maxskip
         self.seq_len = seq_len

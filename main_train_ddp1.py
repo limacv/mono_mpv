@@ -15,14 +15,14 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run/",
+    "tensorboard_logdir": "run1/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 32,
-    "valid_freq": 700,
-    "train_report_freq": 5,
+    "validate_num": 64,
+    "valid_freq": 2000,
+    "train_report_freq": 20,
 
     # about training <<<<<<<<<<<<<<<<
     # comment of current epoch, will print on config.txt
@@ -30,20 +30,22 @@ cfg = {
     "comment": "",
 
     "trainset": "m+r+s_seq",
-    "evalset": "m+r+s_seq",
-    "model_name": "V5Nset2",
+    "evalset": "stereovideo_seq",
+    "model_name": "V6Nset2",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 2000,
     "savepth_iter_freq": 400,
-    "lr": 5e-5,
+    "lr": 1e-4,
+    "lr_milestones": [10e3, 50e3, 100e3, 150e3],
+    "lr_values": [2, 1, 0.5, 0.1],
     "check_point": {
-        "": "V52setcnn_121011_r0.pth"
+        "": "no.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "net_smth_loss": 1,
+        "net_smth_loss": 0.5,
         "depth_loss": 1,
 
         "scale_mode": "adaptive",
@@ -52,14 +54,12 @@ cfg = {
         "upmask_magaware": True,
         "mask_warmup": 1,
         "mask_warmup_milestone": [1e18, 2e18],
-        # "bgflow_warmup": 1,
-        # "bgflow_warmup_milestone": [2e3, 4e3],
-        # "net_warmup": 0,
-        # "net_warmup_milestone": [1e18, 2e18],
+        "bgflow_warmup": 1,
+        "bgflow_warmup_milestone": [2e3, 4e3],
         # "aflow_fusefgpct": False,
 
-        "tempnewview_mode": "biflow",
-        "tempnewview_loss": 0,
+        # "tempnewview_mode": "biflow",
+        # "tempnewview_loss": 0,
     },
 }
 
@@ -68,8 +68,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "V52setcnn_adapts"
-    cfg["comment"] = "bg force nontransparency"
+    cfg["id"] = "DispSpace"
+    cfg["comment"] = "use the final stereo_video as test"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

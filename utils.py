@@ -40,169 +40,25 @@ def select_module(name: str) -> nn.Module:
         return MPINetv2(plane_num)
     elif "hourglass" == name:
         return Hourglass(plane_num)
-    elif "MPVNet" == name:
-        return MPVNet(plane_num)
-    elif "MPI2InMPF" == name:
-        return MPINet2In(plane_num)
-    elif "MPIReccuNet" == name:
-        return MPIReccuNet(plane_num)
-    elif "MPIRecuFlowNet" == name:
-        return MPIRecuFlowNet(plane_num)
-    elif "Full" == name:
+    elif "V5Nset_T" == name:
+        num_set = 2
         return nn.ModuleDict({
-            "MPI": MPINetv2(plane_num),
-            "Fuser": MPIFuser(plane_num)
-        })
-    elif "MPFNet" == name:
-        return nn.ModuleDict({
-            "MPI": MPINetv2(plane_num),
-            "MPF": MPFNet(plane_num)
-        })
-    elif "MPFNetv2" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_FlowGrad(plane_num),
-            "MPF": MPFNet(plane_num)
-        })
-    elif "MPI_FlowGrad" == name:
-        return MPI_FlowGrad(plane_num)
-    # elif "Fullv1" == name:
-    #     return nn.ModuleDict({
-    #         "MPI": MPI_Fullv1(plane_num),
-    #         "MPF": MPFNet(plane_num)
-    #     })
-    elif "Fullv41" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_down8_mask_nobn(plane_num, 6),
+            "MPI": MPI_V5Nset(plane_num, "cnn", num_set, thickmax=0.2),
             "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin()
-        })
-    elif "Fullv4big" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_down8_mask_big(plane_num, 6),
-            "SceneFlow": None,
-            # "AppearanceFlow": AFNet_HR_netflowin()
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv4lite" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_down8_mask_lite(plane_num, 6),
-            "SceneFlow": None,
-            # "AppearanceFlow": AFNet_HR_netflowin()
-            "AppearanceFlow": ASPFNetWithMaskOut()
-        })
-    elif "Fullv50HR_netflow" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_down8_mask_lite(plane_num, 6),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin()
-        })
-    elif "Fullv52LR_netflow" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_down8_mask_lite(plane_num, 6),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_LR_netflowin()
-        })
-    elif "Fullv53LR_netflownet" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_down8_mask_lite(plane_num, 6),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_LR_netflownetin()
-        })
-    elif "Fullv61" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V3(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_LR_netflowin()
-        })
-    elif "Fullv62" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V3(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_LR_netflownetin()
-        })
-    elif "Fullv60HR_netflowbig" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V3(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowinbig()
-        })
-    elif "Fullv60HR_netflow" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V3(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin()
-        })
-    elif "Fullv62LR_netflow" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V3(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_LR_netflowin()
-        })
-    elif "Fullv63LR_netflownet" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V3(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_LR_netflownetin()
-        })
-    elif "Fullv6" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V3(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin()
-        })
-    elif "Fullv4" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V4(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=4)
-        })
-    elif "Fullv4resnet" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V4(plane_num, backbone='resnet'),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=4)
-        })
-    # elif "Fullv6_nrec" == name:
-    #     return nn.ModuleDict({
-    #         "MPI": MPI_SVV3(plane_num),
-    #         "SceneFlow": None,
-    #         "AppearanceFlow": AFNet_HR_netflowin()
-    #     })
-    elif "Fullv5" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V5(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=4)
-        })
-    elif "Fullv5resnet" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V5(plane_num, backbone='resnet'),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=4)
-        })
-    elif "Fullv5norec" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V5(plane_num, recurrent=False),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=4)
-        })
-    elif "Fullv5Dual" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V5Dual(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=6)
-        })
-    elif "Fullv5Dualnorec" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_V5Dual(plane_num, recurrent=False),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=6)
+            "AppearanceFlow": AFNet_HR_netflowin(netcnl=num_set * 3)
         })
     elif "V5Nset" in name:
         num_set = int(name[-1:])
         backbonename = "resnet" if "res" in name else "cnn"
         return nn.ModuleDict({
             "MPI": MPI_V5Nset(plane_num, backbonename, num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin(netcnl=num_set * 3)
+        })
+    elif "V6Nset" in name:
+        num_set = int(name[-1:])
+        return nn.ModuleDict({
+            "MPI": MPI_V6Nset(plane_num, num_set),
             "SceneFlow": None,
             "AppearanceFlow": AFNet_HR_netflowin(netcnl=num_set * 3)
         })
@@ -344,6 +200,8 @@ def smart_select_pipeline(checkpoint, force_modelname="auto", force_pipelinename
         modellossname = cfg_str[cfg_str.find("ModelLoss: ") + 11: cfg_str.find('\n', cfg_str.find("ModelLoss: "))]
         if modellossname == "fulljoint":
             modellossname = "fullv2"
+        elif modellossname == "svjoint":
+            modellossname = "disp_img"
         modelname = modelname if force_modelname == "auto" else force_modelname
         modellossname = modellossname if force_pipelinename == "auto" else force_pipelinename
     else:

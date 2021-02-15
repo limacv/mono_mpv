@@ -9,9 +9,8 @@ from models.mpi_utils import *
 count = 0
 videos = glob(os.path.join(StereoBlur_root, "test", "*.mp4"))
 
-flow_estim = RAFTNet(False)
+flow_estim = RAFTNet(False).cuda()
 flow_estim.eval()
-flow_estim.cuda()
 state_dict = torch.load(RAFT_path["sintel"], map_location='cpu')
 state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
 flow_estim.load_state_dict(state_dict)

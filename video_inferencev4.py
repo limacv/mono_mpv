@@ -7,14 +7,14 @@ import torch.backends.cudnn
 
 
 # Adjust configurations here ########################################################################################
-path = "./log/checkpoint/V52setcnn_121011_r0.pth"
+path = "./log/checkpoint/V52setcnn_adapts_121814_r0.pth"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
 video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-05-16-39-56.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\pg6_Trim.mp4"
-# video_path = "D:\\MSI_NB\\source\\data\\tumrgbd_Trim.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\flickr2.mp4"
 # video_path = "Z:\\dataset\\StereoBlur_processed\\30fps\\HD720-02-15-49-26.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
@@ -73,6 +73,7 @@ with torch.no_grad():
             img = img[:, :wid // 2]
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # img = cv2.resize(img, (400, 720))
         img = cv2.resize(img, None, None, 0.5, 0.5)
         hei, wid, _ = img.shape
         img_tensor = ToTensor()(img).cuda().unsqueeze(0)

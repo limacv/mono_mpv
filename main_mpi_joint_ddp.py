@@ -22,7 +22,7 @@ cfg = {
     "write_validate_result": True,
     "validate_num": 32,
     "valid_freq": 1000,
-    "train_report_freq": 5,
+    "train_report_freq": 20,
 
     # about training <<<<<<<<<<<<<<<<
     # comment of current epoch, will print on config.txt
@@ -36,30 +36,20 @@ cfg = {
     "batch_size": 1,
     "num_epoch": 2000,
     "savepth_iter_freq": 500,
-    "lr": 2e-5,
-    "check_point": "no",  # "mpinet_ori.pth",
+    "lr": 1e-4,
+    "lr_milestones": [10e3, 50e3, 100e3, 150e3],
+    "lr_values": [2, 1, 0.5, 0.1],
+
+    "check_point": "raSV_scratch_s103_040031_r0.pth",  # "mpinet_ori.pth",
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "smooth_loss": 0.5,
         "depth_loss": 1,  # need to figure out
 
+        "scale_mode": "adaptive",
+
         # "temporal_loss": 0.9,
-        # "pixel_std_loss": 0.5,
-        # "temporal_loss": 0.5,
-        # "splat_mode": "bilinear",
-        # "dilate_mpfin": True,
-        # "alpha2mpf": True,
-
-        # "flow_epe": 1,
-        # "flow_smth": 0.1,
-        # "flow_smth_ord": 1,
-        # "flow_smth_bw": False
-        # "aflow_includeself": True,
-        # "sflow_loss": 0.1
-
-        # "sparse_loss": 0.1,
-        # "smooth_tar_loss": 0.5,
     },
 }
 
@@ -68,7 +58,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "raSV_scratch_s103"
+    cfg["id"] = "raSV_scratch_adapts"
     cfg["comment"] = "single frame method baseline (fine-tuning on my dataset)"
 
     parser = argparse.ArgumentParser()

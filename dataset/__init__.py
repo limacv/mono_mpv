@@ -16,7 +16,7 @@ StereoVideo_version = "v3"
 StereoVideo_root = f"/home/lmaag/xgpu-scratch/mali_data/StereoVideoFinal{StereoVideo_version}/"
 StereoVideo_test_pct = 0.1
 
-NvidiaNovelView_root = "/haven't/specify/the/root/yet"
+NvidiaNovelView_root = "/home/lmaag/xgpu-scratch/mali_data/NvidiaNovelViewSynthesis/datas/"
 
 # OutputSize = (512j, 512 + 128 * 2)  # (h, w)
 OutputSize = (448, 448)  # (h, w)

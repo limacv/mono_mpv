@@ -4,12 +4,13 @@ import evaluator
 if __name__ == "__main__":
     cfg = {
         # ======== dataset related =========
-        "dataset": "NvidiaNovelView",  # StereoVideo
+        "num_process": 1,
+        "dataset": "StereoVideo",  # StereoVideo, NvidiaNovelView
         "datasetcfg": {
             "resolution": (448, 800),  # (540, 960)
-            "max_baseline": 4,
+            "max_baseline": 3,
             
-            "seq_len": 20,
+            "seq_len": 7,
             "maxskip": 0
         },
 
@@ -22,10 +23,9 @@ if __name__ == "__main__":
         # "model": "MPINetv2",
         # "pipeline": "disp_img",
 
-        "checkpoint": "./log/checkpoint/V52setcnn_121011_r0.pth",
-        # "model": "MPINetv2",
+        "checkpoint": "./log/checkpoint/V52setcnn_adapts_121814_r0.pth",
         "pipeline": "fullv4",
-        "infer_cfg": {},
+        "infer_cfg": "hardbw selfonly",
 
         # ======= computing error related ===========
         "eval_crop_margin": 0.1,

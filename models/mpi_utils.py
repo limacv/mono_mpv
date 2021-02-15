@@ -497,22 +497,22 @@ def visibility_mask(mpi: torch.Tensor):
     return render_weight
 
 
-def matplot_mpi(mpi: torch.Tensor, alpha=True, visibility=False, RGBA=False):
+def matplot_mpi(mpi: torch.Tensor, alpha=True, visibility=False, RGBA=False, nrow=8):
     import matplotlib.pyplot as plt
     plt.figure()
     with torch.no_grad():
         if alpha:
             if not visibility:
-                img = torchvision.utils.make_grid(mpi[0, :, -1:].detach(), pad_value=1)
+                img = torchvision.utils.make_grid(mpi[0, :, -1:].detach(), pad_value=1, nrow=nrow)
             else:
                 img = visibility_mask(mpi)
-                img = torchvision.utils.make_grid(img.unsqueeze(1).detach(), pad_value=1)
+                img = torchvision.utils.make_grid(img.unsqueeze(1).detach(), pad_value=1, nrow=nrow)
             img = img[0].cpu().numpy()
         else:
             if RGBA:
-                img = torchvision.utils.make_grid(mpi[0].detach())
+                img = torchvision.utils.make_grid(mpi[0].detach(), nrow=nrow)
             else:
-                img = torchvision.utils.make_grid(mpi[0, :, :3].detach())
+                img = torchvision.utils.make_grid(mpi[0, :, :3].detach(), nrow=nrow)
             img = img.permute(1, 2, 0).cpu().numpy()
     plt.imshow(img)
     plt.show()

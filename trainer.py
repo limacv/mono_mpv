@@ -153,7 +153,6 @@ def train(cfg: dict):
                     # "optimizer": optimizer.state_dict()
                 }, os.path.join(checkpoint_path, f"{unique_id}.pth"))
                 print(f"checkpoint saved {epoch}{unique_id}.pth", flush=True)
-                model.cuda()
 
         # output epoch info
         print(f"epoch {epoch} ================================")

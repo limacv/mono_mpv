@@ -7,7 +7,7 @@ import torch.backends.cudnn
 
 
 # Adjust configurations here ########################################################################################
-path = "./log/checkpoint/V52setcnn_sfixs_121813_r0.pth"
+path = "./log/checkpoint/DispSpace_124113_r0.pth"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-06-15-23-27.mp4"
@@ -24,7 +24,7 @@ modelloss = smart_select_pipeline(path)
 
 ret_cfg = "debug"
 
-save_newview = False
+save_newview = True
 save_disparity = True
 save_mpv = True
 save_net = False
@@ -95,7 +95,7 @@ with torch.no_grad():
 
         if save_newview:
             target_pose = torch.tensor(
-                [[1.0, 0.0, 0.0, -0.1],
+                [[1.0, 0.0, 0.0, -0.2],
                  [0.0, 1.0, 0.0, 0],
                  [0.0, 0.0, 1.0, 0]]
             ).type_as(mpi).unsqueeze(0)

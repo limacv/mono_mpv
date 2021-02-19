@@ -62,6 +62,46 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": None,
             "AppearanceFlow": AFNet_HR_netflowin(netcnl=num_set * 3)
         })
+    elif "V6NewBG" == name:
+        num_set = 2
+        return nn.ModuleDict({
+            "MPI": MPI_V6Nset(plane_num, num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet(netcnl=num_set * 3)
+        })
+    elif "V5NewBG" == name:
+        num_set = 2
+        return nn.ModuleDict({
+            "MPI": MPI_V5Nset(plane_num, num_set=num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet(netcnl=num_set * 3)
+        })
+    elif "AB_alpha" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_AB_alpha(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin(netcnl=plane_num - 1)
+        })
+    elif "AB_up" == name:
+        num_set = 2
+        return nn.ModuleDict({
+            "MPI": MPI_AB_up(plane_num, num_set=num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin(netcnl=num_set * 3)
+        })
+    elif "AB_nonet" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_AB_nonet(plane_num, num_set=2),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_HR_netflowin(netcnl=2 * 3)
+        })
+    elif "AB_svdbg" == name:
+        num_set = 2
+        return nn.ModuleDict({
+            "MPI": MPI_V6Nset(plane_num, num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet_AB_svdbg(netcnl=num_set * 3)
+        })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
@@ -81,7 +121,7 @@ def select_modelloss(name: str):
     elif "fullv3" == name:
         return PipelineV3
     elif "fullv4" == name:
-        return PipelineV4
+        return PipelineFiltering
     elif "fulljoint" == name:
         return PipelineJoint
     else:

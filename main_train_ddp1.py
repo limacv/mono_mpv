@@ -18,6 +18,7 @@ cfg = {
     "tensorboard_logdir": "run1/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
+    "unique_id": "FinalDropOut",
 
     "write_validate_result": True,
     "validate_num": 64,
@@ -34,19 +35,20 @@ cfg = {
     "model_name": "V6Nset2",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
-    "num_epoch": 2000,
+    "num_epoch": 500,
     "savepth_iter_freq": 400,
     "lr": 1e-4,
     "lr_milestones": [10e3, 50e3, 100e3, 150e3],
     "lr_values": [2, 1, 0.5, 0.1],
     "check_point": {
-        "": "no.pth"
+        "": "FinalFull_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "net_smth_loss": 0.5,
         "depth_loss": 1,
+        "flownet_dropout": 1,
 
         "scale_mode": "adaptive",
         # "scale_scaling": 1,
@@ -68,7 +70,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "DispSpace"
+    cfg["id"] = "FinalDropOut"
     cfg["comment"] = "use the final stereo_video as test"
 
     parser = argparse.ArgumentParser()
@@ -95,7 +97,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = 6558  # np.random.randint(0, 10000)
+    seed = 6557  # np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

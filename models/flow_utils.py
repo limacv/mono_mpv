@@ -6,6 +6,7 @@ from torchvision.transforms import ToTensor
 import os
 from .RAFT_network import RAFTNet
 from ._modules import downflow8
+from collections import deque
 
 RAFT_path = {
     "small": os.path.join(os.path.dirname(os.path.abspath(__file__)), "../weights/raft-small.pth"),
@@ -414,6 +415,29 @@ class FlowEstimator(nn.Module):
         flow += self.offset
         im1_warpped = torchf.grid_sample(im1, flow, align_corners=True)
         return im1_warpped
+
+
+class Flow_Cacher:
+    def __init__(self, max_sz, device='cpu'):
+        self.sz = max_sz
+        self.flow_cache = {}
+        self.history_que = deque()
+        self.device = device
+
+    def estimate_flow(self, model, im0, im1):
+        key = (id(im0), id(im1))
+        if key in self.flow_cache:
+            # print("cache hit!")e
+            return self.flow_cache[key]
+        else:
+            with torch.no_grad():
+                flow, mask, net = model(im0, im1, ret_upmask=True)
+                flow = upsample_flow(flow, mask).to(self.device)
+            self.flow_cache[key] = flow
+            self.history_que.append(key)
+            if len(self.history_que) > self.sz:
+                self.flow_cache.pop(self.history_que.popleft())
+            return flow
 
 
 def upsample_flow(content, mask):

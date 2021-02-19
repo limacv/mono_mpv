@@ -20,8 +20,8 @@ cfg = {
     "checkpoint_dir": "checkpoint/",
 
     "write_validate_result": True,
-    "validate_num": 32,
-    "valid_freq": 1000,
+    "validate_num": 64,
+    "valid_freq": 2000,
     "train_report_freq": 20,
 
     # about training <<<<<<<<<<<<<<<<
@@ -30,22 +30,23 @@ cfg = {
     "comment": "",
 
     "trainset": "m+r+s_seq",
-    "evalset": "m+r+s_seq",
+    "evalset": "stereovideo_seq",
     "model_name": "MPINetv2",
     "modelloss_name": "svjoint",
     "batch_size": 1,
     "num_epoch": 2000,
-    "savepth_iter_freq": 500,
+    "savepth_iter_freq": 400,
     "lr": 1e-4,
     "lr_milestones": [10e3, 50e3, 100e3, 150e3],
     "lr_values": [2, 1, 0.5, 0.1],
-
-    "check_point": "raSV_scratch_s103_040031_r0.pth",  # "mpinet_ori.pth",
+    "check_point": {
+        "": "no.pth"
+    },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "smooth_loss": 0.5,
-        "depth_loss": 1,  # need to figure out
+        "depth_loss": 0.5,  # need to figure out
 
         "scale_mode": "adaptive",
 
@@ -70,7 +71,7 @@ def main(cfg):
     # please comment this
     if "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
         print("Debug Mode!!!", flush=True)
-        cfg["comment"] = "Dont't forget to change comment" * 100
+        cfg["comment"] = "Dont't forget to change comment" * 50
         cfg["world_size"] = 2
         cfg["train_report_freq"] = 1
         cfg["valid_freq"] = 20
@@ -85,7 +86,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = np.random.randint(0, 10000)
+    seed = 6557  # np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

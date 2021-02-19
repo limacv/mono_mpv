@@ -24,9 +24,11 @@ def train(cfg: dict):
 
     # figuring dispout all the path
     log_prefix = cfg["log_prefix"]
-    unique_id = os.environ["SLURM_JOBID"] if "SLURM_JOBID" in os.environ.keys() else datetime.now().strftime('%d%H%M')
-    if "id" in cfg.keys():
-        unique_id = f"{cfg['id']}_{unique_id}"
+    unique_id = cfg["unique_id"] if "unique_id" in cfg.keys() else ""
+    if len(unique_id) == 0:
+        unique_id = os.environ["SLURM_JOBID"] if "SLURM_JOBID" in os.environ.keys() else datetime.now().strftime('%d%H%M')
+        if "id" in cfg.keys():
+            unique_id = f"{cfg['id']}_{unique_id}"
 
     mpi_save_path = os.path.join(log_prefix, cfg["mpi_outdir"], f"{unique_id}")
     checkpoint_path = os.path.join(log_prefix, cfg["checkpoint_dir"])

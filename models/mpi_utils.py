@@ -485,8 +485,18 @@ def dilate(alpha: torch.Tensor):
     alpha: B x L x H x W
     """
     batchsz, layernum, hei, wid = alpha.shape
-    alphaunfold = torch.nn.Unfold(3, padding=1, stride=1, dilation=1)(alpha.reshape(-1, 1, hei, wid))
+    alphaunfold = torch.nn.Unfold(3, padding=1, stride=1)(alpha.reshape(-1, 1, hei, wid))
     alphaunfold = alphaunfold.max(dim=1)[0]
+    return alphaunfold.reshape_as(alpha)
+
+
+def erode(alpha: torch.Tensor):
+    """
+    alpha: B x L x H x W
+    """
+    batchsz, layernum, hei, wid = alpha.shape
+    alphaunfold = torch.nn.Unfold(3, padding=1, stride=1)(alpha.reshape(-1, 1, hei, wid))
+    alphaunfold = alphaunfold.min(dim=1)[0]
     return alphaunfold.reshape_as(alpha)
 
 

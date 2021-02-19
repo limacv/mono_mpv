@@ -18,7 +18,7 @@ cfg = {
     "tensorboard_logdir": "run1/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
-    "unique_id": "FinalFull",
+    "unique_id": "ablation00_svbase",
 
     "write_validate_result": True,
     "validate_num": 64,
@@ -32,52 +32,35 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "V6Nset2",
-    "modelloss_name": "fulljoint",
+    "model_name": "MPINetv2",
+    "modelloss_name": "svjoint",
     "batch_size": 1,
     "num_epoch": 500,
-    "savepth_iter_freq": 400,
+    "savepth_iter_freq": 441 * 2,
     "lr": 1e-4,
     "lr_milestones": [10e3, 50e3, 100e3, 150e3],
     "lr_values": [2, 1, 0.5, 0.1],
     "check_point": {
-        "": "DispSpace2_124756_r0.pth"
+        "": "ablation00_svbase_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "net_smth_loss": 0.5,
-        "depth_loss": 1,
+        "smooth_loss": 0.5,
+        "depth_loss": 0.5,  # need to figure out
 
         "scale_mode": "adaptive",
-        # "scale_scaling": 1,
 
-        "upmask_magaware": True,
-        "mask_warmup": 1,
-        "mask_warmup_milestone": [1e18, 2e18],
-        "bgflow_warmup": 1,
-        "bgflow_warmup_milestone": [2e3, 4e3],
-        # "aflow_fusefgpct": False,
-
-        # "tempnewview_mode": "biflow",
-        # "tempnewview_loss": 0,
+        # "temporal_loss": 0.9,
     },
 }
-
-
-# TODO
-#   * Implement temporal consistency methods
-#   * Implement post-processing for ablations and single frame methods
-#   * Evaluator:
-#   *   For other dataset
-#   * Implement other video depth & novel view synthesis methods
 
 
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "FinalFull"
+    cfg["id"] = "AB00_svbase"
     cfg["comment"] = "use the final stereo_video as test"
 
     parser = argparse.ArgumentParser()
@@ -104,7 +87,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = 6557  # np.random.randint(0, 10000)
+    seed = 8353  # np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

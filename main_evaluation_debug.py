@@ -15,7 +15,7 @@ if __name__ == "__main__":
         },
 
         # ======== model and inference related =========
-        # "checkpoint": "./log/checkpoint/raSV_scratch_s103_040031_r0.pth",
+        # "checkpoint": "./log/checkpoint/raSV_scratch_adapts_122129_r0.pth",
         # "model": "MPINetv2",
         # "pipeline": "disp_img",
 
@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
         "checkpoint": "./log/checkpoint/V52setcnn_adapts_121814_r0.pth",
         "pipeline": "fullv4",
-        "infer_cfg": "hardbw selfonly",
+        "infer_cfg": "hardbw",
 
         # ======= computing error related ===========
         "eval_crop_margin": 0.1,

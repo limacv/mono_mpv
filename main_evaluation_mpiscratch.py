@@ -10,7 +10,7 @@ if __name__ == "__main__":
             "resolution": (448, 800),  # (540, 960)
             "max_baseline": 4,
 
-            "seq_len": 20,
+            "seq_len": 15,
             "maxskip": 0
         },
 

@@ -1,4 +1,4 @@
-from .ModelWithLoss import PipelineV2, PipelineV3, PipelineV4, ModelandDispLoss
+from .ModelWithLoss import PipelineV2, PipelineV3, PipelineFiltering, ModelandDispLoss
 
 
 class SingleFrameMPI:

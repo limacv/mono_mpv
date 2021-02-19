@@ -1,23 +1,27 @@
 from skimage import metrics
 import torch
+from .lpips.lpips import LPIPS
 
 photometric = {
     "mse": metrics.mean_squared_error,
     "ssim": metrics.structural_similarity,
-    "psnr": metrics.peak_signal_noise_ratio
+    "psnr": metrics.peak_signal_noise_ratio,
+    "lpips": LPIPS()
 }
 
 
-def compute_img_metric(im1: torch.Tensor, im2: torch.Tensor,
+def compute_img_metric(im1t: torch.Tensor, im2t: torch.Tensor,
                        metric="mse", margin=0.05):
     if metric not in photometric.keys():
         raise RuntimeError(f"img_utils:: metric {metric} not recognized")
 
-    if im1.dim() == 3:
-        im1 = im1.unsqueeze(0)
-        im2 = im2.unsqueeze(0)
-    im1 = im1.permute(0, 2, 3, 1).detach().cpu().numpy()
-    im2 = im2.permute(0, 2, 3, 1).detach().cpu().numpy()
+    if im1t.dim() == 3:
+        im1t = im1t.unsqueeze(0)
+        im2t = im2t.unsqueeze(0)
+    im1t = im1t.detach().cpu()
+    im2t = im2t.detach().cpu()
+    im1 = im1t.permute(0, 2, 3, 1).numpy()
+    im2 = im2t.permute(0, 2, 3, 1).numpy()
     batchsz, hei, wid, _ = im1.shape
     if margin > 0:
         marginh = int(hei * margin) + 1
@@ -34,6 +38,10 @@ def compute_img_metric(im1: torch.Tensor, im2: torch.Tensor,
             value = photometric[metric](
                 im1[i], im2[i],
                 multichannel=True
+            )
+        elif metric in ["lpips"]:
+            value = photometric[metric](
+                im1t[i:i+1], im2t[i:i+1]
             )
         else:
             raise NotImplementedError

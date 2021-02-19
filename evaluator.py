@@ -14,7 +14,7 @@ class MetricCounter:
         self.metrics = {}
         self.metrics_num = {}
 
-    def collect(self, name, val, count=1):
+    def collect(self, name, val, count=1.):
         if name in self.metrics.keys():
             self.metrics[name] += val
             self.metrics_num[name] += count
@@ -69,6 +69,8 @@ def evaluation_one(dataset, cudaid, pipeline, cfg):
         EVAL_DICT_PERSCENE = MetricCounter()
         newviews_save = []
         disparitys_save = []
+        disparitys_out = []
+        disparitys_gts = []
         depths_raw = make_depths(32)
         dd = None
 
@@ -115,6 +117,8 @@ def evaluation_one(dataset, cudaid, pipeline, cfg):
                         # only estimate an naive shift of gt (max plus a small margin)
                         gt_disparity[torch.logical_not(valid_mask)] = -1e3
                         shift_gt = torch.max(gt_disparity) + 10
+                        if "stereoblur" in scene_name.lower():
+                            shift_gt = 0
                         disp_diff = disp_raw / -(gt_disparity - shift_gt)
                         scale = torch.exp((torch.log(disp_diff) * valid_mask).sum(dim=[-1, -2])
                                           / valid_mask.sum(dim=[-1, -2]))
@@ -145,7 +149,7 @@ def evaluation_one(dataset, cudaid, pipeline, cfg):
                                              dde)
                     tarview = torch.clamp(tarview, 0, 1)
                     tarviewgt = torch.clamp(tarviewgt, 0, 1).unsqueeze(0)
-                    for metric_name in ["ssim", "psnr", "mse"]:
+                    for metric_name in ["ssim", "psnr", "mse", "lpips"]:
                         val = compute_img_metric(tarview, tarviewgt, metric_name, margin=eval_crop_margin)
                         EVAL_DICT_PERSCENE.collect(metric_name, float(val))
 
@@ -156,7 +160,7 @@ def evaluation_one(dataset, cudaid, pipeline, cfg):
                 tarview = torch.clamp(tarview, 0, 1)
                 tarviewgt = torch.clamp(tarviewgt, 0, 1)
 
-                for metric_name in ["ssim", "psnr", "mse"]:
+                for metric_name in ["ssim", "psnr", "mse", "lpips"]:
                     val = compute_img_metric(tarview, tarviewgt, metric_name, margin=eval_crop_margin)
                     EVAL_DICT_PERSCENE.collect(metric_name, float(val))
 
@@ -167,48 +171,121 @@ def evaluation_one(dataset, cudaid, pipeline, cfg):
             # ===========================================
             # Depth quality
             # ===========================================
+            denorm = 1000.  # can be arbitrary, now the count is unit by K
+            thresh1 = np.log10(1.25)  # log(1.25) ** 2
+            thresh2 = np.log10(1.25 ** 2)  # log(1.25) ** 2
+            thresh3 = np.log10(1.25 ** 3)  # log(1.25) ** 2
             disp_raw = estimate_disparity_torch(mpi, depths_raw).squeeze(0).cpu()
             disparitys_save.append(disp_raw)
-            disp_cor = estimate_disparity_torch(mpi, dde).squeeze(0)
+            disp_cor = estimate_disparity_torch(mpi, dde).squeeze(0).cpu()
+            disparitys_out.append(disp_cor)
+
             if "gt_depth" in datas.keys():  # semi-dense depth map
                 gt_depth = datas["gt_depth"][frameidx]
                 valid_mask = torch.logical_and(-1e3 < gt_depth, gt_depth < 1e3)
+                valid_count = valid_mask.sum()
                 gt_depth[torch.logical_not(valid_mask)] = 1e3
-                diff = (torch.reciprocal(gt_depth) - disp_cor).abs()[valid_mask].mean()
-                diff_scale = torch.log10((disp_cor * gt_depth).abs()) ** 2
-                thresh = np.log10(1.25) ** 2  # log(1.25) ** 2
-                inliner_num = ((diff_scale < thresh) * valid_mask).sum()
-                diff_scale = diff_scale[valid_mask].mean()
+                gt_disparity = torch.reciprocal(gt_depth)
+                disparitys_gts.append(gt_disparity)
 
-                EVAL_DICT_PERSCENE.collect("disp_mae", float(diff))
-                EVAL_DICT_PERSCENE.collect("disp_msle", float(diff_scale))
-                EVAL_DICT_PERSCENE.collect("disp_goodpct", float(inliner_num), int(valid_mask.sum()))
+                abs_rel = (gt_disparity - disp_cor).abs() / gt_disparity.clamp_min(np.finfo(np.float).eps)
+                abs_rel = abs_rel[valid_mask].sum() / denorm
+
+                log10 = torch.log10((disp_cor * gt_depth).abs()).abs()
+                thr1 = torch.logical_and(log10 < thresh1, valid_mask).sum() / denorm
+                thr2 = torch.logical_and(log10 < thresh2, valid_mask).sum() / denorm
+                thr3 = torch.logical_and(log10 < thresh3, valid_mask).sum() / denorm
+                log10 = log10[valid_mask].sum() / denorm
+                # diff = (gt_disparity - disp_cor).abs()[valid_mask].mean()
+                # diff_scale = torch.log10((disp_cor * gt_depth).abs()) ** 2
+                # inliner_num = ((diff_scale < thresh) * valid_mask).sum()
+                # diff_scale = diff_scale[valid_mask].mean()
+
+                EVAL_DICT_PERSCENE.collect("disp_abs_rel", float(abs_rel), count=valid_count / denorm)
+                EVAL_DICT_PERSCENE.collect("disp_log10", float(log10), count=valid_count / denorm)
+                EVAL_DICT_PERSCENE.collect("disp_sigma1", float(thr1), count=valid_count / denorm)
+                EVAL_DICT_PERSCENE.collect("disp_sigma2", float(thr2), count=valid_count / denorm)
+                EVAL_DICT_PERSCENE.collect("disp_sigma3", float(thr3), count=valid_count / denorm)
 
             elif "gt_disparity" in datas.keys():  # semi-dense disparity map
                 gt_disparity = datas["gt_disparity"][frameidx]
                 valid_mask = torch.logical_and(-1e3 < gt_disparity, gt_disparity < 1e3)
+                valid_count = valid_mask.sum()
                 gt_disparity[torch.logical_not(valid_mask)] = 1e3
+                disparitys_gts.append(gt_disparity)
 
-                diff = ((disp_cor - gt_disparity).abs() * valid_mask).sum() / valid_mask.sum()
-                diff_scale = torch.log10(((disp_cor - shift_gt) / (gt_disparity - shift_gt)).abs()) ** 2
-                thresh = np.log10(1.25) ** 2  # log10(1.25) ** 2
-                inliner_num = ((diff_scale < thresh) * valid_mask).sum()
-                diff_scale = (diff_scale * valid_mask).sum() / valid_mask.sum()
+                abs_rel = (gt_disparity - disp_cor).abs() / gt_disparity.abs().clamp_min(np.finfo(np.float).eps)
+                abs_rel = abs_rel[valid_mask].sum() / denorm
 
-                EVAL_DICT_PERSCENE.collect("disp_mae", float(diff))
-                EVAL_DICT_PERSCENE.collect("disp_msle", float(diff_scale))
-                EVAL_DICT_PERSCENE.collect("disp_goodpct", float(inliner_num), int(valid_mask.sum()))
+                log10 = torch.log10(((disp_cor - shift_gt) / (gt_disparity - shift_gt)).abs()).abs()
+                thr1 = torch.logical_and(log10 < thresh1, valid_mask).sum() / denorm
+                thr2 = torch.logical_and(log10 < thresh2, valid_mask).sum() / denorm
+                thr3 = torch.logical_and(log10 < thresh3, valid_mask).sum() / denorm
+                log10 = log10[valid_mask].sum() / denorm
+
+                # diff = ((disp_cor - gt_disparity).abs() * valid_mask).sum() / valid_mask.sum()
+                # diff_scale = torch.log10(((disp_cor - shift_gt) / (gt_disparity - shift_gt)).abs()) ** 2
+                # inliner_num = ((diff_scale < thresh) * valid_mask).sum()
+                # diff_scale = (diff_scale * valid_mask).sum() / valid_mask.sum()
+
+                EVAL_DICT_PERSCENE.collect("disp_abs_rel", float(abs_rel), count=valid_count / denorm)
+                EVAL_DICT_PERSCENE.collect("disp_log10", float(log10), count=valid_count / denorm)
+                EVAL_DICT_PERSCENE.collect("disp_sigma1", float(thr1), count=valid_count / denorm)
+                EVAL_DICT_PERSCENE.collect("disp_sigma2", float(thr2), count=valid_count / denorm)
+                EVAL_DICT_PERSCENE.collect("disp_sigma3", float(thr3), count=valid_count / denorm)
 
             elif "gt_sparsedepth" in datas.keys():  # sparse depth point
                 raise NotImplementedError()
             else:
                 raise RuntimeError(f"Evaluator::Cannot find any depth ground truth")
 
-            # ===========================================
-            # Depth temporal consistency
-            # ===========================================
-            pass  # TODO
+        # ===========================================
+        # Depth temporal consistency
+        # ===========================================
+        # consistency for depth
+        refimgs = [img.unsqueeze(0).cuda() for img in datas["in_imgs"]]
+        flow_cache = Flow_Cacher(4)
+        for frameidx in range(1, len(disparitys_out) - 1):
+            idx0, idx1, idx2 = frameidx - 1, frameidx, frameidx + 1
+            flow10 = flow_cache.estimate_flow(flow_estim, refimgs[idx1], refimgs[idx0])
+            flow01 = flow_cache.estimate_flow(flow_estim, refimgs[idx0], refimgs[idx1])
+            flow12 = flow_cache.estimate_flow(flow_estim, refimgs[idx1], refimgs[idx2])
+            flow21 = flow_cache.estimate_flow(flow_estim, refimgs[idx2], refimgs[idx1])
+            occ10 = torch.norm(warp_flow(flow01, flow10) + flow10, dim=1) < 1.5
+            occ12 = torch.norm(warp_flow(flow21, flow12) + flow12, dim=1) < 1.5
 
+            disp01 = warp_flow(disparitys_out[idx0].unsqueeze(0).unsqueeze(0), flow10)
+            disp21 = warp_flow(disparitys_out[idx2].unsqueeze(0).unsqueeze(0), flow12)
+
+            diff1 = ((disp01 - disparitys_out[idx1]) * occ10).abs().sum() / denorm
+            occ02 = torch.logical_and(occ10, occ12)
+            diff2 = ((disp01 + disp21 - 2 * disparitys_out[idx1]) * occ02).abs().sum() / denorm
+            EVAL_DICT_PERSCENE.collect("temp_disp_o1", float(diff1), count=float(occ10.sum() / denorm))
+            EVAL_DICT_PERSCENE.collect("temp_disp_o2", float(diff2), count=float(occ02.sum() / denorm))
+        refimgs.clear()
+
+        # Consistency for novel views
+        if isinstance(newviews_save[0], torch.Tensor) \
+                and "gt_imgs" in datas.keys() and len(datas["gt_imgs"]) == len(newviews_save):
+            newviews_gt = [img.unsqueeze(0).cuda() for img in datas["gt_imgs"]]
+            newviews_save_cuda = [i_.cuda() for i_ in newviews_save]
+            flow_cache = Flow_Cacher(2)
+            for frameidx in range(1, len(newviews_save)):
+                flowgt10 = flow_cache.estimate_flow(flow_estim, newviews_gt[frameidx], newviews_gt[frameidx - 1])
+                flowgt01 = flow_cache.estimate_flow(flow_estim, newviews_gt[frameidx - 1], newviews_gt[frameidx])
+                occgt10 = torch.norm(warp_flow(flowgt01, flowgt10) + flowgt10, dim=1) < 1.5
+
+                flowout10 = flow_cache.estimate_flow(flow_estim, newviews_save_cuda[frameidx],
+                                                     newviews_save_cuda[frameidx - 1])
+
+                newview01 = warp_flow(newviews_save[frameidx - 1], flowgt10)
+                nvsdiff1 = ((newview01 - newviews_save[frameidx]) * occgt10).abs().sum() / denorm
+                nvsepe = (torch.norm(flowout10 - flowgt10, dim=1) * occgt10).sum() / denorm
+                EVAL_DICT_PERSCENE.collect("temp_nvs_o1", float(nvsdiff1), count=float(occgt10.sum() / denorm))
+                EVAL_DICT_PERSCENE.collect("temp_nvs_epe", float(nvsepe), count=float(occgt10.sum() / denorm))
+
+            newviews_gt.clear()
+            newviews_save_cuda.clear()
         # end of per-scene processing
         # ===================================================================
         # Save informations

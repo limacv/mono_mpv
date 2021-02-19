@@ -130,27 +130,6 @@ def prepareoffset(wid, hei):
     return offset.permute(0, 2, 3, 1)
 
 
-class Flow_Cacher:
-    def __init__(self, max_sz):
-        self.sz = max_sz
-        self.flow_cache = {}
-        self.history_que = deque()
-
-    def estimate_flow(self, model, im0, im1):
-        key = f"{id(im0)}_{id(im1)}"
-        if key in self.flow_cache:
-            # print("cache hit!")
-            return self.flow_cache[key]
-        else:
-            with torch.no_grad():
-                flow = model(im0, im1)
-            self.flow_cache[key] = flow
-            self.history_que.append(key)
-            if len(self.history_que) > self.sz:
-                self.flow_cache.pop(self.history_que.popleft())
-            return flow
-
-
 def detect_black_border(img: np.ndarray):
     img = img.sum(axis=-1).astype(np.float32)
     img_h = np.maximum(img.mean(axis=1) - 20, 0) > 0

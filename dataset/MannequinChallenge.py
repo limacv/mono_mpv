@@ -355,7 +355,7 @@ class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
         #     return None
         point3ds = [colpoints3D[ptid].xyz for ptid in refview.point3D_ids if ptid >= 0]
         point3ds = np.array(point3ds, dtype=np.float32)
-        if len(point3ds) <= 100:
+        if len(point3ds) <= 70:
             return None
         point2ds = refview.xys[refview.point3D_ids >= 0].astype(np.float32)
 
@@ -425,7 +425,7 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
     def __getitem__(self, item):
         # try 3 times
         datas = None
-        for i in range(3):
+        for i in range(1):
             try:
                 datas = self.getitem(item)
             except Exception:
@@ -521,7 +521,7 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
             refview = colimages[refidx + 1]
             point3ds = [colpoints3D[ptid].xyz for ptid in refview.point3D_ids if ptid >= 0]
             point3ds = np.array(point3ds, dtype=np.float32)
-            if len(point3ds) <= 100:
+            if len(point3ds) <= 70:
                 return None
             point2ds = refview.xys[refview.point3D_ids >= 0].astype(np.float32)
             refextrin = np.hstack([refview.qvec2rotmat(), refview.tvec.reshape(3, 1)]).astype(np.float32)
@@ -540,7 +540,7 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
             point2ds_depth = point2ds_depth[good_ptid]
 
             point2ds, point2ds_depth = self.augmenter.apply_pts(point2ds, point2ds_depth)
-            if len(point2ds) < 100:
+            if len(point2ds) < 70:
                 return None
             # random sample point so that output fixed number of points
             # ptnum = point2ds.shape[0]

@@ -18,7 +18,7 @@ cfg = {
     "tensorboard_logdir": "run1/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
-    "unique_id": "FinalFull",
+    "unique_id": "ablation3_nonet",
 
     "write_validate_result": True,
     "validate_num": 64,
@@ -32,16 +32,16 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "V6Nset2",
+    "model_name": "AB_nonet",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 500,
-    "savepth_iter_freq": 400,
+    "savepth_iter_freq": 441 * 2,
     "lr": 1e-4,
     "lr_milestones": [10e3, 50e3, 100e3, 150e3],
     "lr_values": [2, 1, 0.5, 0.1],
     "check_point": {
-        "": "DispSpace2_124756_r0.pth"
+        "": "ablation3_nonet_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
@@ -65,19 +65,11 @@ cfg = {
 }
 
 
-# TODO
-#   * Implement temporal consistency methods
-#   * Implement post-processing for ablations and single frame methods
-#   * Evaluator:
-#   *   For other dataset
-#   * Implement other video depth & novel view synthesis methods
-
-
 def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "FinalFull"
+    cfg["id"] = "AB3_nonet"
     cfg["comment"] = "use the final stereo_video as test"
 
     parser = argparse.ArgumentParser()

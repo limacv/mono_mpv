@@ -10,12 +10,12 @@ if __name__ == "__main__":
             "resolution": (448, 800),  # (540, 960)
             "max_baseline": 4,
 
-            "seq_len": 20,
+            "seq_len": 15,
             "maxskip": 0
         },
 
         # ======== model and inference related =========
-        "checkpoint": "./log/checkpoint/DispSpace_124113_r0.pth",
+        "checkpoint": "./log/checkpoint/Final_my_122424_r0.pth",
         "pipeline": "fullv4",
         "infer_cfg": "hardbw",
 

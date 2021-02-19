@@ -431,6 +431,301 @@ class MPI_V6Nset(nn.Module):
         nn.init.constant_(self.depth_decoder[-1].bias, 0)
 
 
+class MPI_AB_up(nn.Module):
+    def __init__(self, mpi_layers, num_set=2):
+        super().__init__()
+        self.num_layers = mpi_layers
+        self.num_set = num_set
+        down = nn.MaxPool2d(2, ceil_mode=True)
+        self.down = down
+        self.up = up
+        self.imfeat_cnl = 256
+        self.backbone = nn.ModuleList([
+            conv(3, 32, 7),
+            conv(32, 32, 7),
+            down,
+            conv(32, 64, 5),
+            conv(64, 64, 5),
+            down,
+            conv(64, 128, 3),
+            conv(128, 128, 3),
+            down,
+            conv(128, 256, 3),
+            conv(256, 256, 3, isReLU=False)
+        ])  # cnl = 256
+
+        self.down1 = conv(self.imfeat_cnl + 128 * 2, 384, 3)
+        self.down1b = conv(384, 512, 3)
+        self.down2 = conv(512, 512, 3)
+        self.down2b = conv(512, 512, 3)
+        self.down3 = conv(512, 512, 3)
+        self.down3b = conv(512, 512, 3)
+        self.mid1 = conv(512, 512, 3)
+        self.mid2 = conv(512, 512, 3)
+        self.up3 = conv(1024, 512, 3)
+        self.up3b = conv(512, 512, 3)
+        self.up2 = conv(512 + 512, 512, 3)
+        self.up2b = conv(512, 384, 3)
+        self.up1 = conv(512 + 384, 512, 3)
+        self.up1b = conv(512, 256, 3)
+        self.post = conv(self.imfeat_cnl + 512, 512, 3)
+
+        cnl1 = self.num_set * 256
+        cnl2 = self.num_set * 3 * 128
+        self.depth_decoder = nn.Sequential(
+            nn.Conv2d(512, cnl1, 3, padding=1),
+            nn.ReLU(True),
+            nn.PixelShuffle(2),
+            nn.Conv2d(cnl1 // 4, cnl2, 3, padding=1, groups=self.num_set),
+            nn.ReLU(True),
+            nn.PixelShuffle(2),
+            nn.Conv2d(cnl2 // 4, self.num_set * 3 * 4, 3, padding=1, groups=self.num_set * 3),
+            nn.PixelShuffle(2),
+        )
+        self.xscale = 1
+
+        self.register_buffer("xbias", torch.zeros(1, self.num_set * 3, 1, 1, dtype=torch.float32))
+        # output channel: sigma, depth, thickness
+        self.xbias[:, :self.num_set] = 0.5
+        self.xbias[:, 2 * self.num_set:] = -0.5
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, img, flow_net, disp_warp):
+        batchsz, _, hei, wid = img.shape
+        assert hei % 8 == 0 and wid % 8 == 0
+        im_feat = img
+        for layer in self.backbone:
+            im_feat = layer(im_feat)
+
+        feat_in = torch.cat([im_feat, flow_net], dim=1)
+        down1 = self.down1b(self.down1(self.down(feat_in)))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        x = self.up(self.mid2(self.mid1(self.down(down3))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
+        x = self.post(torch.cat(self.shapeto(x, feat_in), dim=1))
+
+        feat = self.depth_decoder(x)  # 256
+        params = feat * self.xscale + self.xbias
+        params = torch.cat([
+            torch.relu(params[:, :self.num_set]),
+            torch.sigmoid(params[:, self.num_set:])
+        ], dim=1)
+        return params, None
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.depth_decoder[-2].weight)
+        nn.init.constant_(self.depth_decoder[-2].bias, 0)
+
+
+class MPI_AB_alpha(nn.Module):
+    """
+    Predict sigma, d, t, d
+    """
+
+    def __init__(self, mpi_layers):
+        super().__init__()
+        self.num_layers = mpi_layers
+        down = nn.MaxPool2d(2, ceil_mode=True)
+        self.down = down
+        self.up = up
+        self.imfeat_cnl = 256
+        self.backbone = nn.ModuleList([
+            conv(3, 32, 7),
+            conv(32, 32, 7),
+            down,
+            conv(32, 64, 5),
+            conv(64, 64, 5),
+            down,
+            conv(64, 128, 3),
+            conv(128, 128, 3),
+            down,
+            conv(128, 256, 3),
+            conv(256, 256, 3, isReLU=False)
+        ])  # cnl = 256
+
+        self.down1 = conv(self.imfeat_cnl + 128 * 2, 384, 3)
+        self.down1b = conv(384, 512, 3)
+        self.down2 = conv(512, 512, 3)
+        self.down2b = conv(512, 512, 3)
+        self.down3 = conv(512, 512, 3)
+        self.down3b = conv(512, 512, 3)
+        self.mid1 = conv(512, 512, 3)
+        self.mid2 = conv(512, 512, 3)
+        self.up3 = conv(1024, 512, 3)
+        self.up3b = conv(512, 512, 3)
+        self.up2 = conv(512 + 512, 512, 3)
+        self.up2b = conv(512, 384, 3)
+        self.up1 = conv(512 + 384, 512, 3)
+        self.up1b = conv(512, 256, 3)
+        self.post = conv(self.imfeat_cnl + 512, 512, 3)
+
+        self.mask_decoder = nn.Sequential(
+            conv(512, 512, 3),
+            nn.Conv2d(512, 64 * 9, 1)
+        )
+        self.depth_decoder = nn.Sequential(
+            nn.Conv2d(512, 256, 3, padding=1),
+            nn.ReLU(True),
+            nn.Conv2d(256, 64, 3, padding=1),
+            nn.ReLU(True),
+            nn.Conv2d(64, self.num_layers - 1, 3, padding=1),
+        )
+        self.xscale = 1
+        self.output_bias = apply_harmonic_bias
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, img, flow_net, disp_warp):
+        batchsz, _, hei, wid = img.shape
+        assert hei % 8 == 0 and wid % 8 == 0
+        im_feat = img
+        for layer in self.backbone:
+            im_feat = layer(im_feat)
+
+        feat_in = torch.cat([im_feat, flow_net], dim=1)
+        down1 = self.down1b(self.down1(self.down(feat_in)))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        x = self.up(self.mid2(self.mid1(self.down(down3))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
+        x = self.post(torch.cat(self.shapeto(x, feat_in), dim=1))
+
+        feat = self.depth_decoder(x)  # 256
+        alphas = self.output_bias(feat, self.num_layers)
+        upmask = self.mask_decoder(x) * 0.25
+        return alphas, upmask
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.depth_decoder[-1].weight)
+        nn.init.constant_(self.depth_decoder[-1].bias, 0)
+
+
+class MPI_AB_nonet(nn.Module):
+    """
+    Predict sigma, d, t, d
+    """
+
+    def __init__(self, mpi_layers, num_set=2):
+        super().__init__()
+        self.num_layers = mpi_layers
+        self.num_set = num_set
+        down = nn.MaxPool2d(2, ceil_mode=True)
+        self.down = down
+        self.up = up
+        self.imfeat_cnl = 256
+        self.backbone = nn.ModuleList([
+            conv(3, 32, 7),
+            conv(32, 32, 7),
+            down,
+            conv(32, 64, 5),
+            conv(64, 64, 5),
+            down,
+            conv(64, 128, 3),
+            conv(128, 128, 3),
+            down,
+            conv(128, 256, 3),
+            conv(256, 256, 3, isReLU=False)
+        ])  # cnl = 256
+
+        self.down1 = conv(self.imfeat_cnl, 384, 3)
+        self.down1b = conv(384, 512, 3)
+        self.down2 = conv(512, 512, 3)
+        self.down2b = conv(512, 512, 3)
+        self.down3 = conv(512, 512, 3)
+        self.down3b = conv(512, 512, 3)
+        self.mid1 = conv(512, 512, 3)
+        self.mid2 = conv(512, 512, 3)
+        self.up3 = conv(1024, 512, 3)
+        self.up3b = conv(512, 512, 3)
+        self.up2 = conv(512 + 512, 512, 3)
+        self.up2b = conv(512, 384, 3)
+        self.up1 = conv(512 + 384, 512, 3)
+        self.up1b = conv(512, 256, 3)
+        self.post = conv(self.imfeat_cnl + 256, 512, 3)
+
+        self.mask_decoder = nn.Sequential(
+            conv(512, 512, 3),
+            nn.Conv2d(512, 64 * 9, 1)
+        )
+        cnl1 = self.num_set * 256
+        cnl2 = self.num_set * 3 * 64
+        self.depth_decoder = nn.Sequential(
+            nn.Conv2d(512, cnl1, 3, padding=1),
+            nn.ReLU(True),
+            nn.Conv2d(cnl1, cnl2, 3, padding=1, groups=self.num_set),
+            nn.ReLU(True),
+            nn.Conv2d(cnl2, self.num_set * 3, 3, padding=1, groups=self.num_set * 3),
+        )
+        self.xscale = 1
+
+        self.register_buffer("xbias", torch.zeros(1, self.num_set * 3, 1, 1, dtype=torch.float32))
+        # output channel: sigma, depth, thickness
+        self.xbias[:, :self.num_set] = 0.5
+        self.xbias[:, 2 * self.num_set:] = -0.5
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, img, flow_net, disp_warp):
+        batchsz, _, hei, wid = img.shape
+        assert hei % 8 == 0 and wid % 8 == 0
+        im_feat = img
+        for layer in self.backbone:
+            im_feat = layer(im_feat)
+
+        feat_in = im_feat  # torch.cat([im_feat, flow_net], dim=1)
+        down1 = self.down1b(self.down1(self.down(feat_in)))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        x = self.up(self.mid2(self.mid1(self.down(down3))))
+        x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
+        x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
+        x = self.up(self.up1b(self.up1(torch.cat(self.shapeto(x, down1), dim=1))))
+        x = self.post(torch.cat(self.shapeto(x, feat_in), dim=1))
+
+        feat = self.depth_decoder(x)  # 256
+        params = feat * self.xscale + self.xbias
+        params = torch.cat([
+            torch.relu(params[:, :self.num_set]),
+            torch.sigmoid(params[:, self.num_set:])
+        ], dim=1)
+        upmask = self.mask_decoder(x) * 0.25
+        return params, upmask
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.depth_decoder[-1].weight)
+        nn.init.constant_(self.depth_decoder[-1].bias, 0)
+
+
 def learned_upsample(content, mask):
     """ Upsample flow field [H/8, W/8, 2] -> [H, W, 2] using convex combination """
     N, C, H, W = content.shape

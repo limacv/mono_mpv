@@ -39,7 +39,7 @@ class ParamScheduler:
             id0, id1 = stage_idx - 1, stage_idx
             mode = self.modes[id0]
             val0, val1 = self.values[id0], self.values[id1]
-            pct = (step - self.milestone[id0]) / (self.milestone[1] - self.milestone[0])
+            pct = (step - self.milestone[id0]) / (self.milestone[id1] - self.milestone[id0])
             if mode == 'linear':
                 return val0 + (val1 - val0) * pct
             elif mode == 'step':

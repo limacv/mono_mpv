@@ -463,6 +463,9 @@ class NetWriter:
 
     def write(self, net: torch.Tensor):
         net = (net * 255).type(torch.uint8)
+        if net.shape[1] == 10:
+            ones = torch.ones_like(net[:, 0:1])
+            net = torch.cat([net[:, :2], ones, net[:, 2:4], ones, net[:, 4:]], dim=1)
         layer1, layer2, imfg, imbg = torch.split(net.squeeze(0), 3, dim=0)
         savefig = torchvision.utils.make_grid([layer1, layer2, imfg, imbg], nrow=2, padding=0)
 

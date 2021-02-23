@@ -13,7 +13,6 @@ from dataset.StereoBlur import *
 from dataset.StereoVideo import *
 from models.rdn import RDN
 from models.ModelWithLoss import *
-
 from dataset.NvidiaNovelView import *
 
 plane_num = 32
@@ -75,6 +74,13 @@ def select_module(name: str) -> nn.Module:
             "MPI": MPI_V5Nset(plane_num, num_set=num_set),
             "SceneFlow": None,
             "AppearanceFlow": AFNet(netcnl=num_set * 3)
+        })
+    elif "LDI" == name:
+        num_set = 2
+        return nn.ModuleDict({
+            "MPI": MPI_LDI(plane_num, num_set=num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet(netcnl=num_set * 2)
         })
     elif "AB_alpha" == name:
         return nn.ModuleDict({
@@ -263,4 +269,3 @@ def select_evalset(name: str, **kwargs):
         return StereoVideo_Eval(**kwargs)
     else:
         raise RuntimeError(f"{name} not recognized")
-

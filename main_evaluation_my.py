@@ -4,20 +4,22 @@ import evaluator
 if __name__ == "__main__":
     cfg = {
         # ======== dataset related =========
-        "num_process": 3,
+        "num_process": 2,
         "dataset": "StereoVideo",  # StereoVideo, NvidiaNovelView
         "datasetcfg": {
-            "resolution": (448, 800),  # (540, 960)
+            "resolution": (448, 768),  # (540, 960)
             "max_baseline": 4,
 
             "seq_len": 15,
             "maxskip": 0
         },
+        "const_scale": True,
+        "scale_in_log": False,
 
         # ======== model and inference related =========
-        "checkpoint": "./log/checkpoint/Final_my_122424_r0.pth",
+        "checkpoint": "./log/checkpointsave/ablation4_nomasu_r0_4.pth",
         "pipeline": "fullv4",
-        "infer_cfg": "hardbw",
+        "infer_cfg": "",
 
         # ======= computing error related ===========
         "eval_crop_margin": 0.1,

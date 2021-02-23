@@ -69,12 +69,12 @@ def main(kwargs):
 
 
 main({
-    "modelname": "V5NewBG",  # MPINetv2, Fullv6, Fullv5.Fullv5resnet, V5Nset[res]N, AB_alpha, AB_nonet, AB_up, AB_svdbg
+    "modelname": "LDI",  # MPINetv2, Fullv6, Fullv5.Fullv5resnet, V5Nset[res]N, AB_alpha, AB_nonet, AB_up, AB_svdbg
     "pipelinename": "fulljoint",  # sv, disp_img, fullv2, fullsvv2, fulljoint, svjoint
     "datasetname": "mannequinchallenge_seq",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
-    "istrain": True,
+    "istrain": False,
     "check_point": {
         # "": "mpinet_ori.pth",
     },

@@ -7,12 +7,14 @@ if __name__ == "__main__":
         "num_process": 2,
         "dataset": "StereoVideo",  # StereoVideo, NvidiaNovelView
         "datasetcfg": {
-            "resolution": (448, 800),  # (540, 960)
+            "resolution": (448, 768),  # (540, 960)
             "max_baseline": 4,
 
-            "seq_len": 20,
+            "seq_len": 15,
             "maxskip": 0
         },
+        "const_scale": True,
+        "scale_in_log": False,
 
         # ======== model and inference related =========
         "checkpoint": "./log/checkpoint/mpinet_ori.pth",

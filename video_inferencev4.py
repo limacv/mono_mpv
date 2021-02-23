@@ -7,7 +7,7 @@ import torch.backends.cudnn
 
 
 # Adjust configurations here ########################################################################################
-path = "./log/checkpoint/V52setcnn_adapts_121814_r0.pth"
+path = "./log/checkpoint/FinalNewBG_r0.pth"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
@@ -23,7 +23,7 @@ pipeline = smart_select_pipeline(path,
                                   force_pipelinename="fullv4",
                                   winsz=7)
 
-ret_cfg = "bgfrom01"
+ret_cfg = ""
 
 save_infer_mpi = True
 save_disparity = True

@@ -1101,7 +1101,15 @@ class PipelineV2(nn.Module):
                                      disp.unsqueeze(2),
                                      thick.unsqueeze(2),
                                      sigma.unsqueeze(2))
-
+        elif isinstance(self.mpimodel, MPI_LDI):
+            disp, thick = torch.split(netout, self.mpimodel.num_set, dim=1)
+            x = torch.reciprocal(make_depths(layernum)).reshape(1, 1, layernum, 1, 1).type_as(netout)
+            disp_min, disp_max = 1 / default_d_far, 1 / default_d_near
+            disp = disp * (disp_max - disp_min) + disp_min
+            alpha = self.nsets2alpha(x,
+                                     disp.unsqueeze(2),
+                                     thick.unsqueeze(2),
+                                     5)
         elif isinstance(self.mpimodel, MPI_AB_alpha):
             alpha = netout
         else:
@@ -1243,7 +1251,7 @@ class PipelineV2(nn.Module):
                     # occ1 = occ1.clamp_max(2)
                     rangemap1 = forward_scatter(flow, torch.ones_like(img[:, 0:1]), self.offset)
                     occ1 = - erode(rangemap1) + 1
-                    rangemap0 = forward_scatter(flowb, occ1, self.offset)
+                    rangemap0 = forward_scatter_withweight(flowb, occ1, occ1, self.offset)
                     flowbg = forward_scatter_withweight(flowb, -flowb, occ1, self.offset)
                     for i in range(3):
                         flowbg = -warp_flow(flowb, flowbg, offset=self.offset_bhw2)
@@ -1432,7 +1440,8 @@ class PipelineV2(nn.Module):
                     net = intermediates["net_up"][mpiframeidx]
                     num_cnl = net.shape[1]
                     bias = torch.ones(1, num_cnl, 1, 1).type_as(net)
-                    bias[:, :(num_cnl // 3)] *= 0.5
+                    if not isinstance(self.mpimodel, MPI_LDI):
+                        bias[:, :(num_cnl // 3)] *= 0.5
                     net_smth_loss = smooth_grad(
                         net * bias,
                         refims[:, mpiframeidx + 1]
@@ -2022,7 +2031,7 @@ class PipelineFiltering(PipelineV2):
                 flowb_list = flow_list
                 img_list = [self.img_window[mididx]]
             else:
-                idx0, idx1 = mididx - 1, mididx + 1
+                idx0, idx1 = mididx - 3, mididx + 3
                 idx0 = mididx if idx0 < 0 else idx0
                 flow_list = [self.estimate_flow(mididx, idx0)[0][1],
                              self.estimate_flow(mididx, idx1)[0][1]]

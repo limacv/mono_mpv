@@ -37,14 +37,14 @@ if 'COMPUTERNAME' in os.environ.keys() and os.environ['COMPUTERNAME'] == "MSI":
 
     StereoBlur_root = "D:\\MSI_NB\\source\\data\\StereoBlur_test"
     StereoBlur_use_saved_disparity = True
-    StereoVideo_root = f"Z:\\dataset\\StereoVideoFinalv2\\"
+    StereoVideo_root = f"Z:\\dataset\\StereoVideoFinalv3\\"
 
     NvidiaNovelView_root = "Z:\\dataset\\NvidiaNovelViewSynthesis\\datas\\"
 
     if not os.path.exists(RealEstate10K_root):  # not pluged
         RealEstate10K_root = "D:\\MSI_NB\\source\\data\\RealEstate10K\\"
         MannequinChallenge_root = "D:\\MSI_NB\\source\\data\\MannequinChallenge"
-        StereoVideo_root = f"D:\\MSI_NB\\source\\data\\StereoVideoFinalv2"
+        StereoVideo_root = f"D:\\MSI_NB\\source\\data\\StereoVideoFinalv3"
 
     is_DEBUG = True
 

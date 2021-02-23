@@ -18,7 +18,7 @@ cfg = {
     "tensorboard_logdir": "run1/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
-    "unique_id": "FinalFull",
+    "unique_id": "FinalLDI",
 
     "write_validate_result": True,
     "validate_num": 64,
@@ -32,7 +32,7 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "V6Nset2",
+    "model_name": "LDI",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 500,
@@ -41,13 +41,16 @@ cfg = {
     "lr_milestones": [10e3, 50e3, 100e3, 150e3],
     "lr_values": [2, 1, 0.5, 0.1],
     "check_point": {
-        "": "DispSpace2_124756_r0.pth"
+        "": "FinalLDI_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "net_smth_loss": 0.5,
         "depth_loss": 1,
+        "flownet_dropout": 1,
+
+        "bg_supervision": 0.1,
 
         "scale_mode": "adaptive",
         # "scale_scaling": 1,
@@ -55,8 +58,8 @@ cfg = {
         "upmask_magaware": True,
         "mask_warmup": 1,
         "mask_warmup_milestone": [1e18, 2e18],
-        "bgflow_warmup": 1,
-        "bgflow_warmup_milestone": [2e3, 4e3],
+        # "bgflow_warmup": 1,
+        # "bgflow_warmup_milestone": [2e3, 4e3],
         # "aflow_fusefgpct": False,
 
         # "tempnewview_mode": "biflow",
@@ -66,8 +69,19 @@ cfg = {
 
 
 # TODO
-#   * Implement temporal consistency methods
-#   * Implement post-processing for ablations and single frame methods
+#   * Implement:
+#       temporal consistency - blind temporal consistency
+#       temporal consistency - learning blind temporal consistency
+#       temporal consistency - blind + dvp
+#       temporal consistency - naive filtering in original resolution
+#       novel view synthesis - 3D Ken-Burn ?
+#       novel view synthesis - Synsin ?
+#       novel view synthesis - MPI [+temp]
+#       depth from video - WSVD - ok
+#       depth from video - MiDaVS - ok
+#       depth from video - MannequinChanllenge (single-frame methods) - ok
+#       depth from video - DeMoN
+#       depth from video - MannequinChanllenge (two-frame methods)
 #   * Evaluator:
 #   *   For other dataset
 #   * Implement other video depth & novel view synthesis methods
@@ -77,7 +91,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "FinalFull"
+    cfg["id"] = "FinalLDI"
     cfg["comment"] = "use the final stereo_video as test"
 
     parser = argparse.ArgumentParser()
@@ -104,7 +118,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = 6557  # np.random.randint(0, 10000)
+    seed = np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

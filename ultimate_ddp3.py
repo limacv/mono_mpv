@@ -15,51 +15,54 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run1/",
+    "tensorboard_logdir": "run/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
+    "unique_id": "Ultimate_BGSU",
 
     "write_validate_result": True,
-    "validate_num": -1,
-    "valid_freq": 200,
-    "train_report_freq": 5,
+    "validate_num": 64,
+    "valid_freq": 1000,
+    "train_report_freq": 20,
 
     # about training <<<<<<<<<<<<<<<<
     # comment of current epoch, will print on config.txt
     "id": "",
     "comment": "",
 
-    "trainset": "stereovideo_img",
+    "trainset": "m+r+s_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "MPINetv2",
-    "modelloss_name": "disp_img",
-    "batch_size": 2,
-    "num_epoch": 300,
-    "savepth_iter_freq": 300,
-    "lr": 2e-5,
-    "check_point": "mpinet_ori.pth",
+    "model_name": "Ultimate2",
+    "modelloss_name": "fulljoint",
+    "batch_size": 1,
+    "num_epoch": 500,
+    "savepth_iter_freq": 400,
+    "lr": 1e-4,
+    "lr_milestones": [10e3, 50e3, 100e3],
+    "lr_values": [2, 1, 0.5],
+    "check_point": {
+        "": "Ultimate_BGSU_r0.pth"
+    },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "smooth_loss": 0.5,
-        "depth_loss": 1,  # need to figure out
+        "new2_net_smth_loss": 0.5,
+        "depth_loss": 1,
+        "flownet_dropout": 1,
 
-        # "temporal_loss": 0.9,
-        # "pixel_std_loss": 0.5,
-        # "temporal_loss": 0.5,
-        # "splat_mode": "bilinear",
-        # "dilate_mpfin": True,
-        # "alpha2mpf": True,
+        "bg_supervision": 0.5,
 
-        # "flow_epe": 1,
-        # "flow_smth": 0.1,
-        # "flow_smth_ord": 1,
-        # "flow_smth_bw": False
-        # "aflow_includeself": True,
-        # "sflow_loss": 0.1
+        "scale_mode": "adaptive",
+        # "scale_scaling": 1,
 
-        # "sparse_loss": 0.1,
-        # "smooth_tar_loss": 0.5,
+        "upmask_magaware": True,
+        "mask_warmup": 1,
+        # "bgflow_warmup": 1,
+        # "bgflow_warmup_milestone": [2e3, 4e3],
+        # "aflow_fusefgpct": False,
+
+        # "tempnewview_mode": "biflow",
+        # "tempnewview_loss": 0,
     },
 }
 
@@ -68,8 +71,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "raSV_finetune"
-    cfg["comment"] = "single frame method baseline (fine-tuning on my dataset)"
+    cfg["id"] = "Ultimate_BGSU"
+    cfg["comment"] = "also, dilate the alpha, and change blend_weight"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -80,7 +83,7 @@ def main(cfg):
     # please comment this
     if "LOGNAME" in os.environ.keys() and os.environ["LOGNAME"] == 'jrchan':
         print("Debug Mode!!!", flush=True)
-        cfg["comment"] = "Dont't forget to change comment" * 100
+        cfg["comment"] = "Dont't forget to change comment" * 50
         cfg["world_size"] = 2
         cfg["train_report_freq"] = 1
         cfg["valid_freq"] = 20

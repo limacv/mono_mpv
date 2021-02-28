@@ -328,6 +328,44 @@ class BasicUpdateBlock(nn.Module):
 # ================================================================================================================
 # Extractor from extractor.py
 # ================================================================================================================
+def spectral_norm(module, mode=True):
+    if mode:
+        return nn.utils.spectral_norm(module)
+    return module
+
+
+class ResidualMy(nn.Module):
+    def __init__(self, in_planes, planes):
+        super(ResidualMy, self).__init__()
+        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, padding=1)
+        self.residual = nn.Conv2d(in_planes, planes, kernel_size=1)
+
+    def forward(self, x):
+        return torch.relu(self.conv2(torch.relu(self.conv1(x)))) + self.residual(x)
+
+
+class ResnetBlock(nn.Module):
+    def __init__(self, dim, dilation=1, use_spectral_norm=False):
+        super(ResnetBlock, self).__init__()
+        self.conv_block = nn.Sequential(
+            nn.ReflectionPad2d(dilation),
+            spectral_norm(nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, padding=0, dilation=dilation, bias=not use_spectral_norm), use_spectral_norm),
+            nn.InstanceNorm2d(dim, track_running_stats=False),
+            nn.ReLU(True),
+
+            nn.ReflectionPad2d(1),
+            spectral_norm(nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=3, padding=0, dilation=1, bias=not use_spectral_norm), use_spectral_norm),
+            nn.InstanceNorm2d(dim, track_running_stats=False),
+        )
+
+    def forward(self, x):
+        out = x + self.conv_block(x)
+
+        # Remove ReLU at the end of the residual block
+        # http://torch.ch/blog/2016/02/04/resnets.html
+
+        return out
 
 
 class ResidualBlock(nn.Module):

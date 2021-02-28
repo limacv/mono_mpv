@@ -8,7 +8,7 @@ class DataAugmenter:
     __init__() -> generate() -> apply_*()
     """
 
-    def __init__(self, outshape, mode="crop", ratio_tol=1.1, resize_tol=0.7):
+    def __init__(self, outshape, mode="crop", ratio_tol=1.1, resize_tol=1):
         """
         outshape: (height, weight)
         mode="crop", "resize"
@@ -18,7 +18,7 @@ class DataAugmenter:
         self.mode = mode.lower()
         self.outhei, self.outwid = outshape
         self.ratio_tol = ratio_tol if ratio_tol > 1 else 1. / ratio_tol  # ratio = wid / hei
-        self.resize_tol = resize_tol if resize_tol > 1 else 1. / resize_tol  # max resize factor after croping
+        self.resize_tol = resize_tol  # max resize factor after croping
 
         # maintain current status
         self.cur_inhei, self.cur_inwid = 0, 0

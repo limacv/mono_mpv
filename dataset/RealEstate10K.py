@@ -12,7 +12,7 @@ import cv2
 import os
 from glob import glob
 from . import RealEstate10K_root, is_DEBUG, RealEstate10K_skip_framenum
-from . import OutputSize, OutputSize_test, MaxPointNumberForce
+from . import OutputSize, OutputSize_test, MaxPointNumberForce, LBTC_OutputSize
 from .colmap_wrapper import *
 from .Augmenter import DataAugmenter
 from .youtubedl_wrapper import run_youtubedl
@@ -420,7 +420,7 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
         self.sequence_length = seq_len
         self.tar_margin = 2
         Outsz = OutputSize if is_train else OutputSize_test
-        self.augmenter = DataAugmenter(Outsz, mode=mode)
+        self.augmenter = DataAugmenter(Outsz, mode=mode, resize_tol=0.7)
         self.maxskip_framenum = max(2, max_skip)  # 1 means no skip
 
     def __len__(self):
@@ -579,3 +579,89 @@ class RealEstate10K_Seq(Dataset, RealEstate10K_Base):
                torch.tensor(refextrins), torch.tensor(tarextrin), \
                torch.tensor(intrin), torch.tensor(pointxys), torch.tensor(pointzs)
 
+
+class RealEstate10K_Multiframe(Dataset, RealEstate10K_Base):
+    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=-1, seq_len=4, max_skip=1):
+        """
+        subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
+        mode=  'none': do noting
+                'resize': resize to 512x512,
+                'pad': pad to multiple of 128, usually used in evaluation,
+                'crop': crop to 512x512 or multiple of 128
+        """
+        super().__init__(is_train=is_train,
+                         black_list=black_list,
+                         ptnum=ptnum)
+        self.name = f"RealEstate10K_Multiframe_{self.trainstr}"
+        self.sequence_length = seq_len
+        Outsz = LBTC_OutputSize
+        self.augmenter = DataAugmenter(Outsz, mode=mode, resize_tol=0.7)
+        self.maxskip_framenum = max(2, max_skip)  # 1 means no skip
+
+    def __len__(self):
+        return len(self.filebase_list)
+
+    def __getitem__(self, item):
+        # try 3 times
+        datas = None
+        for i in range(3):
+            try:
+                datas = self.getitem(item)
+            except Exception:
+                datas = None
+            if datas is not None:
+                return datas
+
+        # if still not working, randomly pick another idx untill success
+        while datas is None:
+            print("RealEstate10K::error after three trys, try another data")
+            item = np.random.randint(len(self))
+            datas = self.getitem(item)
+        return datas
+
+    def getitem(self, item):
+        return self.getitem_bybase(self.filebase_list[item])
+
+    def getitem_bybase(self, file_base):
+        # ================================================
+        # select index and read images
+        # ================================================
+        file_base = os.path.basename(file_base).split('.')[0]
+        video_trim_path = self.video_trim_path(file_base)
+        self._cur_file_base = file_base
+        self._curvideo_trim_path = video_trim_path
+
+        video = cv2.VideoCapture(video_trim_path)
+        if not video.isOpened():
+            print(f"RealEstate10K: cannot open video file {video_trim_path}")
+            return None
+        framenum = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        if framenum < self.sequence_length + 1:
+            return None
+
+        if self.trainstr == "train":
+            skipnum = np.random.randint(1, self.maxskip_framenum)
+            framenum_wid = (self.sequence_length - 1) * skipnum + 1
+            startid = np.random.randint(0, framenum - framenum_wid)
+            refidxs = np.arange(startid, startid + framenum_wid, skipnum)
+        else:
+            refidxs = np.arange(1, 1 + self.sequence_length)
+
+        if np.random.randint(2) == 0:
+            refidxs = refidxs[::-1]
+        refimgs = []
+        for idx in refidxs:
+            video.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret0, refimg = video.read()
+            if not (ret0 and len(refimg) > 0):
+                print(f"RealEstate10K: {file_base}.txt cannot read frame idx {idx}")
+                return None
+
+            refimg = refimg[:, :, ::-1]
+            refimgs.append(refimg)
+        video.release()
+        heiori, widori, _ = refimgs[0].shape
+        self.augmenter.random_generate((heiori, widori))
+        refimgs = [self.totensor(self.augmenter.apply_img(im)) for im in refimgs]
+        refimgs = torch.stack(refimgs, dim=0)
+        return (refimgs, )

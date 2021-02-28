@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 import cv2
 import os
 from glob import glob
-from . import StereoVideo_root, is_DEBUG, OutputSize, StereoVideo_test_pct, OutputSize_test
+from . import StereoVideo_root, is_DEBUG, OutputSize, StereoVideo_test_pct, OutputSize_test, LBTC_OutputSize
 from .colmap_wrapper import *
 from .cv2disparity import compute_disparity_uncertainty
 from .Augmenter import DataAugmenter, DataAdaptor
@@ -407,3 +407,109 @@ class StereoVideo_Eval(StereoVideo_Base):
 
         cap.release()
         return ret
+
+
+class StereoVideo_Multiframe(Dataset, StereoVideo_Base):
+    """
+    used for training LBTC
+    """
+    def __init__(self, is_train, mode='crop', seq_len=4, max_skip=3):
+        super().__init__(is_train=is_train, is_test=False)
+        self.name = f"StereoVideo_Multiframe_{self.trainstr}"
+
+        print(f"{self.name}: find {len(self.filebase_list)} video files in {self.trainstr} set")
+
+        Outsz = LBTC_OutputSize
+        self.augmenter = DataAugmenter(Outsz, mode=mode)
+        self.sequence_length = seq_len
+        self.maxskip_framenum = max(2, max_skip)  # 2 means no skip
+
+    def __len__(self):
+        return len(self.filebase_list)
+
+    def __getitem__(self, item):
+        # try 3 times
+        datas = None
+        for i in range(3):
+            try:
+                datas = self.getitem(item)
+            except Exception as e:
+                print(e)
+                datas = None
+            if datas is not None:
+                return datas
+
+        # if still not working, randomly pick another idx untill success
+        print(f"{self.name}: cannot load {self.filebase_list[item]} after 3 tries")
+        while datas is None:
+            print(f"{self.name}: try fetch another data", flush=True)
+            try:
+                item = np.random.randint(len(self))
+                datas = self.getitem(item)
+            except Exception as e:
+                print(e)
+                datas = None
+        return datas
+
+    def getitem(self, idx):
+        return self.getitem_bybase(self.filebase_list[idx])
+
+    def getitem_bybase(self, filebase):
+        self._cur_file_base = filebase
+        videofile = self.getfullvideopath(filebase)
+        cap = cv2.VideoCapture(videofile)
+        if not cap.isOpened():
+            print(f"{self.name}: cannot open video file {filebase}.mp4")
+            return None
+
+        framenum = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if framenum < self.sequence_length + 1:
+            return None
+
+        # random variables
+        if self.trainstr == "train":
+            max_skip = min(self.maxskip_framenum, 1 + (framenum - 1) // (self.sequence_length - 1))
+            skipnum = np.random.randint(1, max_skip)
+            framenum_wid = (self.sequence_length - 1) * skipnum + 1
+            startid = np.random.randint(0, framenum - framenum_wid + 1)
+            retleft = (np.random.randint(2) == 0)
+        else:
+            skipnum = 2 if framenum > 2 * self.sequence_length else 1
+            startid = 0
+            framenum_wid = (self.sequence_length - 1) * skipnum + 1
+            retleft = False
+        idxs = np.arange(startid, startid + framenum_wid, skipnum)
+        if np.random.randint(2) == 0:
+            idxs = idxs[::-1]
+        hei = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        wid = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) // 2
+        self.augmenter.random_generate((hei, wid))
+
+        imgls, imgrs, disps, uncertainty_maps = [], [], [], []
+
+        for idx in idxs:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, img = cap.read()
+            if not (ret and len(img) > 0):
+                print(f"{self.name}: cannot read frame {idx} in {filebase}, which is said to have {framenum} frames")
+                return None
+
+            # read and split the left and right view
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            hei, wid, _ = img.shape
+
+            wid //= 2
+            imgl, imgr = img[:, :wid], img[:, wid:]
+
+            imgl = self.augmenter.apply_img(imgl)
+            imgr = self.augmenter.apply_img(imgr)
+
+            imgls.append(self.totensor(imgl))
+            imgrs.append(self.totensor(imgr))
+        cap.release()
+
+        if retleft:
+            refimg = torch.stack(imgls, dim=0)
+        else:
+            refimg = torch.stack(imgrs, dim=0)
+        return (refimg, )

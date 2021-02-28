@@ -21,6 +21,7 @@ NvidiaNovelView_root = "/home/lmaag/xgpu-scratch/mali_data/NvidiaNovelViewSynthe
 # OutputSize = (512j, 512 + 128 * 2)  # (h, w)
 OutputSize = (448, 448)  # (h, w)
 OutputSize_test = (360, 640)
+LBTC_OutputSize = (192, 192)
 MaxPointNumberForce = 2000
 colmap_path = "/home/lmaag/xgpu-scratch/mali_data/Programs/colmap_exec/colmap"
 youtubedl_path = "youtube-dl"

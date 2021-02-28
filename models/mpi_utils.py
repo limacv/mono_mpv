@@ -483,22 +483,25 @@ class NetWriter:
         self.out.release()
 
 
-def dilate(alpha: torch.Tensor):
+def dilate(alpha: torch.Tensor, kernelsz=3, dilate=1):
     """
     alpha: B x L x H x W
     """
+    padding = (dilate * (kernelsz - 1) + 1) // 2
     batchsz, layernum, hei, wid = alpha.shape
-    alphaunfold = torch.nn.Unfold(3, padding=1, stride=1)(alpha.reshape(-1, 1, hei, wid))
+    alphaunfold = torch.nn.Unfold(kernelsz, dilation=dilate, padding=padding, stride=1)(alpha.reshape(-1, 1, hei, wid))
     alphaunfold = alphaunfold.max(dim=1)[0]
     return alphaunfold.reshape_as(alpha)
 
 
-def erode(alpha: torch.Tensor):
+def erode(alpha: torch.Tensor, kernelsz=3, dilate=1):
     """
     alpha: B x L x H x W
     """
-    batchsz, layernum, hei, wid = alpha.shape
-    alphaunfold = torch.nn.Unfold(3, padding=1, stride=1)(alpha.reshape(-1, 1, hei, wid))
+    padding = (dilate * (kernelsz - 1) + 1) // 2
+    alphapad = torchf.pad(alpha, [padding, padding, padding, padding], 'replicate')
+    batchsz, layernum, hei, wid = alphapad.shape
+    alphaunfold = torch.nn.Unfold(kernelsz, dilation=dilate, padding=0, stride=1)(alphapad.reshape(-1, 1, hei, wid))
     alphaunfold = alphaunfold.min(dim=1)[0]
     return alphaunfold.reshape_as(alpha)
 

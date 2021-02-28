@@ -7,11 +7,13 @@ import torch.backends.cudnn
 
 
 # Adjust configurations here ########################################################################################
-path = "./log/checkpoint/FinalNewBG_r0.pth"
+path = "./log/checkpoint/Ultimate_BG_r0.pth"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-14-07-38.mp4"
 video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+# video_path = "Z:\\dataset\\WebVideo\\cook\\_4fH_GX3rEM_2.mp4"
+# video_path = "Z:\\dataset\\WebVideo\\cook\\G6UxrF6UFPM_0.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-05-16-39-56.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\pg6_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\flickr2.mp4"
@@ -23,7 +25,7 @@ pipeline = smart_select_pipeline(path,
                                   force_pipelinename="fullv4",
                                   winsz=7)
 
-ret_cfg = ""
+ret_cfg = "dilate"
 
 save_infer_mpi = True
 save_disparity = True
@@ -32,7 +34,7 @@ save_net = True
 regular_video = False
 # \Adjust configuration here ########################################################################################
 
-out_prefix = "Z:\\tmp\\Visual"
+out_prefix = "Z:\\tmp\\VisualNeat"
 if not os.path.exists(out_prefix):
     out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
 if "StereoBlur" in video_path:
@@ -73,8 +75,8 @@ with torch.no_grad():
             img = img[:, :wid // 2]
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        # img = cv2.resize(img, (400, 720))
-        img = cv2.resize(img, None, None, 0.5, 0.5)
+        # img = cv2.resize(img, None, None, 0.5, 0.5)
+        img = cv2.resize(img, (640, 360))
         hei, wid, _ = img.shape
         img_tensor = ToTensor()(img).cuda().unsqueeze(0)
         mpi = pipeline.infer_forward(img_tensor, ret_cfg=ret_cfg)

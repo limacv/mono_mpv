@@ -7,11 +7,12 @@ import torch.backends.cudnn
 
 
 # Adjust configurations here ########################################################################################
-path = "./log/checkpointsave/ablation4_nomasu_r0_4.pth"
+path = "./log/checkpoint/Ultimate_BGSUBG3s_133267_r0.pth"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-06-15-23-27.mp4"
 video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+# video_path = "Z:\\dataset\\WebVideo\\cook\\_4fH_GX3rEM_2.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\pg6_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim_r.mp4"
@@ -31,7 +32,7 @@ save_net = False
 regular_video = False
 # \Adjust configuration here ########################################################################################
 
-out_prefix = "Z:\\tmp\\Visual"
+out_prefix = "Z:\\tmp\\VisualNeat"
 if not os.path.exists(out_prefix):
     out_prefix = "D:\\MSI_NB\\source\\data\\Visual"
 if "StereoBlur" in video_path:
@@ -75,7 +76,8 @@ with torch.no_grad():
             img = img[:, :wid // 2]
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = cv2.resize(img, None, None, 0.5, 0.5)
+        # img = cv2.resize(img, None, None, 0.5, 0.5)
+        img = cv2.resize(img, (640, 360), None)
         hei, wid, _ = img.shape
         img_tensor = ToTensor()(img).cuda()
 

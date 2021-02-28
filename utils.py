@@ -5,13 +5,13 @@ from models.mpv_network import *
 from models.mpi_flow_network import *
 from models.mpifuse_network import *
 from models.hourglass import *
+from models.LBTC_TransformNet import TransformNet
 
 from dataset.ConcatDataset import ConcatDatasetMy
 from dataset.MannequinChallenge import *
 from dataset.RealEstate10K import *
 from dataset.StereoBlur import *
 from dataset.StereoVideo import *
-from models.rdn import RDN
 from models.ModelWithLoss import *
 from dataset.NvidiaNovelView import *
 
@@ -108,6 +108,52 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": None,
             "AppearanceFlow": AFNet_AB_svdbg(netcnl=num_set * 3)
         })
+    elif "Ultimate" == name:
+        num_set = 2
+        return nn.ModuleDict({
+            "MPI": MPI_LDI_res(plane_num, num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet(netcnl=4)
+        })
+    elif "Ultimate2" == name:
+        num_set = 2
+        return nn.ModuleDict({
+            "MPI": MPI_LDIdiv(plane_num, num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet(netcnl=2)
+        })
+    elif "UltimateBig" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_LDIbig(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet(netcnl=2)
+        })
+    elif "UltInpaint" == name:
+        num_set = 2
+        return nn.ModuleDict({
+            "MPI": MPI_LDIdiv(plane_num, num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": InPaintNet(netcnl=2, residual_blocks=6)
+        })
+    elif "UltInpaint" == name:
+        num_set = 2
+        return nn.ModuleDict({
+            "MPI": MPI_LDIdiv(plane_num, num_set),
+            "SceneFlow": None,
+            "AppearanceFlow": InPaintNet(netcnl=2, residual_blocks=6)
+        })
+    elif "MPI+LBTC" == name:
+        return nn.ModuleDict({
+            "MPI": MPINetv2(plane_num),
+            "LBTC": TransformNet(plane_num - 1, conv_cnl_num=64)
+        })
+    elif "Ultimate+LBTC" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_LDI_res(plane_num, 2),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNet(netcnl=4),
+            "LBTC": TransformNet(plane_num - 1, conv_cnl_num=64)
+        })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
@@ -124,24 +170,26 @@ def select_modelloss(name: str):
         return PipelineV2
     elif "fullsvv2" == name:
         return PipelineV2SV
-    elif "fullv3" == name:
-        return PipelineV3
     elif "fullv4" == name:
         return PipelineFiltering
     elif "fulljoint" == name:
         return PipelineJoint
+    elif "lbtc" == name:
+        return PipelineLBTC
     else:
         raise ValueError(f"unrecognized modelloss name: {name}")
 
 
 def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
     name = name.lower()
-    if istrain:
-        mode = "crop"
-        seq_len = 5
+    if "seq_len" not in cfg.keys():
+        seq_len = 5 if istrain else 10
+        seq_len = 11 if "multiframe" in name else seq_len
     else:
-        mode = "resize"
-        seq_len = 10
+        seq_len = cfg["seq_len"]
+
+    mode = "crop" if istrain else "resize"
+
     if "realestate10k_seq" in name:
         return RealEstate10K_Seq(istrain, seq_len=seq_len, mode=mode)
     elif "realestate10k_img" in name:
@@ -182,6 +230,20 @@ def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
         ], frequency=[1, 0.025, 1])
         dataset.name = "manne+realestate+stereovideo_seq"
         return dataset
+    elif "m+r+s_multiframe" == name:
+        dataset = ConcatDatasetMy([
+            MannequinChallenge_Multiframe(istrain, seq_len=seq_len, mode=mode),
+            RealEstate10K_Multiframe(istrain, seq_len=seq_len, mode=mode),
+            StereoVideo_Multiframe(istrain, seq_len=seq_len, mode=mode)
+        ], frequency=[1, 0.025, 1])
+        dataset.name = "manne+realestate+stereovideo_multiframe"
+        return dataset
+    elif "r_multiframe" in name:
+        return RealEstate10K_Multiframe(istrain, seq_len=seq_len, mode=mode)
+    elif "s_multiframe" in name:
+        return StereoVideo_Multiframe(istrain, seq_len=seq_len, mode=mode)
+    elif "m_multiframe" in name:
+        return MannequinChallenge_Multiframe(istrain, seq_len=seq_len, mode=mode)
     else:
         raise NotImplementedError(f"dataset name {name} not recognized")
 
@@ -210,10 +272,14 @@ def smart_load_checkpoint(root, cfg, model: nn.Module):
     # initializing weights
     initial_weights(model)
     newstate_dict = model.state_dict()
+    original_len = len(newstate_dict)
     begin_epoch = 0
+    check_point_cache, path_cache = "I can never be repeated", "me, too!"
     for prefix, path in cfgcheckpoint.items():
         try:
-            check_point = torch.load(os.path.join(root, path), map_location=device)
+            check_point = torch.load(os.path.join(root, path), map_location=device) \
+                if path != path_cache else check_point_cache
+            check_point_cache, path_cache = check_point, path
         except FileNotFoundError:
             print(f"cannot open check point file {path}, initial the model")
             return begin_epoch
@@ -225,6 +291,11 @@ def smart_load_checkpoint(root, cfg, model: nn.Module):
             )
         else:
             newstate_dict.update(temp_state_dict)
+
+        # check robustness
+        if len(newstate_dict) != original_len:
+            raise RuntimeError("Smart Load Checkpoint::different length after updating newstate_dict")
+
         if prefix == "" and "epoch" in check_point.keys():
             begin_epoch = check_point["epoch"]
         if "cfg" in check_point.keys():

@@ -69,22 +69,26 @@ cfg = {
 
 
 # TODO
+#   * In ModelWithLoss:
+#       add temporal filtering for full size alpha / depth map
+#       add blind temporal consistency for full size alpha / depth map
+#       implement the blind temporal consistency train in my own data
 #   * Implement:
-#       temporal consistency - blind temporal consistency
 #       temporal consistency - learning blind temporal consistency
 #       temporal consistency - blind + dvp
 #       temporal consistency - naive filtering in original resolution
-#       novel view synthesis - 3D Ken-Burn ?
-#       novel view synthesis - Synsin ?
+#       novel view synthesis - LDI [+temp]
 #       novel view synthesis - MPI [+temp]
 #       depth from video - WSVD - ok
 #       depth from video - MiDaVS - ok
 #       depth from video - MannequinChanllenge (single-frame methods) - ok
-#       depth from video - DeMoN
+#   * When have free time:
+#       temporal consistency - blind temporal consistency
 #       depth from video - MannequinChanllenge (two-frame methods)
+#       novel view synthesis - 3D Ken-Burn
+#       novel view synthesis - Synsin
 #   * Evaluator:
-#   *   For other dataset
-#   * Implement other video depth & novel view synthesis methods
+#       run in realtime
 
 
 def main(cfg):

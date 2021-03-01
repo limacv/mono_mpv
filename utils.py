@@ -128,12 +128,17 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": None,
             "AppearanceFlow": AFNet(netcnl=2)
         })
-    elif "UltInpaint" == name:
-        num_set = 2
+    elif "UltBigNoMask" == name:
         return nn.ModuleDict({
-            "MPI": MPI_LDIdiv(plane_num, num_set),
+            "MPI": MPI_LDIbig(plane_num),
             "SceneFlow": None,
-            "AppearanceFlow": InPaintNet(netcnl=2, residual_blocks=6)
+            "AppearanceFlow": AFNet(netcnl=4, hasmask=False)
+        })
+    elif "UltBigInpaint" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_LDIbig(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": InPaintNet(netcnl=4, residual_blocks=7, hasmask=False)
         })
     elif "UltInpaint" == name:
         num_set = 2
@@ -145,7 +150,7 @@ def select_module(name: str) -> nn.Module:
     elif "MPI+LBTC" == name:
         return nn.ModuleDict({
             "MPI": MPINetv2(plane_num),
-            "LBTC": TransformNet(plane_num - 1, conv_cnl_num=64)
+            "LBTC": TransformNet(plane_num - 1, conv_cnl_num=96)
         })
     elif "Ultimate+LBTC" == name:
         return nn.ModuleDict({

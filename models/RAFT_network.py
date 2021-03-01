@@ -41,8 +41,8 @@ class RAFTNet(nn.Module):
     def initialize_flow(shapeformat, init_flow=None):
         """ Flow is represented as difference between two coordinate grids flow = coords1 - coords0"""
         N, C, H, W = shapeformat.shape
-        coords0 = coords_grid(N, H, W).to(shapeformat.device)
-        coords1 = coords_grid(N, H, W).to(shapeformat.device)
+        coords0 = coords_grid(N, H, W).type_as(shapeformat)
+        coords1 = coords_grid(N, H, W).type_as(shapeformat)
         if init_flow is not None:
             batchsz, cnl, hei, wid = init_flow.shape
             coords1[:, :, :hei, :wid] += init_flow

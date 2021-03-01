@@ -1,7 +1,7 @@
 from utils import *
 import random
 
-seed = 888  # np.random.randint(0, 10000)
+seed = np.random.randint(0, 10000)
 print(f"random seed = {seed}")
 torch.manual_seed(seed)
 torch.backends.cudnn.deterministic = True
@@ -71,14 +71,14 @@ def main(kwargs):
 main({
     "modelname": "UltimateBig",  # MPINetv2, Fullv6, Fullv5.Fullv5resnet
     "pipelinename": "fulljoint",  # sv, disp_img, fullv2, fullsvv2, fulljoint, svjoint
-    "datasetname": "stereovideo_seq",
+    "datasetname": "mannequinchallenge_seq",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
     "istrain": True,
     "check_point": {
         # "MPI.": "mpinet_ori.pth",  # don't miss the MPI
         # "AppearanceFlow": "Ultimate_LR_r0.pth",
-        "": "Ultimate_BGSUBG3s_133267_r0.pth"
+        "": "UltimateP012big_r0.pth"
     },
 
     "device_ids": [0],
@@ -108,8 +108,12 @@ main({
                      # "aflow_fusefgpct": False,
                      "bg_supervision": 0.1,
                      # "net_smth_loss": 1,
-                     "new3_net_smth_loss": 1,
-                     "tempnewview_mode": "biflow",
+                     "net_smth_loss": 1,
+                     "net_prior0": 1,
+                     "net_prior1": 1,
+                     "net_prior2": 1,
+                     "blending_visible": True,
+                     "tempnewview_mode": "imwarp",
                      "aflow_contextaware": True,
                      "tempnewview_loss": 1,
                      # "net_std": 0.2,
@@ -127,13 +131,12 @@ main({
 main({
     "modelname": "MPI+LBTC",  # MPINetv2, Fullv6, Fullv5.Fullv5resnet
     "pipelinename": "lbtc",  # sv, disp_img, fullv2, fullsvv2, fulljoint, svjoint
-    "datasetname": "m_multiframe",
+    "datasetname": "s_multiframe",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
     "istrain": True,
     "check_point": {
-        "MPI.": "mpinet_ori.pth",  # don't miss the MPI
-        # "AppearanceFlow": "Ultimate_LR_r0.pth",
+        "MPI.": "mpinet_ori.pth",  # don't miss the .
     },
 
     "device_ids": [0],

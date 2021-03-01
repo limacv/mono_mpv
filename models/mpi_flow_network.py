@@ -80,12 +80,14 @@ class AFNet(nn.Module):
     Multi plane flow input, output single plane appearance flow
     in: B x 3 (dx, dy, alpha) x H x W
     """
-    def __init__(self, netcnl=6):
+    def __init__(self, netcnl=6, hasmask=True):
         super().__init__()
+        perframecnl = 4 if hasmask else 3
+        self.hasmask = hasmask
         self.netcnl = netcnl
         self.down = nn.MaxPool2d(2, ceil_mode=True)
         self.up = up
-        self.down1 = conv(netcnl + 3 + (3 + 1) * 2, 64, 7)
+        self.down1 = conv(netcnl + 3 + perframecnl * 2, 64, 7)
         self.down1b = conv(64, 64, 5)
         self.down2 = conv(64, 64, 5)
         self.down2b = conv(64, 64, 5)
@@ -199,12 +201,14 @@ class AFNet_AB_svdbg(nn.Module):
 
 
 class InPaintNet(nn.Module):
-    def __init__(self, netcnl, residual_blocks=8):
+    def __init__(self, netcnl, residual_blocks=8, hasmask=False):
         super(InPaintNet, self).__init__()
+        perframecnl = 4 if hasmask else 3
+        self.hasmask = hasmask
         self.netcnl = netcnl
         self.encoder = nn.Sequential(
             nn.ReflectionPad2d(3),
-            nn.Conv2d(in_channels=netcnl + 3 + 3 * 2, out_channels=64, kernel_size=7, padding=0),
+            nn.Conv2d(in_channels=netcnl + 3 + perframecnl * 2, out_channels=64, kernel_size=7, padding=0),
             nn.InstanceNorm2d(64, track_running_stats=False),
             nn.ReLU(True),
 

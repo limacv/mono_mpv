@@ -37,9 +37,9 @@ cfg = {
     "batch_size": 1,
     "num_epoch": 500,
     "savepth_iter_freq": 400,
-    "lr": 1e-4,
-    "lr_milestones": [10e3, 50e3, 100e3, 150e3],
-    "lr_values": [2, 1, 0.5, 0.1],
+    "lr": 2e-4,
+    "lr_milestones": [12e3, 24e3, 36e3],
+    "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
         "": "FinalLDI_r0.pth"
     },
@@ -69,12 +69,11 @@ cfg = {
 
 
 # TODO
-#   * In ModelWithLoss:
-#       add temporal filtering for full size alpha / depth map
-#       add blind temporal consistency for full size alpha / depth map
-#       implement the blind temporal consistency train in my own data
+#   * List:
+#       implement LDI (either train in Kitti or implement LDI and train in my dataset (former is easier))
+#       adjust my model until that problem is resolved
 #   * Implement:
-#       temporal consistency - learning blind temporal consistency
+#       temporal consistency - learning blind temporal consistency - running
 #       temporal consistency - blind + dvp
 #       temporal consistency - naive filtering in original resolution
 #       novel view synthesis - LDI [+temp]

@@ -595,7 +595,7 @@ class RealEstate10K_Multiframe(Dataset, RealEstate10K_Base):
         self.name = f"RealEstate10K_Multiframe_{self.trainstr}"
         self.sequence_length = seq_len
         Outsz = LBTC_OutputSize
-        self.augmenter = DataAugmenter(Outsz, mode=mode, resize_tol=0.7)
+        self.augmenter = DataAugmenter(Outsz, mode=mode, resize_tol=1.1)
         self.maxskip_framenum = max(2, max_skip)  # 1 means no skip
 
     def __len__(self):

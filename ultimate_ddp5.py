@@ -18,7 +18,7 @@ cfg = {
     "tensorboard_logdir": "run/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
-    "unique_id": "Ultimate_BGSUBG3",
+    "unique_id": "Ult_ctx",
 
     "write_validate_result": True,
     "validate_num": 64,
@@ -37,26 +37,25 @@ cfg = {
     "batch_size": 1,
     "num_epoch": 500,
     "savepth_iter_freq": 400,
-    "lr": 1e-4,
-    "lr_milestones": [10e3, 50e3, 100e3],
-    "lr_values": [2, 1, 0.5],
+    "lr": 2e-4,
+    "lr_milestones": [12e3, 24e3, 36e3],
+    "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        "": "Ultimate_BGSUBG3_r0.pth"
+        "": "Ult_ctx_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "new3_net_smth_loss": 0.5,
+        "net_smth_loss": 0.5,
         "depth_loss": 1,
         "flownet_dropout": 1,
 
         "bg_supervision": 0.5,
 
-        "scale_mode": "adaptive",
-        # "scale_scaling": 1,
-
-        "upmask_magaware": True,
+        "net_prior0": 1,
+        "net_prior2": 1,
         "mask_warmup": 1,
+        "aflow_contextaware": True,
         # "bgflow_warmup": 1,
         # "bgflow_warmup_milestone": [2e3, 4e3],
         # "aflow_fusefgpct": False,
@@ -71,8 +70,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "Ultimate_BGSUBG3"
-    cfg["comment"] = "also, dilate the alpha, and change blend_weight"
+    cfg["id"] = "Ult_ctx"
+    cfg["comment"] = "different prior"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

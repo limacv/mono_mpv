@@ -591,7 +591,7 @@ class MannequinChallenge_Multiframe(Dataset, MannequinChallenge_Base):
         self.name = f"MannequinChallenge_Multiframe_{self.trainstr}"
         self.sequence_length = seq_len
         Outsz = LBTC_OutputSize
-        self.augmenter = DataAugmenter(Outsz, mode=mode, resize_tol=0.9)
+        self.augmenter = DataAugmenter(Outsz, mode=mode, resize_tol=1.1)
         self.maxskip_framenum = max(2, max_skip)  # 1 means no skip
 
     def __len__(self):

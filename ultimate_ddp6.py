@@ -18,11 +18,11 @@ cfg = {
     "tensorboard_logdir": "run/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
-    "unique_id": "Ultimate_LR",
+    "unique_id": "Ult_inp",
 
     "write_validate_result": True,
     "validate_num": 64,
-    "valid_freq": 2000,
+    "valid_freq": 1000,
     "train_report_freq": 20,
 
     # about training <<<<<<<<<<<<<<<<
@@ -32,7 +32,7 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Ultimate",
+    "model_name": "UltBigInpaint",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 500,
@@ -41,7 +41,7 @@ cfg = {
     "lr_milestones": [12e3, 24e3, 36e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        "": "Ultimate_LR_r0.pth"
+        "": "Ult_inp_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
@@ -52,12 +52,9 @@ cfg = {
 
         "bg_supervision": 0.5,
 
-        "scale_mode": "adaptive",
-        # "scale_scaling": 1,
-
-        "upmask_magaware": True,
+        "net_prior0": 1,
+        "net_prior2": 1,
         "mask_warmup": 1,
-        "mask_warmup_milestone": [1e18, 2e18],
         # "bgflow_warmup": 1,
         # "bgflow_warmup_milestone": [2e3, 4e3],
         # "aflow_fusefgpct": False,
@@ -72,8 +69,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "Ultimate_LR"
-    cfg["comment"] = "use the final stereo_video as test"
+    cfg["id"] = "Ult_inp"
+    cfg["comment"] = "different prior"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

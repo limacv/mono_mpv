@@ -68,7 +68,8 @@ def train(cfg: dict):
     lr_values = cfg.pop("lr_values", None)
     lr_scheduler = ParamScheduler(
         milestones=lr_milestones,
-        values=lr_values
+        values=lr_values,
+        mode='step'
     ) if lr_milestones is not None and lr_values is not None else None
     lr_cur = lr
 
@@ -114,13 +115,6 @@ def train(cfg: dict):
             loss = loss.mean()
             loss_dict = {k: v.mean() for k, v in loss_dict.items()}
 
-            # debug usage
-            if loss_dict["scale"] > 1000:
-                print(f"RANK_{local_rank}:: detect large scale, "
-                      f"current base: {trainset.name}: {trainset._cur_file_base}")
-            elif loss_dict["scale"] < 1/1000:
-                print(f"RANK_{local_rank}:: detect small scale, "
-                      f"current base: {trainset.name}: {trainset._cur_file_base}")
             # first evaluate and then backward so that first evaluate is always the same
             optimizer.zero_grad()
             loss.backward()

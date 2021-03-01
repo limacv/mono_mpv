@@ -37,9 +37,9 @@ cfg = {
     "batch_size": 1,
     "num_epoch": 500,
     "savepth_iter_freq": 441 * 2,
-    "lr": 1e-4,
-    "lr_milestones": [10e3, 50e3, 100e3, 150e3],
-    "lr_values": [2, 1, 0.5, 0.1],
+    "lr": 2e-4,
+    "lr_milestones": [12e3, 24e3, 36e3],
+    "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
         "": "ablation01_svtemp_r0.pth"
     },

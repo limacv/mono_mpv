@@ -17,8 +17,10 @@ const_use_sobel = True
 class ParamScheduler:
     def __init__(self, milestones, values, mode='linear'):
         """
-        milestone should be sorted
-        mode shoule be eighter one string or list of string that len > len(milestone-1)
+        when mode = 'liear' ==>
+            v0  -m0-  v0+v1  -m1-   v1+v2  -m2-   v2
+        when mode = 'step' ==>
+            1  -m0-  v0  -m1-  v1  -m2-  v2
         """
         assert len(milestones) == len(values), "scheduler::len(milestones) == len(values)"
         if isinstance(mode, List):
@@ -32,7 +34,7 @@ class ParamScheduler:
     def get_value(self, step):
         stage_idx = np.searchsorted(self.milestone, step)
         if stage_idx == 0:
-            return self.values[0]
+            return 1. if self.modes[0] == 'step' else self.values[0]
         elif stage_idx == len(self.milestone):
             return self.values[-1]
         else:
@@ -43,10 +45,7 @@ class ParamScheduler:
             if mode == 'linear':
                 return val0 + (val1 - val0) * pct
             elif mode == 'step':
-                return val0 if pct < 0.5 else val1
-            elif mode == 'expo':
-                # todo: implement this
-                return val0 + (val1 - val0) * pct
+                return val0
             else:
                 return val0 + (val1 - val0) * pct
 
@@ -255,9 +254,10 @@ def smooth_grad(disp: torch.Tensor, image: torch.Tensor, e_min=0.05, g_min=0.02,
     grad_im_max = torch.max(grad_im.reshape(batchsz, -1), dim=-1)[0].reshape(-1, 1, 1, 1)
     grad_disp = disp_dx.abs() + disp_dy.abs()
 
-    weights = torch.min(grad_im / (e_min * grad_im_max), torch.tensor(1.).type_as(disp))
     if not inverseedge:
-        weights = - weights + 1
+        weights = - torch.min(grad_im / (e_min * grad_im_max), torch.tensor(1.).type_as(disp)) + 1
+    else:
+        weights = torch.min(grad_im / (0.2 * grad_im_max), torch.tensor(1.).type_as(disp))
         
     smooth = torch.max(grad_disp - g_min, torch.tensor(0.).type_as(disp))
     return weights * smooth

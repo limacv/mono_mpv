@@ -246,6 +246,9 @@ def evaluation_mpi_SB(mpis, datas, flow_estim, cfg):
         EVAL_DICT_PERSCENE.collect("temp_disp_o2", float(diff2), count=float(occ02.sum() / denorm))
     refimgs.clear()
 
+    # ===========================================
+    # Novel view temporal consistency
+    # ===========================================
     # Consistency for novel views
     newviews_gt = [img.unsqueeze(0).cuda() for img in datas["gt_imgs"]]
     newviews_save_cuda = [i_.cuda() for i_ in newviews_save]

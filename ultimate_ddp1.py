@@ -15,10 +15,10 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run/",
+    "tensorboard_logdir": "run1/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
-    "unique_id": "UltP02_nbw",
+    "unique_id": "Ultly_ctx",
 
     "write_validate_result": True,
     "validate_num": 64,
@@ -32,7 +32,7 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "UltimateBig",
+    "model_name": "Ultimately",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 500,
@@ -41,7 +41,8 @@ cfg = {
     "lr_milestones": [12e3, 24e3, 36e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        "": "UltP02_nbw_r0.pth"
+        # "MPI": "Ult_bootstrap.pth",
+        "": "Ultly_ctx_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
@@ -50,11 +51,13 @@ cfg = {
         "depth_loss": 1,
         "flownet_dropout": 1,
 
-        "bg_supervision": 0.5,
+        "bg_supervision": 5,
 
         "net_prior0": 1,
         "net_prior2": 1,
         "mask_warmup": 1,
+        "aflow_contextaware": True,
+        "aflow_selfsu": True,
         # "bgflow_warmup": 1,
         # "bgflow_warmup_milestone": [2e3, 4e3],
         # "aflow_fusefgpct": False,
@@ -69,7 +72,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "UltP02_nbw"
+    cfg["id"] = "Ultly_ctx"
     cfg["comment"] = "different prior"
 
     parser = argparse.ArgumentParser()

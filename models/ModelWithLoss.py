@@ -656,6 +656,7 @@ class PipelineV2(nn.Module):
         self.upmask_magaware = self.loss_weight.pop("upmask_magaware", True)
         self.upmask_lr = self.loss_weight.pop("upmask_lr", True)
         self.aflow_contextaware = self.loss_weight.pop("aflow_contextaware", False)
+        self.aflow_selfsu = self.loss_weight.pop("aflow_selfsu", False)
 
         # optical flow estimator
         if not hasattr(self, "flow_estim"):
@@ -1255,8 +1256,7 @@ class PipelineV2(nn.Module):
         # =========================
         # new pipeline
         # =========================
-        if isinstance(self.afmodel, (AFNet, InPaintNet)):
-            assert len(flows_list) == 2
+        if isinstance(self.afmodel, (AFNet, InPaintNet, AFNetBig)):
             bglist, malist = [], []
             for img, flow, flowb, flowupma, flowbupma in \
                     zip(imgs_list, flows_list, flowsb_list, flow_upmasks_list, flowb_upmasks_list):
@@ -1283,17 +1283,41 @@ class PipelineV2(nn.Module):
                     fg = net[:, 0:1].detach()
                     fge = erode(erode(fg))
                     diff = learned_upsample(fg - fge, upmask.detach())
-                    context = dilate(diff, dilate=2) < 3. / 32.
+                    context = dilate(diff, dilate=2) < 4. / 32.
                     for ma in malist:
                         context *= (ma < 0.1)
                     imgin = curim * context
             else:
                 imgin = curim
 
-            if self.afmodel.hasmask:
+            if isinstance(self.afmodel, AFNetBig):
+                frame = curim.clone()
+                accmask = malist[0] > 0.1
+                mask = accmask.expand(-1, 3, -1, -1)
+                frame[mask] = bglist[0][mask]
+                for bgctx, mactx in zip(bglist[1:], malist[1:]):
+                    newma = torch.logical_and(torch.logical_not(accmask), mactx > 0.1)
+                    mask = newma.expand(-1, 3, -1, -1)
+                    frame[mask] = bgctx[mask]
+                    accmask = torch.logical_or(accmask, newma)
+                frames_list = [torch.cat([frame, accmask.type_as(frame)], dim=1)]
+            elif self.afmodel.hasmask:
                 frames_list = [torch.cat([bg, ma], dim=1) for bg, ma in zip(bglist, malist)]
             else:
                 frames_list = [bg * (ma > 0.1) for bg, ma in zip(bglist, malist)]
+
+            if self.training and self.aflow_selfsu:  # should ensure that context aware is True and is AFNetBig
+                hei, wid = ma.shape[-2:]
+                rand_hei = np.random.randint(hei // 10, hei // 5)
+                rand_wid = np.random.randint(wid // 10, wid // 5)
+                rand_top = np.random.randint(hei // 10, hei - hei // 10)
+                rand_left = np.random.randint(wid // 10, wid - wid // 10)
+
+                ma_gen = torch.zeros_like(context)
+                ma_gen[..., rand_top: rand_top + rand_hei, rand_left: rand_left + rand_wid] = True
+                ma_gen = torch.logical_and(ma_gen, context)
+                frame_supervision = curim
+                imgin[ma_gen.expand(-1, 3, -1, -1)] = 0
 
             net_in = net_up[:, :2] if self.afmodel.netcnl == 2 else net_up
             net_in = net_in.detach()
@@ -1303,8 +1327,10 @@ class PipelineV2(nn.Module):
             bg = self.afmodel(inp)
 
             if intermediate is not None and "bg_supervise" in intermediate.keys():
-                intermediate["bg_supervise"].append([bg, malist[0], bglist[0]])
-                intermediate["bg_supervise"].append([bg, malist[1], bglist[1]])
+                intermediate["bg_supervise"].append([bg, erode(malist[0]), bglist[0]])
+                intermediate["bg_supervise"].append([bg, erode(malist[1]), bglist[1]])
+                if self.aflow_selfsu:
+                    intermediate["bg_supervise"].append([bg, ma_gen, frame_supervision])
             return bg
 
         # =========================
@@ -1477,9 +1503,10 @@ class PipelineV2(nn.Module):
 
                     fg_up_loss = smooth_grad(fg_up, guidence_up)
                     fg_down_loss = smooth_grad(fg_down, guidence_down)
-                    # bg_down_loss = smooth_grad(bg_down, guidence_down, inverseedge=True)
+                    bg_down_loss = smooth_grad(bg_down, guidence_down, inverseedge=True)
                     net_smth_loss = fg_up_loss.mean() + \
-                                    fg_down_loss.mean()  # + bg_down_loss.mean() * 0.1
+                                    fg_down_loss.mean() + \
+                                    bg_down_loss.mean()
                 else:
                     raise RuntimeError(f"net_smth_loss::{type(self.mpimodel)} not recognized")
 
@@ -1489,10 +1516,9 @@ class PipelineV2(nn.Module):
                 else:
                     loss_dict["netsmth"] += net_smth_loss.detach()
 
-            with torch.no_grad():
-                fg_down, bg_down = net_out[mpiframeidx][:, :2].split(1, dim=1)
-                alpha_down, _ = self.net2alpha(net_out[mpiframeidx].detach(), None)
-                disp_down = estimate_disparity_torch(alpha_down.unsqueeze(2), depth).unsqueeze(1)
+            fg_down, bg_down = net_out[mpiframeidx][:, :2].split(1, dim=1)
+            alpha_down, _ = self.net2alpha(net_out[mpiframeidx].detach(), None)
+            disp_down = estimate_disparity_torch(alpha_down.unsqueeze(2), depth).unsqueeze(1)
 
             if "net_prior0" in self.loss_weight.keys():
                 prior = torch.relu(bg_down - fg_down.detach()).mean()

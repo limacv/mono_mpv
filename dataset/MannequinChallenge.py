@@ -401,7 +401,7 @@ class MannequinChallenge_Img(Dataset, MannequinChallenge_Base):
 
 
 class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
-    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=-1, seq_len=4, max_skip=1):
+    def __init__(self, is_train=True, black_list=True, mode='crop', ptnum=-1, seq_len=4, max_skip=2):
         """
         subset_byfile: if yes, then the dataset is get from the xxx_valid.txt file
         mpimodel=  'none': do noting
@@ -414,7 +414,7 @@ class MannequinChallenge_Seq(Dataset, MannequinChallenge_Base):
                          ptnum=ptnum)
         self.name = f"MannequinChallenge_Video_{self.trainstr}"
         self.sequence_length = seq_len
-        self.tar_margin = 0
+        self.tar_margin = -1
         Outsz = OutputSize if is_train else OutputSize_test
         self.augmenter = DataAugmenter(Outsz, mode=mode, resize_tol=0.9)
         self.maxskip_framenum = max(2, max_skip)  # 1 means no skip

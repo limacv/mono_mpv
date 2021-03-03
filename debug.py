@@ -1,7 +1,7 @@
 from utils import *
 import random
 
-seed = np.random.randint(0, 10000)
+seed = 6183  #np.random.randint(0, 10000)
 print(f"random seed = {seed}")
 torch.manual_seed(seed)
 torch.backends.cudnn.deterministic = True
@@ -69,16 +69,16 @@ def main(kwargs):
 
 
 main({
-    "modelname": "UltimateBig",  # MPINetv2, Fullv6, Fullv5.Fullv5resnet
+    "modelname": "Ultimately",  # MPINetv2, Fullv6, Fullv5.Fullv5resnet
     "pipelinename": "fulljoint",  # sv, disp_img, fullv2, fullsvv2, fulljoint, svjoint
-    "datasetname": "mannequinchallenge_seq",
+    "datasetname": "stereovideo_seq",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
     "istrain": True,
     "check_point": {
         # "MPI.": "mpinet_ori.pth",  # don't miss the MPI
         # "AppearanceFlow": "Ultimate_LR_r0.pth",
-        "": "UltimateP012big_r0.pth"
+        "MPI": "Ultimately_r0.pth"
     },
 
     "device_ids": [0],
@@ -115,6 +115,7 @@ main({
                      "blending_visible": True,
                      "tempnewview_mode": "imwarp",
                      "aflow_contextaware": True,
+                     "aflow_selfsu": True,
                      "tempnewview_loss": 1,
                      # "net_std": 0.2,
                      "upmask_lr": True,

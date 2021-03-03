@@ -17,7 +17,7 @@ if __name__ == "__main__":
         "scale_in_log": False,
 
         # ======== model and inference related =========
-        "checkpoint": "./log/checkpointsave/ablation4_nomasu_r0_4.pth",
+        "checkpoint": "./log/checkpoint/UltP02_nbw_r0.pth",
         "pipeline": "fullv4",
         "infer_cfg": "",
 

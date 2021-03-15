@@ -4,11 +4,12 @@ import evaluator
 if __name__ == "__main__":
     cfg = {
         # ======== dataset related =========
-        "num_process": 3,
-        "dataset": "StereoVideo",  # StereoVideo, NvidiaNovelView
+        "num_process": 2,
+        "dataset": "NvidiaNovelView",  # StereoVideo, NvidiaNovelView
         "datasetcfg": {
             "resolution": (448, 768),  # (540, 960)
             "max_baseline": 4,
+            "proj_to_view1": False,
 
             "seq_len": 20,
             "maxskip": 2
@@ -17,9 +18,10 @@ if __name__ == "__main__":
         "scale_in_log": False,
 
         # ======== model and inference related =========
-        "checkpoint": "./log/checkpointsave/ablation01_svtemp_r0_4.pth",
-        "model": "MPINetv2",
-        "pipeline": "disp_img",
+        "checkpoint": "./log/checkpointsave/Ultly2ok_r0_4.pth",
+        "pipeline": "fullv4",
+        "pipelinecfg": {"winsz": 7, "forwardaf_idx": [0, 2, -1]},
+        "infer_cfg": "",
 
         # ======= computing error related ===========
         "eval_crop_margin": 0.1,

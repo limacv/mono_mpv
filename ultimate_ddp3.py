@@ -15,10 +15,10 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run1/",
+    "tensorboard_logdir": "run/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
-    "unique_id": "Ultly_base",
+    "unique_id": "Ultly2ok",
 
     "write_validate_result": True,
     "validate_num": 64,
@@ -35,14 +35,14 @@ cfg = {
     "model_name": "Ultimately",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
-    "num_epoch": 500,
+    "num_epoch": 120,
     "savepth_iter_freq": 400,
     "lr": 2e-4,
     "lr_milestones": [12e3, 24e3, 36e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        # "MPI": "Ult_bootstrap.pth"
-        "": "Ultly_base_r0.pth"
+        # "MPI": "Ult_bootstrap.pth",
+        "": "Ultly2ok_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
@@ -51,16 +51,13 @@ cfg = {
         "depth_loss": 1,
         "flownet_dropout": 1,
 
-        "bg_supervision": 5,
+        "bg_supervision": 1,
 
-        "net_prior0": 1,
-        "net_prior2": 1,
+        "net_prior0": 0.2,
+        "net_prior1": 0.2,
+        "net_prior2": 0.2,
         "mask_warmup": 1,
-        # "bgflow_warmup": 1,
-        # "bgflow_warmup_milestone": [2e3, 4e3],
-        # "aflow_fusefgpct": False,
 
-        # "tempnewview_mode": "biflow",
         # "tempnewview_loss": 0,
     },
 }
@@ -70,7 +67,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "Ultly_base"
+    cfg["id"] = "Ultly2ok"
     cfg["comment"] = "different prior"
 
     parser = argparse.ArgumentParser()

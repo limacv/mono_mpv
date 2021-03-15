@@ -15,14 +15,14 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run1/",
+    "tensorboard_logdir": "run/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
-    "unique_id": "ablation5_svdbg",
+    "unique_id": "AB6_ndropout",
 
     "write_validate_result": True,
     "validate_num": 64,
-    "valid_freq": 2000,
+    "valid_freq": 1000,
     "train_report_freq": 20,
 
     # about training <<<<<<<<<<<<<<<<
@@ -32,35 +32,32 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "AB_svdbg",
+    "model_name": "Ultimately",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
-    "num_epoch": 500,
-    "savepth_iter_freq": 441 * 2,
+    "num_epoch": 120,
+    "savepth_iter_freq": 400,
     "lr": 2e-4,
     "lr_milestones": [12e3, 24e3, 36e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        "": "ablation5_svdbg_r0.pth"
+        # "MPI": "Ult_bootstrap.pth",
+        "": "AB6_ndropout_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "net_smth_loss": 0.5,
         "depth_loss": 1,
-        "flownet_dropout": 1,
+        "flownet_dropout": 0,
 
-        "scale_mode": "adaptive",
-        # "scale_scaling": 1,
+        "bg_supervision": 1,
 
-        "upmask_magaware": True,
+        "net_prior0": 0.2,
+        "net_prior1": 0.2,
+        "net_prior2": 0.2,
         "mask_warmup": 1,
-        "mask_warmup_milestone": [1e18, 2e18],
-        # "bgflow_warmup": 1,
-        # "bgflow_warmup_milestone": [2e3, 4e3],
-        "aflow_fusefgpct": False,
 
-        # "tempnewview_mode": "biflow",
         # "tempnewview_loss": 0,
     },
 }
@@ -70,7 +67,7 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "AB5_svdbg"
+    cfg["id"] = "AB6_ndropout"
     cfg["comment"] = "use the final stereo_video as test"
 
     parser = argparse.ArgumentParser()
@@ -97,7 +94,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = np.random.randint(0, 10000)
+    seed = 6557  # np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

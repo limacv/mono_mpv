@@ -5,10 +5,11 @@ if __name__ == "__main__":
     cfg = {
         # ======== dataset related =========
         "num_process": 3,
-        "dataset": "StereoVideo",  # StereoVideo, NvidiaNovelView
+        "dataset": "NvidiaNovelView",  # StereoVideo, NvidiaNovelView
         "datasetcfg": {
             "resolution": (448, 768),  # (540, 960)
             "max_baseline": 4,
+            "proj_to_view1": False,
 
             "seq_len": 20,
             "maxskip": 2

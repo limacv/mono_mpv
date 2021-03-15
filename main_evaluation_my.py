@@ -10,14 +10,14 @@ if __name__ == "__main__":
             "resolution": (448, 768),  # (540, 960)
             "max_baseline": 4,
 
-            "seq_len": 15,
-            "maxskip": 0
+            "seq_len": 20,
+            "maxskip": 2
         },
         "const_scale": True,
         "scale_in_log": False,
 
         # ======== model and inference related =========
-        "checkpoint": "./log/checkpoint/UltP02_nbw_r0.pth",
+        "checkpoint": "./log/checkpointsave/Ultly2ok_r0_6.pth",
         "pipeline": "fullv4",
         "infer_cfg": "",
 

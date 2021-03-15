@@ -4,7 +4,7 @@ import evaluator
 if __name__ == "__main__":
     cfg = {
         # ======== dataset related =========
-        "num_process": 3,
+        "num_process": 2,
         "dataset": "StereoVideo",  # StereoVideo, NvidiaNovelView
         "datasetcfg": {
             "resolution": (448, 768),  # (540, 960)
@@ -17,9 +17,9 @@ if __name__ == "__main__":
         "scale_in_log": False,
 
         # ======== model and inference related =========
-        "checkpoint": "./log/checkpointsave/ablation01_svtemp_r0_4.pth",
+        "checkpoint": "./log/checkpointsave/ablation00_svbase_r0_5.pth",
         "model": "MPINetv2",
-        "pipeline": "disp_img",
+        "pipeline": "fullv3",
 
         # ======= computing error related ===========
         "eval_crop_margin": 0.1,

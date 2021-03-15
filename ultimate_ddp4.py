@@ -15,14 +15,14 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run/",
+    "tensorboard_logdir": "run1/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
-    "unique_id": "Ultimate_LR",
+    "unique_id": "Ultly_newbase",
 
     "write_validate_result": True,
     "validate_num": 64,
-    "valid_freq": 2000,
+    "valid_freq": 1000,
     "train_report_freq": 20,
 
     # about training <<<<<<<<<<<<<<<<
@@ -32,16 +32,17 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Ultimate",
+    "model_name": "Ultimately",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
-    "num_epoch": 500,
+    "num_epoch": 120,
     "savepth_iter_freq": 400,
     "lr": 2e-4,
     "lr_milestones": [12e3, 24e3, 36e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        "": "Ultimate_LR_r0.pth"
+        # "MPI": "Ult_bootstrap.pth",
+        "": "Ultly_newbase_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
@@ -50,19 +51,13 @@ cfg = {
         "depth_loss": 1,
         "flownet_dropout": 1,
 
-        "bg_supervision": 0.5,
+        "bg_supervision": 1,
 
-        "scale_mode": "adaptive",
-        # "scale_scaling": 1,
-
-        "upmask_magaware": True,
+        "net_prior0": 1,
+        "net_prior1": 1,
+        "net_prior2": 1,
         "mask_warmup": 1,
-        "mask_warmup_milestone": [1e18, 2e18],
-        # "bgflow_warmup": 1,
-        # "bgflow_warmup_milestone": [2e3, 4e3],
-        # "aflow_fusefgpct": False,
 
-        # "tempnewview_mode": "biflow",
         # "tempnewview_loss": 0,
     },
 }
@@ -72,8 +67,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "Ultimate_LR"
-    cfg["comment"] = "use the final stereo_video as test"
+    cfg["id"] = "Ultly_newbase"
+    cfg["comment"] = "different prior"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

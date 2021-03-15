@@ -7,17 +7,26 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.mpi_utils import *
 
 lastposx, lastposy = 0, 0
-currentdx, currentdy = 0, 0
+currentdx, currentdy, currentdz = 0, 0, 0
+focal = 1
+disp_min, disp_max = 1 / default_d_far, 1 / default_d_near
 load_partial_raw = True
 
 
 def click_callback(event, x, y, flags, param):
-    global lastposx, lastposy, currentdx, currentdy
+    global lastposx, lastposy, currentdx, currentdy, currentdz, focal
     if event == cv2.EVENT_LBUTTONDOWN:
         lastposx, lastposy = x, y
     elif event == cv2.EVENT_MOUSEMOVE and flags == cv2.EVENT_FLAG_LBUTTON:
         currentdx = (x - lastposx) * 0.001
         currentdy = (y - lastposy) * 0.001
+    elif event == cv2.EVENT_MOUSEWHEEL:
+        if flags > 0:
+            focal += 0.04
+            currentdz += 0.04
+        else:
+            focal -= 0.04
+            currentdz -= 0.04
 
 
 def square2alpha(x, layer, planenum):
@@ -27,6 +36,17 @@ def square2alpha(x, layer, planenum):
     n = torch.max(n, torch.zeros(1).type_as(n))
     n = torch.min(n, denorm * scale * thick)
     return n[1:] - n[:-1]
+
+
+def nsets2alpha(x, ds, th, sig):
+    th = torch.min(ds - 1. / default_d_far, th)
+    t = x - ds + th
+    t = torch.relu(t)
+    t = torch.min(t, th)
+    dt = t[:, :, 1:] - t[:, :, :-1]
+
+    expo = -(dt * sig).sum(dim=1)
+    return -torch.exp(expo * 20) + 1
 
 
 class MPIS:
@@ -88,7 +108,10 @@ class MPNet(MPIS):
     def __init__(self):
         super().__init__()
         self.layernum = planenum
-        self.alphax = None
+        self.x = torch.reciprocal(make_depths(planenum)).reshape(1, 1, planenum, 1, 1).cuda()
+        self.dx = float(self.x[0, 0, 2, 0, 0] - self.x[0, 0, 1, 0, 0])
+        self.depthes = make_depths(self.layernum)[1:].cuda()
+        self.zeros = None
 
     def load(self, videoname):
         cap = cv2.VideoCapture(os.path.join(videopath, videoname))
@@ -97,7 +120,7 @@ class MPNet(MPIS):
 
         wid = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         hei = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.wid, self.hei = wid // 2, hei // 2
+        self.wid, self.hei = wid // 2, hei // 3
 
         print(f"Loading mpis of {self.wid}x{self.hei}")
         frameidx = 0
@@ -107,25 +130,38 @@ class MPNet(MPIS):
             if not ret:
                 break
             frameidx += 1
-            net = (torch.tensor(net).cuda().type(torch.float32) / 255).permute(2, 0, 1)
-            layer1, layer2, fg, bg = net[:, :self.hei, :self.wid], \
-                                     net[:, :self.hei, self.wid:], \
-                                     net[:, self.hei:, :self.wid], \
-                                     net[:, self.hei:, self.wid:]
-            net = torch.stack([layer1, layer2, fg, bg]).contiguous()
-            self.raw_list.append(net)
+            net = (torch.tensor(net).type(torch.float32) / 255).permute(2, 0, 1)
+            fg, bg, dfg, dbg, tfg, tbg = net[:, :self.hei, :self.wid], net[:, :self.hei, self.wid:], \
+                                         net[:, self.hei:2*self.hei, :self.wid], net[:, self.hei:2*self.hei, self.wid:], \
+                                         net[:, 2*self.hei:, :self.wid], net[:, 2*self.hei:, self.wid:],
+            disp = torch.cat([dfg[0:1], dbg[0:1]], dim=0).unsqueeze(0)
+            disp = disp * (disp_max - disp_min) + disp_min
+            thick = torch.cat([tfg[0:1] / 10, tbg[0:1]], dim=0).unsqueeze(0)
+            self.raw_list.append((disp.contiguous().cuda(), thick.contiguous().cuda(),
+                                  fg.unsqueeze(0).contiguous().cuda(), bg.unsqueeze(0).contiguous().cuda()))
         print("\nSuccess")
-        self.alphax = torch.linspace(0, 1, self.layernum).reshape(self.layernum, 1, 1).type_as(self.raw_list[0])
-        self.depthes = make_depths(self.layernum).cuda()
+        self.zeros = torch.zeros_like(tfg[0:1].unsqueeze(0)).cuda()
 
     def getmpi(self, i):
-        layer1, layer2, imfg, imbg = self.raw_list[i]
-        alpha1 = square2alpha(self.alphax, layer1, self.layernum)
-        alpha2 = square2alpha(self.alphax, layer2, self.layernum)
-        alpha = alpha1 + alpha2
-        alpha = torch.clamp(alpha, 0, 1)
-        alpha = torch.cat([torch.ones([1, self.hei, self.wid]).type_as(alpha), alpha], dim=0)
-        mpi = alpha2mpi(alpha.unsqueeze(0), imfg.unsqueeze(0), imbg.unsqueeze(0))
+        disp, thick, imfg, imbg = self.raw_list[i]
+
+        alpha = nsets2alpha(self.x,
+                            disp.unsqueeze(2),
+                            thick.unsqueeze(2),
+                            5)
+        alpha = dilate(erode(alpha))
+        # compute blend weight
+        fg, bg = disp.split(1, dim=1)
+
+        tfg = thick[:, 0:1]
+        # turning = (fg + bg) / 2.
+        # scaling = - torch.exp(-tfg * 100) + 1
+        turning = (dilate(dilate(fg)) + bg) / 2.
+        scaling = - torch.exp(-dilate(dilate(tfg)) * 100) + 1
+        blend_weight = torch.relu(torch.min(turning, self.x[:, 0, 1:]) - self.x[:, 0, :-1]) / self.dx
+        blend_weight = - blend_weight * scaling + 1
+
+        mpi = alpha2mpi(alpha, imfg, imbg, blend_weight=blend_weight)
         return mpi
 
 
@@ -139,7 +175,7 @@ parser.add_argument("--planenum", default=32, help="the number of planes")
 args = parser.parse_args()
 videoname = args.videoname
 planenum = args.planenum
-isnet = True if args.isnet.lower() == "net" or (args.isnet.lower() == "auto" and videoname.endswith("_net.mp4")) \
+isnet = True if args.isnet.lower() == "net" or (args.isnet.lower() == "auto" and '_net' in videoname) \
     else False
 
 if __name__ == "__main__":
@@ -160,6 +196,11 @@ if __name__ == "__main__":
          [0.0, repos.hei / 2, repos.hei / 2],
          [0.0, 0.0, 1.0]]
     ).type(torch.float32).cuda().unsqueeze(0)
+    tarintrin = torch.tensor(
+        [[repos.wid / 2, 0.0, repos.wid / 2],
+         [0.0, repos.hei / 2, repos.hei / 2],
+         [0.0, 0.0, 1.0]]
+    ).type(torch.float32).cuda().unsqueeze(0)
 
     mode = "mpi"
 
@@ -176,9 +217,11 @@ if __name__ == "__main__":
                 target_pose = torch.tensor(
                     [[cosx, -sinx*siny, -sinx * cosy, currentdx],
                      [0.0, cosy, -siny, currentdy],
-                     [sinx, cosx * siny, cosx * cosy, 0]]
+                     [sinx, cosx * siny, cosx * cosy, currentdz]]
                 ).type(torch.float32).cuda().unsqueeze(0)
-                view = render_newview(curmpi, source_pose, target_pose, intrin, intrin, repos.depthes)[0]
+                tarintrin[0, 0, 0] = repos.wid / 2 * focal
+                tarintrin[0, 1, 1] = repos.hei / 2 * focal
+                view = render_newview(curmpi, source_pose, target_pose, intrin, tarintrin, repos.depthes)[0]
 
             elif mode == "disp":
                 estimate_disparity_torch(curmpi.unsqueeze(0), repos.depthes)
@@ -190,4 +233,9 @@ if __name__ == "__main__":
                 exit(0)
             elif key == ord(' '):
                 update = not update
+            elif key == ord('p'):
+                print("target pose:")
+                print(target_pose)
+                print("focal length:")
+                print(focal)
 

@@ -41,15 +41,15 @@ cfg = {
     "lr_milestones": [10e3, 15e3, 20e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        "": "mpiori_LBTC_r0.pth",
-        # "MPI.": "mpinet_ori.pth",
+        # "": "mpiori_LBTC_r0.pth",
+        "MPI.": "mpinet_ori.pth",
     },
     "loss_weights": {
         "disp_consist": True,
         "alpha": 50,
         "short_term": 100,
         "long_term": 100,
-        "sv_loss": 1,
+        "sv_loss": 10,
         "svg_loss": 10,
     },
 }

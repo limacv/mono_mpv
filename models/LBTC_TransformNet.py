@@ -49,7 +49,7 @@ class TransformNet(nn.Module):
 
         # Non-linearities
         self.relu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
-        self.tanh = nn.Tanh()
+        self.tanh = nn.Sigmoid()
 
     def forward(self, X, prev_state):
 

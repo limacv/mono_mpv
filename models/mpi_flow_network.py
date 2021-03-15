@@ -151,6 +151,7 @@ class AFNetBig(nn.Module):
     def __init__(self, netcnl=4, hasmask=False, framenum=1):
         super().__init__()
         perframecnl = 4 if hasmask else 3
+        self.framenum = framenum
         self.hasmask = hasmask
         self.netcnl = netcnl
         self.down = nn.MaxPool2d(2, ceil_mode=True)

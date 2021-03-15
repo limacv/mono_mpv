@@ -1,6 +1,7 @@
 from skimage import metrics
 import torch
 from .lpips.lpips import LPIPS
+import numpy as np
 
 photometric = {
     "mse": None,
@@ -11,7 +12,7 @@ photometric = {
 
 
 def compute_img_metric(im1t: torch.Tensor, im2t: torch.Tensor,
-                       metric="mse", margin=0.05):
+                       metric="mse", margin=0.05, mask=None):
     if metric not in photometric.keys():
         raise RuntimeError(f"img_utils:: metric {metric} not recognized")
     if photometric[metric] is None:
@@ -23,6 +24,18 @@ def compute_img_metric(im1t: torch.Tensor, im2t: torch.Tensor,
             photometric[metric] = metrics.peak_signal_noise_ratio
         elif metric == "lpips":
             photometric[metric] = LPIPS()
+
+    if mask is not None:
+        if mask.dim() == 3:
+            mask = mask.unsqueeze(1)
+        if mask.shape[1] == 1:
+            mask = mask.expand(-1, 3, -1, -1)
+        mask = mask.permute(0, 2, 3, 1).numpy()
+        batchsz, hei, wid, _ = mask.shape
+        if margin > 0:
+            marginh = int(hei * margin) + 1
+            marginw = int(wid * margin) + 1
+            mask = mask[:, marginh:hei - marginh, marginw:wid - marginw]
 
     if im1t.dim() == 3:
         im1t = im1t.unsqueeze(0)
@@ -38,16 +51,25 @@ def compute_img_metric(im1t: torch.Tensor, im2t: torch.Tensor,
         im1 = im1[:, marginh:hei - marginh, marginw:wid - marginw]
         im2 = im2[:, marginh:hei - marginh, marginw:wid - marginw]
     values = []
+
     for i in range(batchsz):
         if metric in ["mse", "psnr"]:
+            if mask is not None:
+                im1 = im1 * mask[i]
+                im2 = im2 * mask[i]
             value = photometric[metric](
                 im1[i], im2[i]
             )
+            if mask is not None:
+                hei, wid, _ = im1[i].shape
+                pixelnum = mask[i, ..., 0].sum()
+                value = value - 10 * np.log10(hei * wid / pixelnum)
         elif metric in ["ssim"]:
-            value = photometric[metric](
-                im1[i], im2[i],
-                multichannel=True
+            value, ssimmap = photometric["ssim"](
+                im1[i], im2[i], multichannel=True, full=True
             )
+            if mask is not None:
+                value = (ssimmap * mask[i]).sum() / mask[i].sum()
         elif metric in ["lpips"]:
             value = photometric[metric](
                 im1t[i:i + 1], im2t[i:i + 1]

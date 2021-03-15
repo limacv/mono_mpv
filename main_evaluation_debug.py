@@ -8,26 +8,23 @@ if __name__ == "__main__":
         "dataset": "StereoVideo",  # StereoVideo, NvidiaNovelView
         "datasetcfg": {
             "resolution": (448, 768),  # (540, 960)
-            "max_baseline": 3,
+            "max_baseline": 4,
+            "proj_to_view1": False,
             
-            "seq_len": 7,
+            "seq_len": 9,
             "maxskip": 0
         },
         "const_scale": True,
         "scale_in_log": False,
 
         # ======== model and inference related =========
-        # "checkpoint": "./log/checkpoint/raSV_scratch_adapts_122129_r0.pth",
+        # "checkpoint": "./log/checkpoint/ablation00_svbase_r0.pth",
         # "model": "MPINetv2",
         # "pipeline": "disp_img",
 
-        "checkpoint": "./log/checkpoint/mpinet_ori.pth",
-        "model": "MPINetv2",
-        "pipeline": "disp_img",
-
-        # "checkpoint": "./log/checkpoint/V52setcnn_adapts_121814_r0.pth",
-        # "pipeline": "fullv4",
-        # "infer_cfg": "hardbw",
+        "checkpoint": "./log/checkpoint/Ultly2_r0.pth",
+        "pipeline": "fullv4",
+        "infer_cfg": "",
 
         # ======= computing error related ===========
         "eval_crop_margin": 0.1,
@@ -38,7 +35,7 @@ if __name__ == "__main__":
         # set to "no" to disable saving
         "saveroot": "auto",
         "save_perscene": True,
-        "save_tarviews": False,
+        "save_tarviews": True,
         "save_disparity": True,
     }
     evaluator.evaluation(cfg)

@@ -237,7 +237,7 @@ def gradient(data, order=1):
     return data_dx, data_dy
 
 
-def smooth_grad(disp: torch.Tensor, image: torch.Tensor, e_min=0.05, g_min=0.02, inverseedge=False):
+def smooth_grad(disp: torch.Tensor, image: torch.Tensor, e_min=0.1, g_min=0.05, inverseedge=False):
     """
     edge-aware smooth loss
     :param disp: [B, H, W] or [B, 1, H, W]
@@ -261,4 +261,18 @@ def smooth_grad(disp: torch.Tensor, image: torch.Tensor, e_min=0.05, g_min=0.02,
         
     smooth = torch.max(grad_disp - g_min, torch.tensor(0.).type_as(disp))
     return weights * smooth
+
+
+def smooth_loss(disp: torch.Tensor, g_min=0.02):
+    """
+    edge-aware smooth loss
+    :param disp: [B, H, W] or [B, 1, H, W]
+    :param image: [B, 3, H, W]
+    :return: ret: smoothness map [B, H, W]
+    """
+    if disp.dim() == 3:
+        disp = disp.unsqueeze(-3)
+    disp_dx, disp_dy = gradient(disp)
+    grad_disp = disp_dx.abs() + disp_dy.abs()
+    return torch.max(grad_disp - g_min, torch.tensor(0.).type_as(disp))
 

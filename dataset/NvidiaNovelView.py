@@ -30,6 +30,7 @@ class NvidiaNovelView:
         self.scene_list = [self.getbasename(_p) for _p in item_list]
         self.adaptor = DataAdaptor(resolution)
         self.max_baseline = max_baseline
+        self.proj_to_view1 = kwargs.get("proj_to_view1", False)
         print(f"{self.name}\n"
               f"total {len(self)} videos/scenes\n"
               f"resolution={resolution}, max_baseline={max_baseline}")
@@ -116,14 +117,13 @@ class NvidiaNovelView:
             # novel views
             intrin = torch.tensor(self.adaptor.apply_intrin(intrins[frameidx - 1])).type(torch.float32)
             extrin = torch.tensor(extrins[frameidx - 1]).type(torch.float32)
-            ret["in_poses"].append((extrin, intrin))
+            ret["in_poses"].append((extrin, intrin, frameidx))
             ret["gt_imgs"].append([])
             ret["gt_poses"].append([])
-            for viewidx in range(1, 13):
+
+            if self.proj_to_view1:
+                viewidx = 1
                 if viewidx == frameidx:
-                    continue
-                distance = np.linalg.norm(centers[viewidx - 1] - centers[frameidx - 1])
-                if distance > self.max_baseline:
                     continue
                 gtimg = cv2.imread(self.getviewgtpath(base, viewidx, frameidx))
                 gtimg = cv2.cvtColor(gtimg, cv2.COLOR_BGR2RGB)
@@ -131,10 +131,23 @@ class NvidiaNovelView:
                 ret["gt_imgs"][-1].append(self.totensor(gtimg))
                 intrin = torch.tensor(self.adaptor.apply_intrin(intrins[viewidx - 1])).type(torch.float32)
                 extrin = torch.tensor(extrins[viewidx - 1]).type(torch.float32)
-                ret["gt_poses"][-1].append((extrin, intrin))
+                ret["gt_poses"][-1].append((extrin, intrin, viewidx))
+            else:
+                for viewidx in range(1, 13):
+                    if viewidx == frameidx:
+                        continue
+                    distance = np.linalg.norm(centers[viewidx - 1] - centers[frameidx - 1])
+                    if distance > self.max_baseline:
+                        continue
+                    gtimg = cv2.imread(self.getviewgtpath(base, viewidx, frameidx))
+                    gtimg = cv2.cvtColor(gtimg, cv2.COLOR_BGR2RGB)
+                    gtimg = self.adaptor.apply_img(gtimg)
+                    ret["gt_imgs"][-1].append(self.totensor(gtimg))
+                    intrin = torch.tensor(self.adaptor.apply_intrin(intrins[viewidx - 1])).type(torch.float32)
+                    extrin = torch.tensor(extrins[viewidx - 1]).type(torch.float32)
+                    ret["gt_poses"][-1].append((extrin, intrin, viewidx))
 
-            if len(ret["gt_imgs"][-1]) == 0:
-                print(f"{self.name}:: Warning! Scene={base} "
-                      f"time={frameidx} has no GT view with max_baseline={self.max_baseline}")
-
+                if len(ret["gt_imgs"][-1]) == 0:
+                    print(f"{self.name}:: Warning! Scene={base} "
+                          f"time={frameidx} has no GT view with max_baseline={self.max_baseline}")
         return ret

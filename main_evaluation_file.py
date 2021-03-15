@@ -1,10 +1,19 @@
 import evaluator
+import argparse
+import os
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="evaluate for fullv4")
+    parser.add_argument("checkpoint", type=str)
+    args = parser.parse_args()
+
+    checkpointpath = args.checkpoint
+    if not os.path.exists(checkpointpath):
+        raise RuntimeError(f"{checkpointpath} not exist")
     cfg = {
         # ======== dataset related =========
-        "num_process": 3,
+        "num_process": 2,
         "dataset": "StereoVideo",  # StereoVideo, NvidiaNovelView
         "datasetcfg": {
             "resolution": (448, 768),  # (540, 960)
@@ -17,9 +26,9 @@ if __name__ == "__main__":
         "scale_in_log": False,
 
         # ======== model and inference related =========
-        "checkpoint": "./log/checkpointsave/ablation01_svtemp_r0_4.pth",
-        "model": "MPINetv2",
-        "pipeline": "disp_img",
+        "checkpoint": checkpointpath,
+        "pipeline": "fullv4",
+        "infer_cfg": "",
 
         # ======= computing error related ===========
         "eval_crop_margin": 0.1,

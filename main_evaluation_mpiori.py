@@ -4,20 +4,20 @@ import evaluator
 if __name__ == "__main__":
     cfg = {
         # ======== dataset related =========
-        "num_process": 2,
+        "num_process": 3,
         "dataset": "StereoVideo",  # StereoVideo, NvidiaNovelView
         "datasetcfg": {
             "resolution": (448, 768),  # (540, 960)
             "max_baseline": 4,
 
-            "seq_len": 15,
-            "maxskip": 0
+            "seq_len": 20,
+            "maxskip": 2
         },
         "const_scale": True,
         "scale_in_log": False,
 
         # ======== model and inference related =========
-        "checkpoint": "./log/checkpoint/mpinet_ori.pth",
+        "checkpoint": "./log/checkpointsave/ablation00_svbase_r0_4.pth",
         "model": "MPINetv2",
         "pipeline": "disp_img",
 

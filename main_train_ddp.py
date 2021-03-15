@@ -70,10 +70,9 @@ cfg = {
 
 # TODO
 #   * List:
-#       implement LDI (either train in Kitti or implement LDI and train in my dataset (former is easier))
-#       adjust my model until that problem is resolved
+#       implement LDI
 #   * Implement:
-#       temporal consistency - learning blind temporal consistency - running
+#       temporal consistency - learning blind temporal consistency - ok
 #       temporal consistency - blind + dvp
 #       temporal consistency - naive filtering in original resolution
 #       novel view synthesis - LDI [+temp]

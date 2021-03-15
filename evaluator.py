@@ -36,8 +36,8 @@ class MetricCounter:
 def evaluation_one(dataset, cudaid, pipeline, cfg):
     print(f"rank {cudaid} start working")
     num_process = cfg["num_process"]
-    ret_cfg = cfg.pop("infer_cfg", "")
-
+    ret_cfg = cfg.get("infer_cfg", "")
+    datasetname = cfg.get("dataset", "shit")
     saveroot = cfg["saveroot"]
     save_persceneinfo = cfg["save_perscene"]
     save_tarviews = cfg["save_tarviews"]
@@ -64,16 +64,16 @@ def evaluation_one(dataset, cudaid, pipeline, cfg):
         datas = dataset[sceneid]
         scene_name = datas['scene_name']
 
-        if hasattr(pipeline, "infer_multiple"):
-            mpis = pipeline.infer_multiple(datas["in_imgs"], ret_cfg)
-        else:
-            mpis = []
-            for refimg in datas["in_imgs"]:
-                mpi = pipeline.infer_forward(refimg.unsqueeze(0).cuda(), ret_cfg)
-                mpis.append(mpi.cpu())
-
+        assert hasattr(pipeline, "infer_multiple"), f"{pipeline} show implement the infer_multiple methods"
+        mpis = pipeline.infer_multiple(datas["in_imgs"], ret_cfg)
+        datas["mpis"] = mpis
         # distribute evaluation
-        EVAL_DICT_PERSCENE, newviews_save, disparitys_save = evaluation_mpi_SB(mpis, datas, flow_estim, cfg)
+        if datasetname == "StereoVideo":
+            EVAL_DICT_PERSCENE, newviews_save, disparitys_save = evaluation_mpi_SB(datas, flow_estim, cfg)
+        elif datasetname == "NvidiaNovelView":
+            EVAL_DICT_PERSCENE, newviews_save, disparitys_save = evaluation_mpi_NVNVS(datas, flow_estim, cfg)
+        else:
+            raise NotImplementedError(f"{datasetname} not recognized")
 
         # end of per-scene processing
         # ===================================================================
@@ -89,17 +89,25 @@ def evaluation_one(dataset, cudaid, pipeline, cfg):
         saveroot_perscene = os.path.join(saveroot, f"{scene_name}")
         mkdir_ifnotexist(saveroot_perscene)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        if save_tarviews and isinstance(newviews_save[0], torch.Tensor):
-            videoname = os.path.join(saveroot_perscene, f"novelviews.mp4")
-            heio, wido = newviews_save[0].shape[-2:]
-            writer = cv2.VideoWriter()
-            writer.open(videoname, fourcc, 15, (wido, heio), isColor=True)
-            for img in newviews_save:
-                img = (img[0].permute(1, 2, 0) * 255).type(torch.uint8).numpy()
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                writer.write(img)
-            writer.release()
-            print(f"{videoname} saved!")
+        if save_tarviews:
+            if isinstance(newviews_save, Sequence):
+                videoname = os.path.join(saveroot_perscene, f"novelviews.mp4")
+                heio, wido = newviews_save[0].shape[-2:]
+                writer = cv2.VideoWriter()
+                writer.open(videoname, fourcc, 15, (wido, heio), isColor=True)
+                for img in newviews_save:
+                    img = (img[0].permute(1, 2, 0) * 255).type(torch.uint8).numpy()
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    writer.write(img)
+                writer.release()
+                print(f"{videoname} saved!")
+            elif isinstance(newviews_save, Dict):
+                for k, img in newviews_save.items():
+                    imgname = os.path.join(saveroot_perscene, f"{k}.jpg")
+                    img = (img[0].permute(1, 2, 0) * 255).type(torch.uint8).numpy()
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    cv2.imwrite(imgname, img)
+
         if save_disparity:
             videoname = os.path.join(saveroot_perscene, f"disparitymaps.mp4")
             heio, wido = disparitys_save[0].shape[:2]
@@ -118,8 +126,8 @@ def evaluation_one(dataset, cudaid, pipeline, cfg):
 
 
 @torch.no_grad()
-def evaluation_mpi_SB(mpis, datas, flow_estim, cfg):
-    eval_crop_margin = cfg.pop("eval_crop_margin", 0)
+def evaluation_mpi_SB(datas, flow_estim, cfg):
+    eval_crop_margin = cfg.get("eval_crop_margin", 0)
     const_scale = cfg["const_scale"]
     scale_in_log = cfg["scale_in_log"]
     scene_name = datas['scene_name']
@@ -127,7 +135,7 @@ def evaluation_mpi_SB(mpis, datas, flow_estim, cfg):
     depths_raw = make_depths(32)
     dd = None
 
-    mpis = [mpi.cpu() for mpi in mpis]
+    mpis = [mpi.cpu() for mpi in datas["mpis"]]
     newviews_save = []
     disparitys_save = []
     disparitys_out = []
@@ -136,6 +144,7 @@ def evaluation_mpi_SB(mpis, datas, flow_estim, cfg):
     assert "gt_disparity" in datas.keys()
 
     for frameidx, mpi in enumerate(mpis):
+        input_img = datas["in_imgs"][frameidx]
         # ===========================================
         # estimate the scale & shift and estimate disparity map
         # ===========================================
@@ -178,7 +187,32 @@ def evaluation_mpi_SB(mpis, datas, flow_estim, cfg):
             val = compute_img_metric(tarview, tarviewgt, metric_name, margin=eval_crop_margin)
             EVAL_DICT_PERSCENE.collect(metric_name, float(val))
 
+        flow_cache = Flow_Cacher(1)
+        # rough align the result
+
+        apflow = flow_cache.estimate_flow(flow_estim, tarviewgt.cuda(), tarview.cuda())
+        epe = apflow.norm(dim=1)
+        EVAL_DICT_PERSCENE.collect("visflowepe", float(epe.mean()))
+        EVAL_DICT_PERSCENE.collect("visflowmax", float(epe.max()))
+        EVAL_DICT_PERSCENE.collect("visflowmid", float(torch.median(epe)))
+
+        apflow_smth = torchf.interpolate(apflow, scale_factor=0.01, mode='area')
+        apflow_smth = torchf.interpolate(apflow_smth, apflow.shape[-2:], mode='bicubic')
+        tarview_warp = warp_flow(tarview, apflow_smth)
+
+        for metric_name in ["ssim", "psnr", "mse", "lpips"]:
+            val = compute_img_metric(tarview_warp, tarviewgt, metric_name, margin=eval_crop_margin)
+            EVAL_DICT_PERSCENE.collect(f"flowcor_{metric_name}", float(val))
+
         newviews_save.append(tarview.cpu())
+        # disocclude region
+        flowf = flow_cache.estimate_flow(flow_estim, tarviewgt.cuda(), input_img.unsqueeze(0).cuda())
+        flowb = flow_cache.estimate_flow(flow_estim, input_img.unsqueeze(0).cuda(), tarviewgt.cuda())
+        disocc = (torch.norm(warp_flow(flowb, flowf) + flowf, dim=1) > 1).type(torch.float32).unsqueeze(1)
+        disocc = dilate(dilate(disocc))
+        for metric_name in ["ssim", "psnr"]:
+            val = compute_img_metric(tarview_warp, tarviewgt, metric_name, margin=eval_crop_margin, mask=disocc)
+            EVAL_DICT_PERSCENE.collect(f"disocc_{metric_name}", float(val))
 
         # ===========================================
         # Depth quality
@@ -274,16 +308,15 @@ def evaluation_mpi_SB(mpis, datas, flow_estim, cfg):
 
 
 @torch.no_grad()
-def evaluation_mpi_NVNVS(mpis, datas, flow_estim, cfg):
-    eval_crop_margin = cfg.pop("eval_crop_margin", 0)
-    saveroot = cfg["saveroot"]
-
-    scene_name = datas['scene_name']
+def evaluation_mpi_NVNVS(datas, flow_estim, cfg):
+    eval_crop_margin = cfg.get("eval_crop_margin", 0)
+    const_scale = cfg["const_scale"]
+    scale_in_log = cfg["scale_in_log"]
     EVAL_DICT_PERSCENE = MetricCounter()
     depths_raw = make_depths(32)
-    dd = None
 
-    mpis = [mpi.cpu() for mpi in mpis]
+    mpis = [mpi.cpu() for mpi in datas["mpis"]]
+    newviews_save = dict()
     disparitys_save = []
     disparitys_out = []
     disparitys_gts = []
@@ -293,41 +326,81 @@ def evaluation_mpi_NVNVS(mpis, datas, flow_estim, cfg):
     assert "in_poses" in datas.keys()
 
     for frameidx, mpi in enumerate(mpis):
+        input_img = datas["in_imgs"][frameidx]
         # ===========================================
         # estimate the scale & shift and estimate disparity map
         # ===========================================
-        if frameidx == 0:  # only estimate scale in first frame
+        if not const_scale or (const_scale and frameidx == 0):
             disp_raw = estimate_disparity_torch(mpi, depths_raw).squeeze(0)
 
             gt_depth = datas["gt_depth"][frameidx]
             valid_mask = torch.logical_and(-1e3 < gt_depth, gt_depth < 1e3)
             gt_depth[torch.logical_not(valid_mask)] = 1e3
 
-            scale = torch.exp((torch.log(disp_raw * gt_depth) * valid_mask.type_as(disp_raw)).sum(dim=[-1, -2]) \
-                              / valid_mask.sum(dim=[-1, -2]))
-            dde = depths_raw * scale
-            dd = torch.reciprocal(dde)
+            if not scale_in_log:
+                scale_es = (disp_raw.abs() * valid_mask).sum(dim=[-1, -2]) \
+                           / valid_mask.sum(dim=[-1, -2])
+                scale_gt = (torch.reciprocal(gt_depth).abs() * valid_mask).sum(dim=[-1, -2]) \
+                           / valid_mask.sum(dim=[-1, -2])
+                dd = torch.reciprocal(depths_raw) / scale_es * scale_gt
+
+            else:
+                disp_diff = disp_raw * gt_depth
+                scale = torch.exp((torch.log(disp_diff) * valid_mask).sum(dim=[-1, -2])
+                                  / valid_mask.sum(dim=[-1, -2]))
+                dd = torch.reciprocal(depths_raw * scale)
+            dde = torch.reciprocal(dd)
 
         # ===========================================
         # render new view and quality
         # ===========================================
         refpose = datas["in_poses"][frameidx]
+        srcextrin, srcintrin, srcviewidx = refpose
         if not isinstance(datas["gt_poses"][frameidx], Sequence):
             datas["gt_poses"][frameidx] = [datas["gt_poses"][frameidx]]
             datas["gt_imgs"][frameidx] = [datas["gt_poses"][frameidx]]
 
         for tarpose, tarviewgt in zip(datas["gt_poses"][frameidx], datas["gt_imgs"][frameidx]):
+            tarextrin, tarintrin, tarviewidx = tarpose
             tarview = render_newview(mpi,
-                                     refpose[0].unsqueeze(0),
-                                     tarpose[0].unsqueeze(0),
-                                     refpose[1].unsqueeze(0),
-                                     tarpose[1].unsqueeze(0),
+                                     srcextrin.unsqueeze(0),
+                                     tarextrin.unsqueeze(0),
+                                     srcintrin.unsqueeze(0),
+                                     srcintrin.unsqueeze(0),
                                      dde)
             tarview = torch.clamp(tarview, 0, 1)
             tarviewgt = torch.clamp(tarviewgt, 0, 1).unsqueeze(0)
             for metric_name in ["ssim", "psnr", "mse", "lpips"]:
                 val = compute_img_metric(tarview, tarviewgt, metric_name, margin=eval_crop_margin)
                 EVAL_DICT_PERSCENE.collect(metric_name, float(val))
+
+            flow_cache = Flow_Cacher(1)
+            # rough align the result
+
+            apflow = flow_cache.estimate_flow(flow_estim, tarviewgt.cuda(), tarview.cuda())
+            epe = apflow.norm(dim=1)
+            EVAL_DICT_PERSCENE.collect("visflowepe", float(epe.mean()))
+            EVAL_DICT_PERSCENE.collect("visflowmax", float(epe.max()))
+            EVAL_DICT_PERSCENE.collect("visflowmid", float(torch.median(epe)))
+
+            apflow_smth = torchf.interpolate(apflow, scale_factor=0.01, mode='area')
+            apflow_smth = torchf.interpolate(apflow_smth, apflow.shape[-2:], mode='bicubic')
+            tarview_warp = warp_flow(tarview, apflow_smth)
+
+            for metric_name in ["ssim", "psnr", "mse", "lpips"]:
+                val = compute_img_metric(tarview_warp, tarviewgt, metric_name, margin=eval_crop_margin)
+                EVAL_DICT_PERSCENE.collect(f"flowcor_{metric_name}", float(val))
+
+            newviews_save[f"{srcviewidx}to{tarviewidx}"] = tarview.cpu()
+            # disocclude region
+            flowf = flow_cache.estimate_flow(flow_estim, tarviewgt.cuda(), input_img.unsqueeze(0).cuda())
+            flowb = flow_cache.estimate_flow(flow_estim, input_img.unsqueeze(0).cuda(), tarviewgt.cuda())
+            disocc = (torch.norm(warp_flow(flowb, flowf) + flowf, dim=1) > 1).type(torch.float32).unsqueeze(1)
+            disocc = dilate(dilate(disocc))
+            if disocc.sum() > 10:
+                for metric_name in ["ssim", "psnr"]:
+                    val = compute_img_metric(tarview_warp, tarviewgt, metric_name, margin=eval_crop_margin, mask=disocc)
+                    EVAL_DICT_PERSCENE.collect(f"disocc_{metric_name}", float(val))
 
         # ===========================================
         # Depth quality
@@ -356,6 +429,9 @@ def evaluation_mpi_NVNVS(mpis, datas, flow_estim, cfg):
         thr2 = torch.logical_and(log10 < thresh2, valid_mask).sum() / denorm
         thr3 = torch.logical_and(log10 < thresh3, valid_mask).sum() / denorm
         log10 = log10[valid_mask].sum() / denorm
+
+        rmse = (((disp_cor - gt_disparity) * valid_mask) ** 2).sum() / denorm
+
         # diff = (gt_disparity - disp_cor).abs()[valid_mask].mean()
         # diff_scale = torch.log10((disp_cor * gt_depth).abs()) ** 2
         # inliner_num = ((diff_scale < thresh) * valid_mask).sum()
@@ -363,6 +439,7 @@ def evaluation_mpi_NVNVS(mpis, datas, flow_estim, cfg):
 
         EVAL_DICT_PERSCENE.collect("disp_abs_rel", float(abs_rel), count=valid_count / denorm)
         EVAL_DICT_PERSCENE.collect("disp_log10", float(log10), count=valid_count / denorm)
+        EVAL_DICT_PERSCENE.collect("disp_rmse", float(rmse), count=valid_count / denorm)
         EVAL_DICT_PERSCENE.collect("disp_sigma1", float(thr1), count=valid_count / denorm)
         EVAL_DICT_PERSCENE.collect("disp_sigma2", float(thr2), count=valid_count / denorm)
         EVAL_DICT_PERSCENE.collect("disp_sigma3", float(thr3), count=valid_count / denorm)
@@ -392,15 +469,17 @@ def evaluation_mpi_NVNVS(mpis, datas, flow_estim, cfg):
         EVAL_DICT_PERSCENE.collect("temp_disp_o2", float(diff2), count=float(occ02.sum() / denorm))
     refimgs.clear()
 
-    return EVAL_DICT_PERSCENE, None, disparitys_save
+    return EVAL_DICT_PERSCENE, newviews_save, disparitys_save
 
 
 # warpper for error detection
 def process_one(*args):
+    import traceback
     try:
         ret = evaluation_one(*args)
     except Exception as e:
         print(f"Error!!!!!!!!!!!!!!!!!!!!!!!!!\n {e}", flush=True)
+        traceback.print_tb(e.__traceback__)
         ret = None
 
     return ret
@@ -422,19 +501,20 @@ def evaluation(cfg):
     datasetcfg = cfg["datasetcfg"]
     dataset = select_evalset(datasetname, **datasetcfg)
 
-    checkpointname = cfg.pop("checkpoint", "")
-    modelname = cfg.pop("model", "auto")
-    pipelinename = cfg.pop("pipeline", "auto")
-    ret_cfg = cfg.pop("infer_cfg", "")
+    checkpointname = cfg.get("checkpoint", "")
+    modelname = cfg.get("model", "auto")
+    pipelinename = cfg.get("pipeline", "auto")
+    ret_cfg = cfg.get("infer_cfg", "")
     pipeline = smart_select_pipeline(
         checkpoint=checkpointname,
         force_modelname=modelname,
         force_pipelinename=pipelinename,
+        **cfg.get("pipelinecfg", {})
     ).cpu()
     checkpoint = torch.load(checkpointname)
     checkpointcfg = checkpoint["cfg"] if "cfg" in checkpoint.keys() else "no cfg"
     del checkpoint
-    eval_crop_margin = cfg.pop("eval_crop_margin", 0)
+    eval_crop_margin = cfg.get("eval_crop_margin", 0)
 
     saveroot = cfg["saveroot"]
     if saveroot == "auto":
@@ -443,7 +523,8 @@ def evaluation(cfg):
             saveroot = "Z:\\tmp\\Visual"
             if not os.path.exists(saveroot):
                 saveroot = "D:\\MSI_NB\\source\\data\\Visual"
-        saveroot = os.path.join(saveroot, f"{datasetname}_{os.path.basename(checkpointname).split('.')[0]}")
+        saveroot = os.path.join(saveroot, f"{datasetname}_{os.path.basename(checkpointname).split('.')[0]}"
+                                          f"_{modelname}_{pipelinename}")
     mkdir_ifnotexist(saveroot)
     cfg["saveroot"] = saveroot
 
@@ -467,15 +548,18 @@ def evaluation(cfg):
     torch.cuda.empty_cache()
     mp.set_start_method('spawn')
 
-    pool = mp.Pool(num_process)
-    print(f"num_process, {num_process}")
-    for i in range(num_process):
-        print(f"launch process {i}")
-        pool.apply_async(process_one,
-                         (dataset, i, pipeline, cfg.copy()),
-                         callback=print_callback)
-    pool.close()
-    pool.join()
+    if num_process == 1:
+        print_callback(process_one(dataset, 0, pipeline, cfg.copy()))
+    else:
+        pool = mp.Pool(num_process)
+        print(f"num_process, {num_process}")
+        for i in range(num_process):
+            print(f"launch process {i}")
+            pool.apply_async(process_one,
+                             (dataset, i, pipeline, cfg.copy()),
+                             callback=print_callback)
+        pool.close()
+        pool.join()
     # end of the entire dataset processing
     global EVAL_DICT
     print(f"Successfully processing all {len(dataset)} scenes/videos")

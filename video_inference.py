@@ -3,24 +3,26 @@ from models.ModelWithLoss import *
 from models.loss_utils import *
 from models.mpi_utils import *
 from models.flow_utils import *
+from testposes import *
 import torch.backends.cudnn
 
 
 # Adjust configurations here ########################################################################################
-path = "./log/checkpoint/ablation00_svbase_r0.pth"
+path = "./log/checkpointsave/ablation01_svtemp_r0_4.pth"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
-video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-04-15-33-25.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-04-15-33-25.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+video_path = "Z:\\dataset\\StereoVideoFinalv3\\videos\\StereoBlur_HD720-02-15-49-26_0.mp4"
 # video_path = "Z:\\dataset\\WebVideo\\cook\\_4fH_GX3rEM_2.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\pg6_Trim.mp4"
-# video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim.mp4"
+# video_path = "Z:\\dataset\\WebVideo\\horseriding_Trim1.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\traintmp\\01bfb80e5b8fe757\\video_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\RealEstate10K\\testtmp\\ccc439d4b28c87b2\\video_Trim_r.mp4"
 # video_path = "Z:\\dataset\\StereoBlur_processed\\30fps\\HD720-02-15-49-26.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\testtmp\\00c4a2d23c90fbc9\\video_Trim.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\MannequinChallenge\\traintmp\\0a312f741fdf5d89\\video_Trim.mp4"
 
-# modelloss = smart_select_pipeline(path, "MPINetv2", "disp_img")
 modelloss = smart_select_pipeline(path)
 
 ret_cfg = "debug"
@@ -57,19 +59,21 @@ if save_net:
 cap = cv2.VideoCapture(video_path)
 dispout = cv2.VideoWriter()
 newview_out = cv2.VideoWriter() if save_newview else None
+disparity_list = []
 mpvout = MPVWriter(mpvout_path)
 netout = NetWriter(mpvout_path)
 
 frameidx = 0
+framestart = 16
 with torch.no_grad():
     while True:
         print(f"\r{frameidx}", end='')
         ret, img = cap.read()
-        # if frameidx % 10 != 0:
-        #     frameidx += 1
-        #     continue
+        if frameidx < framestart:
+            frameidx += 1
+            continue
 
-        if not ret or frameidx > 50:
+        if not ret or frameidx > 68:
             break
         hei, wid, _ = img.shape
         if wid > hei * 2:
@@ -93,27 +97,8 @@ with torch.no_grad():
             mpvout.write(mpi[0])
         depthes = make_depths(mpi.shape[1]).cuda()
         disparity = estimate_disparity_torch(mpi, depthes)
+        disparity_list.append(disparity.cpu())
         visdisp = draw_dense_disp(disparity, depthes[-1])[:, :, ::-1]
-
-        if save_newview:
-            target_pose = torch.tensor(
-                [[1.0, 0.0, 0.0, -0.2],
-                 [0.0, 1.0, 0.0, 0],
-                 [0.0, 0.0, 1.0, 0]]
-            ).type_as(mpi).unsqueeze(0)
-            source_pose = torch.tensor(
-                [[1.0, 0.0, 0.0, 0],
-                 [0.0, 1.0, 0.0, 0],
-                 [0.0, 0.0, 1.0, 0]]
-            ).type_as(mpi).unsqueeze(0)
-            intrin = torch.tensor(
-                [[wid / 2, 0.0, wid / 2],
-                 [0.0, hei / 2, hei / 2],
-                 [0.0, 0.0, 1.0]]
-            ).type_as(mpi).unsqueeze(0)
-            view = render_newview(mpi, source_pose, target_pose, intrin, intrin, depthes)
-            visview = (view * 255).type(torch.uint8).squeeze(0).permute(1, 2, 0).cpu().numpy()
-            visview = cv2.cvtColor(visview, cv2.COLOR_RGB2BGR)
 
         if save_disparity:
             if not dispout.isOpened():
@@ -121,8 +106,6 @@ with torch.no_grad():
                 if newview_out is not None:
                     newview_out.open(newviewsvideo_path, 828601953, 30., (wid, hei), True)
             dispout.write(visdisp)
-        if newview_out is not None:
-            newview_out.write(visview)
 
         frameidx += 1
 

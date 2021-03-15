@@ -1,7 +1,7 @@
 from utils import *
 import random
 
-seed = 6183  #np.random.randint(0, 10000)
+seed = np.random.randint(0, 10000)
 print(f"random seed = {seed}")
 torch.manual_seed(seed)
 torch.backends.cudnn.deterministic = True
@@ -78,7 +78,7 @@ main({
     "check_point": {
         # "MPI.": "mpinet_ori.pth",  # don't miss the MPI
         # "AppearanceFlow": "Ultimate_LR_r0.pth",
-        "MPI": "Ultimately_r0.pth"
+        "MPI": "Ultly_base_r0.pth"
     },
 
     "device_ids": [0],
@@ -119,7 +119,6 @@ main({
                      "tempnewview_loss": 1,
                      # "net_std": 0.2,
                      "upmask_lr": True,
-
                      "alpha": 50,
                      "short_term": 100,
                      "long_term": 100,
@@ -135,7 +134,7 @@ main({
     "datasetname": "s_multiframe",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
-    "istrain": True,
+    "istrain": False,
     "check_point": {
         "MPI.": "mpinet_ori.pth",  # don't miss the .
     },
@@ -167,10 +166,11 @@ main({
                      # "aflow_fusefgpct": False,
                      "bg_supervision": 0.1,
                      # "net_smth_loss": 1,
+                     "disp_smth_loss": 1,
                      "new3_net_smth_loss": 1,
                      "tempnewview_mode": "biflow",
                      "aflow_contextaware": True,
-                     "tempnewview_loss": 1,
+                     # "tempnewview_loss": 1,
                      # "net_std": 0.2,
                      "upmask_lr": True,
 

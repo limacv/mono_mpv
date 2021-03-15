@@ -6,6 +6,7 @@ import cv2
 import os
 from typing import *
 from .flow_utils import flow_to_png_middlebury
+import matplotlib.pyplot as plt
 
 default_d_near = 1
 default_d_far = 1000
@@ -355,7 +356,7 @@ def shift_newview(mpi: torch.Tensor, disparities: torch.Tensor, ret_mask=False, 
     affine = torch.eye(2, 3).reshape(1, 1, 2, 3).repeat(batchsz, planenum, 1, 1).type_as(disparities)
     affine[:, :, 0, -1] = (disparities / ((wid - 1) / 2))
 
-    grid = torchf.affine_grid(affine.reshape(bpnum, 2, 3), [bpnum, cnl, hei, wid])
+    grid = torchf.affine_grid(affine.reshape(bpnum, 2, 3), [bpnum, cnl, hei, wid], align_corners=True)
     mpi_warp = torchf.grid_sample(mpi.reshape(bpnum, cnl, hei, wid), grid, align_corners=True)
     mpi_warp = mpi_warp.reshape(batchsz, planenum, cnl, hei, wid)
 
@@ -404,12 +405,12 @@ class MPVWriter:
         mpipad = mpipad.cpu().numpy()
         rgb = mpipad[:3][::-1].transpose(1, 2, 0)
         a = mpipad[3]
-
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         if not self.out.isOpened():
-            self.out.open(self.path, 828601953, 30., (wid, hei), True)
-            self.outa.open(self.patha, 828601953, 30., (wid, hei), False)
+            self.out.open(self.path, fourcc, 30., (wid, hei), True)
+            self.outa.open(self.patha, fourcc, 30., (wid, hei), False)
             if not self.out.isOpened():
-                raise RuntimeError(f"MPVWriter::cannot open {self.path}")
+                raise RuntimeError(f"MPVWriter::cannot open {self.path} with fourcc {fourcc}")
             if not self.outa.isOpened():
                 raise RuntimeError(f"MPVWriter:;cannot open {self.patha}")
         self.out.write(rgb)
@@ -456,28 +457,44 @@ class MPFWriter:
 
 
 class NetWriter:
-    def __init__(self, path):
+    def __init__(self, path, toimg=False):
         self.out = cv2.VideoWriter()
-        self.path = path.split('.')[0] + "_net.mp4"
+        self.path = path.split('.')[0] + "_net.mp4" if not toimg else path.split('.')[0] + "/net"
+        if toimg:
+            os.makedirs(self.path, exist_ok=True)
+        self.frameidx = 0
         self.size = (0, 0)
+        self.toimg = toimg
 
     def write(self, net: torch.Tensor):
-        net = (net * 255).type(torch.uint8)
-        if net.shape[1] == 10:
-            ones = torch.ones_like(net[:, 0:1])
-            net = torch.cat([net[:, :2], ones, net[:, 2:4], ones, net[:, 4:]], dim=1)
-        layer1, layer2, imfg, imbg = torch.split(net.squeeze(0), 3, dim=0)
-        savefig = torchvision.utils.make_grid([layer1, layer2, imfg, imbg], nrow=2, padding=0)
+        assert net.dim() == 4 and net.shape[1] == 10
+        net = net.cpu()
+        dfg, dbg, tfg, tbg, imfg, imbg = torch.split(net[0], [1, 1, 1, 1, 3, 3])
+
+        def discrete(img: torch.tensor, scale=1):
+            if img.shape[0] == 1:
+                img = torch.repeat_interleave(img, 3, dim=0)
+            img = (img * scale * 255).type(torch.uint8)
+            return img
+
+        savefig = torchvision.utils.make_grid([discrete(imfg), discrete(imbg),
+                                               discrete(dfg), discrete(dbg),
+                                               discrete(tfg, scale=10), discrete(tbg)
+                                               ], nrow=2, padding=0)
 
         cnl, hei, wid = savefig.shape
         mpipad = savefig.cpu().numpy()
         rgb = mpipad[:3][::-1].transpose(1, 2, 0)
 
-        if not self.out.isOpened():
-            self.out.open(self.path, 828601953, 30., (wid, hei), True)
+        if self.toimg:
+            cv2.imwrite(os.path.join(self.path, f"{self.frameidx:05d}.png"), rgb)
+        else:
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             if not self.out.isOpened():
-                raise RuntimeError(f"MPVWriter::cannot open {self.path}")
-        self.out.write(rgb)
+                self.out.open(self.path, fourcc, 30., (wid, hei), True)
+                if not self.out.isOpened():
+                    raise RuntimeError(f"Netwriter::cannot open {self.path} with fourcc {fourcc}")
+            self.out.write(rgb)
 
     def __del__(self):
         self.out.release()
@@ -506,6 +523,18 @@ def erode(alpha: torch.Tensor, kernelsz=3, dilate=1):
     return alphaunfold.reshape_as(alpha)
 
 
+def media_filter(alpha: torch.Tensor, kernelsz=3, dilate=1):
+    """
+    alpha: B x L x H x W
+    """
+    padding = (dilate * (kernelsz - 1) + 1) // 2
+    alphapad = torchf.pad(alpha, [padding, padding, padding, padding], 'replicate')
+    batchsz, layernum, hei, wid = alphapad.shape
+    alphaunfold = torch.nn.Unfold(kernelsz, dilation=dilate, padding=0, stride=1)(alphapad.reshape(-1, 1, hei, wid))
+    alphaunfold = alphaunfold.median(dim=1)[0]
+    return alphaunfold.reshape_as(alpha)
+
+
 def visibility_mask(mpi: torch.Tensor):
     alpha = mpi[0, :, -1]
     render_weight = alpha * torch.cat([torch.cumprod(- torch.flip(alpha, dims=[0]) + 1, dim=0).flip(dims=[0])[1:],
@@ -514,7 +543,6 @@ def visibility_mask(mpi: torch.Tensor):
 
 
 def matplot_mpi(mpi: torch.Tensor, alpha=True, visibility=False, RGBA=False, nrow=8):
-    import matplotlib.pyplot as plt
     plt.figure()
     with torch.no_grad():
         if alpha:
@@ -535,7 +563,7 @@ def matplot_mpi(mpi: torch.Tensor, alpha=True, visibility=False, RGBA=False, nro
 
 
 def matplot_img(img):
-    import matplotlib.pyplot as plt
+
     plt.figure()
     if isinstance(img, torch.Tensor):
         if img.dim() == 4:
@@ -553,11 +581,47 @@ def matplot_img(img):
         elif img.shape[0] == 1:
             img = img[0]
     plt.imshow(img)
-    plt.show()
+    plt.show(block=False)
+
+
+def save_img(img, name, root="Z:\\tmp\\EvaluationAndResults\\Results\\", colorencode=True):
+    if isinstance(img, torch.Tensor):
+        if img.dim() == 4:
+            img = img[0]
+        if img.shape[0] == 3 or img.shape[0] == 4:
+            img = img.permute(1, 2, 0)
+        elif img.shape[0] == 1:
+            img = img[0]
+        img = img.detach().cpu().numpy()
+    elif isinstance(img, np.ndarray):
+        if img.ndim == 4:
+            img = img[0]
+        if img.shape[0] == 3:
+            img = img.transpose(1, 2, 0)
+        elif img.shape[0] == 1:
+            img = img[0]
+    else:
+        raise RuntimeError("img should be tensor or nparray")
+    if img.ndim == 3:
+        img = np.uint8(img * 255)
+        if img.shape[-1] == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        elif img.shape[-1] == 4:
+            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGRA)
+    elif img.ndim == 2 and colorencode:
+        mask = np.bitwise_or(img < -1e3, img > 1e3, img == np.nan)[..., np.newaxis].repeat(3, axis=-1)
+        img = np.uint8(img * 255)
+        img = cv2.applyColorMap(img, cv2.COLORMAP_HOT)
+        img[mask] = 255
+    path = os.path.join(root, name)
+    if os.path.exists(path):
+        reply = input(f"{name} exist, overwrite? y/n:")
+        if 'n' in reply:
+            return
+    cv2.imwrite(os.path.join(root, name), img)
 
 
 def matplot_net(net):
-    import matplotlib.pyplot as plt
     plt.figure()
     if net.dim() != 4:
         assert True, "not a net"
@@ -580,7 +644,6 @@ def matplot_net(net):
 
 
 def matplot_upmask(upmask, dim=0):
-    import matplotlib.pyplot as plt
     bsz, c, hei, wid = upmask.shape
     assert c == 8*8*9, "incorrect channel numebr"
     img = upmask.detach().reshape(bsz, 9, 8, 8, hei, wid)[0, dim]\
@@ -590,7 +653,6 @@ def matplot_upmask(upmask, dim=0):
 
 
 def matplot_flow(flow: torch.Tensor, maxflow=None):
-    import matplotlib.pyplot as plt
     plt.figure()
     vis = flow_to_png_middlebury(flow[0].detach().cpu().numpy(), maxflow=maxflow)
     plt.imshow(vis)
@@ -598,7 +660,6 @@ def matplot_flow(flow: torch.Tensor, maxflow=None):
 
 
 def matplot_mpf(mpf: torch.Tensor, alphampi=None):
-    import matplotlib.pyplot as plt
     plt.figure()
     mpfpad = torchvision.utils.make_grid(mpf[0], nrow=8, pad_value=1)
     mpfvis = flow_to_png_middlebury(mpfpad.cpu().numpy())

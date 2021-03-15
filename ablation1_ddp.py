@@ -15,14 +15,14 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run1/",
+    "tensorboard_logdir": "run/",
     "mpi_outdir": "mpi/",
     "checkpoint_dir": "checkpoint/",
-    "unique_id": "ablation1_alpha",
+    "unique_id": "AB1_alpha",
 
     "write_validate_result": True,
     "validate_num": 64,
-    "valid_freq": 2000,
+    "valid_freq": 1000,
     "train_report_freq": 20,
 
     # about training <<<<<<<<<<<<<<<<
@@ -35,13 +35,13 @@ cfg = {
     "model_name": "AB_alpha",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
-    "num_epoch": 500,
-    "savepth_iter_freq": 441 * 2,
+    "num_epoch": 120,
+    "savepth_iter_freq": 400,
     "lr": 2e-4,
     "lr_milestones": [12e3, 24e3, 36e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        "": "ablation1_alpha_r0.pth"
+        "": "AB1_alpha_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
@@ -50,17 +50,10 @@ cfg = {
         "depth_loss": 1,
         "flownet_dropout": 1,
 
-        "scale_mode": "adaptive",
-        # "scale_scaling": 1,
+        "bg_supervision": 1,
 
-        "upmask_magaware": True,
         "mask_warmup": 1,
-        "mask_warmup_milestone": [1e18, 2e18],
-        "bgflow_warmup": 1,
-        "bgflow_warmup_milestone": [2e3, 4e3],
-        # "aflow_fusefgpct": False,
 
-        # "tempnewview_mode": "biflow",
         # "tempnewview_loss": 0,
     },
 }
@@ -71,7 +64,7 @@ def main(cfg):
     Please specify the id and comment!!!!!!!!!
     """
     cfg["id"] = "AB1_alpha"
-    cfg["comment"] = "use the final stereo_video as test"
+    cfg["comment"] = "different prior"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -97,7 +90,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = 6557  # np.random.randint(0, 10000)
+    seed = np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

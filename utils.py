@@ -37,23 +37,6 @@ def select_module(name: str) -> nn.Module:
         return MPINet(plane_num)
     elif "MPINetv2" == name:
         return MPINetv2(plane_num)
-    elif "hourglass" == name:
-        return Hourglass(plane_num)
-    elif "V5Nset_T" == name:
-        num_set = 2
-        return nn.ModuleDict({
-            "MPI": MPI_V5Nset(plane_num, "cnn", num_set, thickmax=0.2),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=num_set * 3)
-        })
-    elif "V5Nset" in name:
-        num_set = int(name[-1:])
-        backbonename = "resnet" if "res" in name else "cnn"
-        return nn.ModuleDict({
-            "MPI": MPI_V5Nset(plane_num, backbonename, num_set),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=num_set * 3)
-        })
     elif "V6Nset" in name:
         num_set = int(name[-1:])
         return nn.ModuleDict({
@@ -81,32 +64,6 @@ def select_module(name: str) -> nn.Module:
             "MPI": MPI_LDI(plane_num, num_set=num_set),
             "SceneFlow": None,
             "AppearanceFlow": AFNet(netcnl=num_set * 2)
-        })
-    elif "AB_alpha" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_AB_alpha(plane_num),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=plane_num - 1)
-        })
-    elif "AB_up" == name:
-        num_set = 2
-        return nn.ModuleDict({
-            "MPI": MPI_AB_up(plane_num, num_set=num_set),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=num_set * 3)
-        })
-    elif "AB_nonet" == name:
-        return nn.ModuleDict({
-            "MPI": MPI_AB_nonet(plane_num, num_set=2),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_HR_netflowin(netcnl=2 * 3)
-        })
-    elif "AB_svdbg" == name:
-        num_set = 2
-        return nn.ModuleDict({
-            "MPI": MPI_V6Nset(plane_num, num_set),
-            "SceneFlow": None,
-            "AppearanceFlow": AFNet_AB_svdbg(netcnl=num_set * 3)
         })
     elif "Ultimate" == name:
         num_set = 2
@@ -140,6 +97,24 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": None,
             "AppearanceFlow": AFNetBig(netcnl=4, hasmask=True)
         })
+    elif "AB_alpha" == name:
+        return nn.ModuleDict({
+            "MPI": MPILDI_AB_alpha(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNetBig(netcnl=plane_num-1, hasmask=True)
+        })
+    elif "AB_nonet" == name:
+        return nn.ModuleDict({
+            "MPI": MPILDI_AB_nonet(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNetBig(netcnl=4, hasmask=True)
+        })
+    elif "AB_svdbg" == name:
+        return nn.ModuleDict({
+            "MPI": MPI_LDIbig(plane_num),
+            "SceneFlow": None,
+            "AppearanceFlow": AFNetBig(netcnl=4, hasmask=True, framenum=0)
+        })
     elif "MPI+LBTC" == name:
         return nn.ModuleDict({
             "MPI": MPINetv2(plane_num),
@@ -168,6 +143,8 @@ def select_modelloss(name: str):
         return PipelineV2
     elif "fullsvv2" == name:
         return PipelineV2SV
+    elif "fullv3" == name:
+        return PipelineFilteringSV
     elif "fullv4" == name:
         return PipelineFiltering
     elif "fulljoint" == name:
@@ -181,8 +158,8 @@ def select_modelloss(name: str):
 def select_dataset(name: str, istrain: bool, cfg) -> Dataset:
     name = name.lower()
     if "seq_len" not in cfg.keys():
-        seq_len = 5 if istrain else 10
-        seq_len = 11 if "multiframe" in name else seq_len
+        seq_len = 5 if istrain else 9
+        seq_len = 11 if "multiframe" is name else seq_len
     else:
         seq_len = cfg["seq_len"]
 
@@ -327,7 +304,7 @@ def smart_select_pipeline(checkpoint, force_modelname="auto", force_pipelinename
 
     model = select_module(modelname).cuda()
     smart_load_checkpoint('', {"check_point": checkpoint}, model)
-    pipeline = select_modelloss(modellossname)(model, {"loss_weights": loss_weights})
+    pipeline = select_modelloss(modellossname)(model, {"loss_weights": loss_weights, **kwargs})
     return pipeline
 
 

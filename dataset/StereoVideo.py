@@ -44,6 +44,8 @@ class StereoVideo_Base:
                 lines = f.readlines()
             test_base = [self.getbasename(l_) for l_ in lines]
 
+        # remove all the video from StereBlur
+        self.filebase_list = [fb for fb in self.filebase_list if "StereoBlur_HD720" not in fb]
         if is_train:
             self.trainstr = "train"
             self.filebase_list = list(set(self.filebase_list) - set(test_base))

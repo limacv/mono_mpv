@@ -12,19 +12,19 @@ if __name__ == "__main__":
             "proj_to_view1": False,
             
             "seq_len": 9,
-            "maxskip": 0
+            "maxskip": 2
         },
         "const_scale": True,
         "scale_in_log": False,
 
         # ======== model and inference related =========
-        # "checkpoint": "./log/checkpoint/ablation00_svbase_r0.pth",
-        # "model": "MPINetv2",
-        # "pipeline": "disp_img",
+        "checkpoint": "./log/checkpoint/ablation01_svtemp_r0.pth",
+        "model": "MPINetv2",
+        "pipeline": "disp_img",
 
-        "checkpoint": "./log/checkpoint/Ultly2_r0.pth",
-        "pipeline": "fullv4",
-        "infer_cfg": "",
+        # "checkpoint": "./log/checkpointsave/Ultly2ok_r0_6.pth",
+        # "pipeline": "fullv4",
+        # "infer_cfg": "",
 
         # ======= computing error related ===========
         "eval_crop_margin": 0.1,

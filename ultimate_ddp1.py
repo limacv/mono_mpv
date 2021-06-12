@@ -41,8 +41,8 @@ cfg = {
     "lr_milestones": [12e3, 24e3, 36e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        # "MPI": "Ult_bootstrap.pth",
-        "": "Ultly3_r0.pth"
+        "MPI": "Ult_bootstrap.pth",
+        # "": "Ultly3_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',

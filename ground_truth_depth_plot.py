@@ -5,8 +5,8 @@ from models.loss_utils import *
 from models.mpi_utils import *
 from models.flow_utils import *
 from testposes import *
+from video_inference_cfg import video_path, framestart, frameend
 
-video_path = "Z:\\dataset\\StereoVideoFinalv3\\videos\\StereoBlur_HD720-02-15-49-26_0.mp4"
 isleft = True
 
 lrstr = "left" if isleft else "right"
@@ -15,7 +15,7 @@ disparity_path = video_path.replace("\\videos\\", "\\disparities\\").split('.')[
 disparity_list = []
 disp_max = 0
 
-for frameidx in range(16, 68):
+for frameidx in range(framestart, frameend):
     disp_file = os.path.join(disparity_path, f"{frameidx:06d}.npy")
     if not os.path.exists(disp_file):
         print(f"cannot find {disp_file}!")

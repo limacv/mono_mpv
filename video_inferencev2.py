@@ -1,27 +1,22 @@
 from video_inference_cfg import *
 
 
-path = "./log/checkpointsave/Ultly2ok_r0_6.pth"
-pipeline = smart_select_pipeline(path,
-                                 force_pipelinename="fullv4",)
-
+path = "./log/checkpointsave/ablation01_svtemp_r0_4.pth"
+pipeline = smart_select_pipeline(path)
 ret_cfg = ""
-save_mpv = False
 
 if "StereoBlur" in video_path:
-    saveprefix = "ZV4" + os.path.basename(path).split('.')[0] \
+    saveprefix = "ZV2" + os.path.basename(path).split('.')[0] \
                  + os.path.basename(video_path).split('.')[0] + ret_cfg
 elif "MannequinChallenge" in video_path:
-    saveprefix = "ZV4" + os.path.basename(path).split('.')[0] \
+    saveprefix = "ZV2" + os.path.basename(path).split('.')[0] \
                  + os.path.basename(os.path.dirname(video_path)).split('.')[0] + ret_cfg
 else:
-    saveprefix = "ZV4" + os.path.basename(path).split('.')[0] \
+    saveprefix = "ZV2" + os.path.basename(path).split('.')[0] \
                  + os.path.basename(video_path).split('.')[0]
 dispvideo_path = os.path.join(out_prefix, saveprefix + "_disparity.mp4")
 newviewvideo_path = os.path.join(out_prefix, saveprefix + "_newview.mp4")
 mpvout_path = os.path.join(out_prefix, saveprefix + ".mp4")
-if save_net:
-    ret_cfg += "ret_net"
 
 # ## ### #### ##### ###### ####### ######## ####### ###### ##### #### ### ## #
 
@@ -30,7 +25,6 @@ mpvout = MPVWriter(mpvout_path)
 netout = NetWriter(mpvout_path)
 viewout = MyVideoWriter(newviewvideo_path)
 dispout = MyVideoWriter(dispvideo_path)
-maskout = MyVideoWriter(f"Z:\\tmp\\VisualVideo\\{saveprefix}_occmask.mp4")
 disparity_list = []
 
 frameidx = 0
@@ -70,12 +64,10 @@ with torch.no_grad():
             continue
         if isinstance(mpi, tuple):
             mpi, net = mpi
-            disparity_list.append(pipeline.net2disparity(net[:, :4]).cpu())
 
-        maskout.write((renderto(mpi, newview_pose, device='cuda:0') > 0.3).cpu())
-
-        if save_net:
-            netout.write(net)
+        depthes = make_depths(mpi.shape[1]).cuda()
+        disparity = estimate_disparity_torch(mpi, depthes)
+        disparity_list.append(disparity.cpu())
 
         if save_mpv:
             mpvout.write(mpi[0])

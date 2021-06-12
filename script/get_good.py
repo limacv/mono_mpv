@@ -4,8 +4,8 @@ from glob import glob
 root = "Z:\\tmp\\VisualEval"
 
 items = [
-    "StereoVideo_ablation00_svbase_r0_5_MPINetv2_disp_img√",
-    "StereoVideo_Ultly2ok_r0_4_auto_fullv4_hard_sigmoid",
+    "StereoVideo_ablation01_svtemp_r0_4_MPINetv2_disp_img√",
+    "StereoVideo_Ultly2ok_r0_6_auto_fullv4_softsigmoid√",
 ]
 
 if __name__ == "__main__":
@@ -31,6 +31,8 @@ if __name__ == "__main__":
     nvsisgoodlist = []
     depisgoodlist = []
     for videoname in item_scores[0].keys():
+        if videoname not in item_scores[1].keys():
+            continue
         scores = [s[videoname] for s in item_scores]
         nvs = ["ssim", "psnr"]
         nvsisgood = True

@@ -169,7 +169,11 @@ class TernaryLoss(nn.Module):
 
 
 def draw_dense_disp(disp: torch.Tensor, scale) -> np.ndarray:
-    display = (disp[0].detach() * 255 * scale).type(torch.uint8).cpu().numpy()
+    if disp.dim() == 4:
+        disp = disp[0]
+    if disp.dim() == 3:
+        disp = disp[0]
+    display = (disp.detach() * 255 * scale).type(torch.uint8).cpu().numpy()
     display = cv2.cvtColor(cv2.applyColorMap(display, cv2.COLORMAP_HOT), cv2.COLOR_BGR2RGB)
     return display
 
@@ -217,6 +221,15 @@ gaussian_kernel = \
         (0.118095,	0.146293,	0.118095),
         (0.095332,	0.118095,	0.095332),
     )).reshape((1, 1, 3, 3)).type(torch.float32)
+
+
+def gaussian_blur(content, times=1):
+    global gaussian_kernel
+    data_cnl = content.shape[1]
+    gaussian_kernel = gaussian_kernel.repeat(data_cnl, 1, 1, 1).reshape((data_cnl, 1, 3, 3)).type_as(content)
+    for i in range(times):
+        content = torchf.conv2d(torchf.pad(content, [1, 1, 1, 1], 'replicate'), gaussian_kernel, groups=data_cnl)
+    return content
 
 
 def gradient(data, order=1):

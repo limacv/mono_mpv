@@ -12,10 +12,10 @@ import cv2
 #     print(videoname)
 #     cap = cv2.VideoCapture(videoname)
 #     writer = cv2.VideoWriter()
-#     framecount = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+#     frameend = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 #
 #     scene_count = 0
-#     for frameidx in range(framecount):
+#     for frameidx in range(frameend):
 #         ret, frame = cap.read()
 #         if frameidx % 2 == 0:
 #             continue
@@ -30,7 +30,7 @@ import cv2
 #         if (frameidx + 1) % 300 == 0:
 #             scene_count += 1
 #             writer.release()
-#             if framecount - frameidx < 300:
+#             if frameend - frameidx < 300:
 #                 break
 #
 # print("finish process stereoblur")

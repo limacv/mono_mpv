@@ -1401,7 +1401,8 @@ class PipelineV2(nn.Module):
 
                     accmask_yes = torch.logical_or(accmask_yes, mactx > 0.1)
                 accmask_yes = accmask_yes.type(torch.float32)
-                frames_list = [torch.cat([frame, accmask_yes.type_as(frame)], dim=1)]
+                mask_in = dilate(dilate(accmask_yes), dilate=2)
+                frames_list = [torch.cat([frame, mask_in], dim=1)]
                 if self.afmodel.framenum == 0:
                     frames_list = []
             elif self.afmodel.hasmask:
@@ -2155,6 +2156,8 @@ class PipelineFiltering(PipelineV2):
             ret1 = self._1update_one_net(*ret0, ret_cfg)
             if ret1 is not None:
                 net_up, alpha, imfg, imbg, bw = ret1
+                imfg = torch.ones_like(imfg)
+                imbg = torch.zeros_like(imbg)
                 mpi = alpha2mpi(alpha, imfg, imbg, blend_weight=bw)
 
                 if "ret_net" in ret_cfg:
@@ -2207,7 +2210,7 @@ class PipelineFilteringSV(ModelandDispLoss):
         self.imbg_window = deque()
         self.flow_cache = dict()
 
-        self.winsz = cfg.pop("winsz", 7)  # level0 bootstrap len
+        self.winsz = cfg.pop("winsz", 9)  # level0 bootstrap len
         self.mididx = self.winsz // 2
         self.defer_num = self.mididx
 

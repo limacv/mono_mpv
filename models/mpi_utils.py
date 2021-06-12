@@ -500,6 +500,42 @@ class NetWriter:
         self.out.release()
 
 
+class MyVideoWriter:
+    def __init__(self, path):
+        self.out = cv2.VideoWriter()
+        self.path = path
+        self.frameidx = 0
+
+    def write(self, img):
+        if isinstance(img, torch.Tensor):
+            if img.dim() == 4:
+                img = img[0]
+            img = img.permute(1, 2, 0).cpu().numpy()
+            if img.max() < 2:
+                img = (img * 255).astype(np.uint8)
+            else:
+                img = img.astype(np.uint8)
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        elif isinstance(img, np.ndarray):
+            if img.ndim == 4:
+                img = img[0]
+            if img.shape[0] == 3:
+                img = img.transpose([1, 2, 0])
+            if img.max() < 2:
+                img = (img * 255).astype(np.uint8)
+
+        hei, wid, cnl = img.shape
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        if not self.out.isOpened():
+            self.out.open(self.path, fourcc, 30., (wid, hei), True)
+            if not self.out.isOpened():
+                raise RuntimeError(f"Netwriter::cannot open {self.path} with fourcc {fourcc}")
+        self.out.write(img)
+
+    def __del__(self):
+        self.out.release()
+
+
 def dilate(alpha: torch.Tensor, kernelsz=3, dilate=1):
     """
     alpha: B x L x H x W

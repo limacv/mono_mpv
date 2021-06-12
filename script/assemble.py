@@ -6,7 +6,7 @@ from evaluator import MetricCounter
 
 root = "Z:\\tmp\\VisualEval"
 
-item = "StereoVideo_3D-Photo_mydepth"
+item = "StereoVideo_3D-Photo_hisdepth"
 
 metrics = ['ssim', 'psnr', 'mse', 'lpips',
            'visflowepe', 'visflowmax', 'visflowmid',

@@ -40,15 +40,77 @@ target_pose4 = torch.tensor(
       [0.0630, 0.0976, 0.9932, 0.0000]]]
 )
 
+target_posemmp = torch.tensor(
+    [[[0.9919, -0.0054, -0.1265, 0.1270],
+      [0.0000, 0.9991, -0.0430, 0.0430],
+      [0.1267, 0.0426, 0.9910, 0.0400]]]
+)
 
-def renderto(mpi, tarpose, focal=1):
-    mpi = mpi.cpu()
+target_pose5 = torch.tensor(
+    [[[0.9944, 0.0107, 0.1053, -0.1060],
+      [0.0000, 0.9949, -0.1008, 0.1010],
+      [-0.1058, 0.1003, 0.9893, 0.0000]]]
+)
+
+target_pose_blackswan = torch.tensor(
+    [[[0.9989, 0.0058, 0.0456, -0.0460],
+      [0.0000, 0.9921, -0.1257, 0.1260],
+      [-0.0460, 0.1255, 0.9910, 0.0000]]]
+)
+
+target_pose_bmx_bumps = torch.tensor(
+    [[[0.9958, 0.0028, 0.0918, -0.0920],
+      [0.0000, 0.9996, -0.0300, 0.0300],
+      [-0.0919, 0.0299, 0.9953, 0.0000]]]
+)
+
+target_pose_camel = torch.tensor(
+    [[[0.9942, -0.0018, -0.1078, 0.1080],
+      [0.0000, 0.9999, -0.0170, 0.0170],
+      [0.1078, 0.0169, 0.9940, 0.0000]]]
+)
+
+target_pose_carroundabout = torch.tensor(
+    [[[0.9930, 0.0081, 0.1174, -0.1180],
+      [0.0000, 0.9976, -0.0689, 0.0690],
+      [-0.1177, 0.0685, 0.9907, 0.0000]]]
+)
+target_pose_soapbox = torch.tensor(
+    [[[0.9950, -0.0072, -0.0996, 0.1000],
+      [0.0000, 0.9974, -0.0719, 0.0720],
+      [0.0998, 0.0716, 0.9924, 0.0000]]]
+)
+
+target_posedx = lambda dx: torch.tensor(
+    [[[1, 0, 0, -dx],
+      [0, 1, 0, 0],
+      [0, 0, 1, 0.]]]
+).type(torch.float32)
+
+target_pose_forvis1 = torch.tensor(
+    [[[0.9852, -0.0034, 0.1711, -0.1720],
+      [0.0000, 0.9998, 0.0200, -0.0200],
+      [-0.1712, -0.0197, 0.9850, 0.0000]]]
+)
+
+
+def renderto(mpi, tarpose, focal=1, device='cpu'):
+    mpi = mpi.to(device)
+    tarpose = tarpose.to(device)
     depthes = make_depths(32).type_as(mpi)
-    tarintrin = intrin.clone()
+    tarintrin = intrin.clone().type_as(mpi)
     tarintrin[0, 0, 0] *= focal
     tarintrin[0, 1, 1] *= focal
-    view = render_newview(mpi, source_pose, tarpose, intrin, intrin, depthes)
+    view = render_newview(mpi, source_pose.clone().type_as(mpi), tarpose, tarintrin, tarintrin, depthes)
     return view
+
+
+def estimate_dx(mpi, refim, tarim, flow_estim, flowcache):
+    if refim.dim() == 3:
+        refim = refim.unsequeeze(0)
+    if tarim.dim() == 3:
+        tarim = tarim.unsequeeze(0)
+    flowgt = flowcache.estimate_flow(refim, tarim)
 
 
 def disoccmask(disparity, tarpose, focal=1.):

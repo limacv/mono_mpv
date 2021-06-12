@@ -147,7 +147,7 @@ class MPNet(MPIS):
 
         alpha = nsets2alpha(self.x,
                             disp.unsqueeze(2),
-                            thick.unsqueeze(2),
+                            thick.unsqueeze(2) * 2,
                             5)
         alpha = dilate(erode(alpha))
         # compute blend weight

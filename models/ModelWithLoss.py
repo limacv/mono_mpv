@@ -2156,8 +2156,6 @@ class PipelineFiltering(PipelineV2):
             ret1 = self._1update_one_net(*ret0, ret_cfg)
             if ret1 is not None:
                 net_up, alpha, imfg, imbg, bw = ret1
-                imfg = torch.ones_like(imfg)
-                imbg = torch.zeros_like(imbg)
                 mpi = alpha2mpi(alpha, imfg, imbg, blend_weight=bw)
 
                 if "ret_net" in ret_cfg:

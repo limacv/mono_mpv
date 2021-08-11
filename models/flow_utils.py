@@ -146,6 +146,69 @@ def forward_scatter_withweight(flow01: torch.Tensor, content: torch.Tensor, soft
     return newcontent.type_as(flow01)
 
 
+def forward_scatter_render(flow01: torch.Tensor, content: torch.Tensor, softmask: torch.Tensor, offset=None):
+    """
+    :param flow01: Bx2xHxWthe target pos in im1
+    :param content: BxcxHxW the scatter content
+    :return: rangemap of im1
+    """
+    batchsz, _, hei, wid = flow01.shape
+    content = torch.cat([content, softmask], dim=1)
+    cnl = content.shape[1]
+    if offset is None:
+        offsety, offsetx = torch.meshgrid([
+            torch.linspace(0, hei - 1, hei),
+            torch.linspace(0, wid - 1, wid)
+        ])
+        offset = torch.stack([offsetx, offsety], 0).unsqueeze(0).type_as(flow01)
+    coords = (flow01 + offset).permute(0, 2, 3, 1)
+    coords_floor = torch.floor(coords).int()
+    coords_offset = coords - coords_floor
+
+    content_flat = content.permute(0, 2, 3, 1).reshape([-1, cnl])
+    coords_floor_flat = coords_floor.reshape([-1, 2])
+    coords_offset_flat = coords_offset.reshape([-1, 2])
+
+    idxs_list, weights_list = [], []
+    content_list = []
+    for di in range(2):
+        for dj in range(2):
+            idxs_i = coords_floor_flat[:, 0] + di
+            idxs_j = coords_floor_flat[:, 1] + dj
+
+            idxs = idxs_j * wid + idxs_i
+
+            mask = torch.bitwise_and(
+                torch.bitwise_and(idxs_i >= 0, idxs_i < wid),
+                torch.bitwise_and(idxs_j >= 0, idxs_j < hei)).reshape(-1)
+            valid_idxs = idxs[mask]
+            valid_offsets = coords_offset_flat[mask]
+            content_cur = content_flat[mask]
+
+            weights_i = (1. - di) - (-1) ** di * valid_offsets[:, 0]
+            weights_j = (1. - dj) - (-1) ** dj * valid_offsets[:, 1]
+            weights = weights_i * weights_j
+
+            idxs_list.append(valid_idxs)
+            weights_list.append(weights)
+            content_list.append(content_cur)
+
+    idxs = torch.cat(idxs_list, dim=0).to(torch.int64)
+    weights = torch.cat(weights_list, dim=0)
+    content = torch.cat(content_list, dim=0)
+    weights = weights * content[:, -1]
+    content = content[:, :-1]
+    cnl -= 1
+    newcontent = torch.zeros(hei * wid, cnl).to(content.device)
+    content = content * weights.unsqueeze(-1)
+    newcontent = newcontent.scatter_add_(0, idxs.unsqueeze(-1).expand(-1, cnl), content)
+    denorm = torch.zeros(hei * wid).to(content.device)
+    denorm = denorm.scatter_add_(0, idxs, weights).unsqueeze(-1) + 0.00000001
+    newcontent = (newcontent / denorm).reshape(1, hei, wid, cnl).permute(0, 3, 1, 2)
+
+    return newcontent.type_as(flow01)
+
+
 def forward_scatter_mpi(flow01: torch.Tensor, mpi: torch.Tensor):
     """
     two modifications regarding the forward_scatter:

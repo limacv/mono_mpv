@@ -5,7 +5,7 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.mpi_utils import *
-from models.flow_utils import forward_scatter_render
+from models.flow_utils import forward_scatter_fusebatch
 
 lastposx, lastposy = 0, 0
 currentdx, currentdy, currentdz = 0, 0, 0
@@ -126,9 +126,9 @@ class MPRGBA:
         newcoord = (tar_intr @ newcoord).squeeze(-1)
         newcoord = newcoord[..., :2] / newcoord[..., -1:]
         flow = newcoord - coord[..., :2]
-        img = forward_scatter_render(flow.permute(0, 3, 1, 2),
-                                     rgb,
-                                     alpha * softz)
+        img = forward_scatter_fusebatch(flow.permute(0, 3, 1, 2),
+                                        rgb,
+                                        alpha * softz)
         return img
 
 

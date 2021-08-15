@@ -15,10 +15,9 @@ cfg = {
     "world_size": 10,
     # const configuration <<<<<<<<<<<<<<<<
     "log_prefix": "./log/",
-    "tensorboard_logdir": "run1/",
-    "mpi_outdir": "mpi/",
-    "checkpoint_dir": "checkpoint/",
-    "unique_id": "Ultly_newbase",
+    "tensorboard_logdir": "ldi2mpi_log/",
+    "checkpoint_dir": "ldi2mpi_checkpoint/",
+    "unique_id": "LDILDI",
 
     "write_validate_result": True,
     "validate_num": 64,
@@ -32,33 +31,27 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "Ultimately",
+    "model_name": "RGBAD_LDI",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 120,
-    "savepth_iter_freq": 400,
+    "savepth_iter_freq": 200,
     "lr": 2e-4,
     "lr_milestones": [12e3, 24e3, 36e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        # "MPI": "Ult_bootstrap.pth",
-        "": "Ultly_newbase_r0.pth"
+        "": "LDILDI_r0.pth",
+        # "": "Ultly3_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
         "net_smth_loss": 0.5,
-        "depth_loss": 1,
+        "depth_loss": 0.5,
+        "disp_smth_loss": 0.1,
         "flownet_dropout": 1,
 
         "bg_supervision": 1,
-
-        "net_prior0": 1,
-        "net_prior1": 1,
-        "net_prior2": 1,
-        "mask_warmup": 1,
-
-        # "tempnewview_loss": 0,
     },
 }
 
@@ -67,8 +60,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "Ultly_newbase"
-    cfg["comment"] = "different prior"
+    cfg["id"] = "LDI2MPI"
+    cfg["comment"] = "test run of RGBAD model"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)
@@ -94,7 +87,7 @@ def main(cfg):
     print(f"------------- start running (PID: {os.getpid()} Rank: {cfg['local_rank']})--------------", flush=True)
     torch.cuda.set_device(cfg["local_rank"])
 
-    seed = 6557  # np.random.randint(0, 10000)
+    seed = 147  # np.random.randint(0, 10000)
     print(f"RANK_{cfg['local_rank']}: random seed = {seed}")
     cfg["comment"] += f", random seed = {seed}"
     torch.manual_seed(seed)

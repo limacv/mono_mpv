@@ -19,15 +19,16 @@ def main(kwargs):
         milestones=[10e3, 50e3, 100e3, 150e3],
         values=[2, 1, 0.5, 0.2]
     )
-    lr_scheduler.get_value(120e3)
+
     modelloss = select_modelloss(kwargs["pipelinename"])(model, kwargs)
+
     optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-6)
-    optimizer.param_groups[0]["lr"] = 1
+    optimizer.param_groups[0]["lr"] = 1e-4
     dataset = select_dataset(kwargs["datasetname"], kwargs["istrain"], {"seq_len": 5})
     for i in range(int(14000)):
         datas_all = [[]] * 7
         for dev in range(batchsz):
-            datas = dataset[0]
+            datas = dataset[1]
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
@@ -35,7 +36,9 @@ def main(kwargs):
             loss_dict = modelloss(*datas, step=i)
             loss = loss_dict["loss"]
             loss = loss.mean()
+            loss = torch.tensor(0., requires_grad=True)
             loss_dict = loss_dict["loss_dict"]
+            print(f"{loss_dict}")
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -63,22 +66,22 @@ def main(kwargs):
 # logdir="./log/run/dbg_/", [opt]
 # mpioutdir="./log/Debug1", [opt]
 # savefile="./log/Debug_all.pth", [opt]
-# loss_cfg={"pixel_loss": 1,
+# loss_cfg={"pixel_loss": 1,t
 #        "smooth_loss": 0.5,
 #        "depth_loss": 0.1},
 
 
 main({
-    "modelname": "Ultimately",  # MPINetv2, Fullv6, Fullv5.Fullv5resnet
+    "modelname": "RGBAD",  # MPINetv2, Fullv6, Fullv5.Fullv5resnet, Ultimately, RGBAD
     "pipelinename": "fulljoint",  # sv, disp_img, fullv2, fullsvv2, fulljoint, svjoint
-    "datasetname": "stereovideo_seq",
+    "datasetname": "realestate10k_seq",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
     "istrain": True,
     "check_point": {
         # "MPI.": "mpinet_ori.pth",  # don't miss the MPI
         # "AppearanceFlow": "Ultimate_LR_r0.pth",
-        "MPI": "Ultly_base_r0.pth"
+        "": "LDI2MPI_r0.pth"
     },
 
     "device_ids": [0],
@@ -94,7 +97,7 @@ main({
                      "flownet_dropout": 1,
                      # "net_smth_loss_fg": 0.5,
                      # "net_smth_loss_bg": 0.5,
-                     "depth_loss": 1,
+                     "depth_loss": 0.1,
                      "depth_loss_mode": "fine",
                      "alpha_thick_in_disparity": False,
                      "aflow_mask": True,
@@ -106,9 +109,9 @@ main({
                      # "net_warmup": 0.5,
                      # "net_warmup_milestone": [1e18, 2e18],
                      # "aflow_fusefgpct": False,
-                     "bg_supervision": 0.1,
+                     "bg_supervision": 1,
                      # "net_smth_loss": 1,
-                     "net_smth_loss": 1,
+                     "net_smth_loss": 0.5,
                      "net_prior0": 1,
                      "net_prior1": 1,
                      "net_prior2": 1,
@@ -124,6 +127,7 @@ main({
                      "long_term": 100,
                      "sv_loss": 10,
                      "svg_loss": 10,
+                     "disp_smth_loss": 0.5,
                      },
 })
 

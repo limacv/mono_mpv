@@ -146,11 +146,13 @@ def forward_scatter_withweight(flow01: torch.Tensor, content: torch.Tensor, soft
     return newcontent.type_as(flow01)
 
 
-def forward_scatter_render(flow01: torch.Tensor, content: torch.Tensor, softmask: torch.Tensor, offset=None):
+def forward_scatter_fusebatch(flow01: torch.Tensor, content: torch.Tensor, softmask: torch.Tensor, offset=None):
     """
     :param flow01: Bx2xHxWthe target pos in im1
     :param content: BxcxHxW the scatter content
     :return: rangemap of im1
+    To overcome this, we simply render the target frame at half the input resolution,
+    i.e. the output image from the rendering function described in Section 3.2 is half the size of the input LDI
     """
     batchsz, _, hei, wid = flow01.shape
     content = torch.cat([content, softmask], dim=1)

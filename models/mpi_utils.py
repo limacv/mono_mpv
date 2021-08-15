@@ -367,6 +367,26 @@ def shift_newview(mpi: torch.Tensor, disparities: torch.Tensor, ret_mask=False, 
         return overcompose(mpi_warp, ret_mask=ret_mask)
 
 
+def compute_ldi_flow(disparity: torch.Tensor, src_ext, src_intr, tar_ext, tar_intr, coord=None):
+    batchsz, _, hei, wid = disparity.shape
+    depth = torch.reciprocal(disparity).squeeze(1).unsqueeze(-1)
+    if coord is None:
+        meshy, meshx = torch.meshgrid([torch.arange(0, hei), torch.arange(0, wid)])
+        meshx = meshx.unsqueeze(0).unsqueeze(-1).cuda()
+        meshy = meshy.unsqueeze(0).unsqueeze(-1).cuda()
+        coord = torch.cat([meshx, meshy, torch.ones_like(meshx)], dim=-1)
+
+    src_r, src_t = src_ext[None, None, :, :3, :3], src_ext[None, None, :, :3, 3, None]
+    tar_r, tar_t = tar_ext[None, None, :, :3, :3], tar_ext[None, None, :, :3, 3, None]
+
+    newcoord = src_intr.inverse() @ (coord * depth).unsqueeze(-1)
+    newcoord = (tar_r @ src_r.inverse() @ (newcoord - src_t)) + tar_t
+    newcoord = (tar_intr @ newcoord).squeeze(-1)
+    newcoord = newcoord[..., :2] / newcoord[..., -1:]
+    flow = newcoord - coord[..., :2]
+    return flow.permute(0, 3, 1, 2)
+
+
 def warp_flow(content: torch.Tensor, flow: torch.Tensor, offset=None, pad_mode="zeros", mode="bilinear"):
     """
     content: [..., cnl, H, W]

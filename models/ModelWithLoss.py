@@ -414,6 +414,7 @@ class ModelandDispLoss(nn.Module):
 
         net_warp = self.flowfwarp_warp(flowf, flowb, net_last)
         return net_warp
+
     def prepareoffset(self, wid, hei):
         if self.offset is None or self.offset.shape[-2:] != (hei, wid):
             offsety, offsetx = torch.meshgrid([
@@ -671,6 +672,37 @@ class ModelandLossJoint(nn.Module):
             raise RuntimeError()
 
 
+def volume2alpha(x: torch.Tensor, depth, thick, sigma=4):
+    t = x - depth + thick
+    t = torch.relu(t)
+    t = torch.min(t, thick)
+    dt = t[:, 1:] - t[:, :-1]
+    return - torch.exp(-dt * sigma * Sigma_Denorm) + 1
+
+
+def volume2alphaindepth(x, disp, thickindisp, sigma=1):
+    thickindisp = torch.min(disp - 1. / default_d_far, thickindisp)
+    depth0 = torch.reciprocal(disp)
+    t = x - depth0
+    t = torch.min(torch.relu(t), thickindisp * torch.reciprocal(disp - thickindisp) * depth0)
+    dt = t[:, :-1] - t[:, 1:]
+    return - torch.exp(-dt * sigma * Sigma_Denorm) + 1
+
+
+def params2alpha(x, ds1, ds2, t1, t2, s1, s2):
+    t1 = torch.min(ds1 - 1. / default_d_far, t1)
+    t2 = torch.min(ds2 - 1. / default_d_far, t2)
+    de1 = torch.reciprocal(ds1)
+    de2 = torch.reciprocal(ds2)
+    x1 = x - de1
+    x2 = x - de2
+    x1 = torch.min(torch.relu(x1), t1 * torch.reciprocal(ds1 - t1) * de1)
+    x2 = torch.min(torch.relu(x2), t2 * torch.reciprocal(ds2 - t2) * de2)
+    dx1 = x1[:, :-1] - x1[:, 1:]
+    dx2 = x2[:, :-1] - x2[:, 1:]
+    return -torch.exp(-(dx1 * s1 + dx2 * s2) * 10) + 1
+
+
 class PipelineV2(nn.Module):
     """
     The entire pipeline using backward warping
@@ -706,6 +738,7 @@ class PipelineV2(nn.Module):
         self.upmask_lr = self.loss_weight.pop("upmask_lr", True)
         self.aflow_contextaware = self.loss_weight.pop("aflow_contextaware", False)
         self.aflow_selfsu = self.loss_weight.pop("aflow_selfsu", False)
+        self.soft_z_tau = self.loss_weight.pop("soft_z_tau", 10)
 
         # optical flow estimator
         if not hasattr(self, "flow_estim"):
@@ -808,15 +841,9 @@ class PipelineV2(nn.Module):
         elif len(self.img_window) < self.max_win_sz:
             return None
 
-        alpha, net, upmask = self.forwardmpi(
-            None,
-            self.img_window[1],
-            [self.flowbnet_win[0], self.flowfnet_win[1]],
-            self.net_warp
-        )
-        depth = make_depths(alpha.shape[1]).type_as(alpha).unsqueeze(0).repeat(1, 1)
-        disp, blend_weight = estimate_disparity_torch(alpha.unsqueeze(2), depth, retbw=True)
-
+        # =================
+        # generate contex and contex mask
+        # =================
         img_list = [self.img_window[0], self.img_window[2]]
         flow_list = [self.flowb_win[0], self.flowf_win[1]]
         flownet_list = [self.flowbnet_win[0], self.flowfnet_win[1]]
@@ -834,23 +861,34 @@ class PipelineV2(nn.Module):
             flownet_list.append(flownetself)
             flowmask_list.append(flowmaskself)
 
-        imbg = self.forwardaf(disp, net, upmask, self.img_window[1],
-                              flows_list=flow_list,
-                              imgs_list=img_list,
-                              flow_nets_list=flownet_list,
-                              flow_upmasks_list=flowmask_list,
-                              flowsb_list=flowb_list,
-                              flowb_nets_list=flownetb_list,
-                              flowb_upmasks_list=flowmaskb_list)
-        mpi = alpha2mpi(alpha, self.img_window[1], imbg, blend_weight=blend_weight)
+        ctxmalist, ctxlist, ctx, ctx_ma = self.forwardaf(
+            self.img_window[1],
+            flows_list=flow_list,
+            imgs_list=img_list,
+            flow_nets_list=flownet_list,
+            flow_upmasks_list=flowmask_list,
+            flowsb_list=flowb_list,
+            flowb_nets_list=flownetb_list,
+            flowb_upmasks_list=flowmaskb_list)
+        inputs = torch.cat([self.img_window[1], ctx, ctx_ma], dim=1)
+
+        intermediates = {"blendweight": None, "net_up": []}
+        net, mpialpha, rgbs = self.forwardmpi(
+            intermediates,
+            inputs,
+            [self.flowbnet_win[0], self.flowfnet_win[1]],
+            self.net_warp
+        )
+        blend_weight = intermediates.pop("blendweight")
+        rgbs = rgbs.reshape(bsz, -1, 3, hei, wid)
+        mpirgb = (rgbs.unsqueeze(2) * blend_weight.unsqueeze(3)).sum(dim=1)
+        mpi = torch.cat([mpirgb, mpialpha.unsqueeze(2)], dim=2)
 
         # update last frame info
         self.lastmpi = mpi
         self.net_warp = self.forwardsf(self.flowf_win[1], self.flowb_win[1], net)
         if "ret_net" in ret_cfg:
-            ret_net = learned_upsample(net, upmask)
-            ret_net = torch.cat([ret_net, self.img_window[1], imbg], dim=1)
-            return mpi, ret_net
+            return mpi, net
         return mpi
 
     def forward_multiframes(self, refims, step=None, intermediates=None):
@@ -874,30 +912,28 @@ class PipelineV2(nn.Module):
             flows_b_upmask = flows_b_upmask.reshape(batchsz, framenum - 1, -1, heiori // 8, widori // 8)
             flows_b_net = flows_b_net.reshape(batchsz, framenum - 1, -1, heiori // 8, widori // 8)
 
-        mpi_out = []
+        sreprs = []
         net_out = []
-        upmask_out = []
         disp_out = []
-        # estimate depth map and sample sparse point depth
-        depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
 
         if intermediates is not None:
             if "disp0" in intermediates.keys():
                 with torch.no_grad():
-                    # flows_f0, flows_f_upmask0, flows_f_net0 = \
-                    #     self.flow_estim(refims[:, 0], refims[:, 1], ret_upmask=True)
-                    alpha, net, upmask = self.forwardmpi(
-                        None,
-                        refims[:, 0],
+                    tmp = {"net_up": []}
+                    self.forwardldi(
+                        tmp,
+                        torch.cat([refims[:, 0], refims[:, 0], torch.zeros_like(refims[:, 0, 0:1])], dim=1),
                         [flows_f_net[:, 0]],
                         None
                     )
-                    disp0 = estimate_disparity_torch(alpha.unsqueeze(2), depth)
+                    net_up = tmp.get("net_up", [])[-1]
+                    disp0 = self.ldi2disparity(net_up)
                     intermediates["disp0"] = disp0
 
                 if "net_warp" in intermediates.keys():
-                    net_warp = self.forwardsf(flows_f[:, 0], flows_b[:, 0], net)
-                    intermediates["net_warp"].append(net_warp)
+                    assert NotImplementedError("ModelWithLoss revised version error")
+                    # net_warp = self.forwardsf(flows_f[:, 0], flows_b[:, 0], net)
+                    # intermediates["net_warp"].append(net_warp)
 
                 if "disp_warp" in intermediates.keys():
                     disp0_warp = self.flowfwarp_warp(upsample_flow(flows_f[:, 0], flows_f_upmask[:, 0]),
@@ -914,23 +950,11 @@ class PipelineV2(nn.Module):
             if "flows_b" in intermediates.keys():
                 intermediates["flows_b"] = flows_b
 
+        # Starting the main pipeline
         for frameidx in range(1, framenum - 1):
-            intermediates["blendweight"] = None
-            alpha, net, upmask = self.forwardmpi(
-                intermediates,
-                refims[:, frameidx],
-                [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx]],
-                None
-            )
-            blend_weight = intermediates.pop("blendweight")
-
-            netups = intermediates.get("net_up", [])
-            net_up = netups[-1] if len(netups) > 0 else learned_upsample(net, upmask)
-            if isinstance(self.mpimodel, MPILDI_AB_alpha):
-                disp = estimate_disparity_torch(alpha.unsqueeze(2), depth)
-            else:
-                disp = self.net2disparity(net_up).squeeze(1)
-
+            # ============
+            # generate contex and contex mask
+            # ============
             flow_list = [flows_b[:, frameidx - 1], flows_f[:, frameidx]]
             flow_net_list = [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx]]
             flow_mask_list = [flows_b_upmask[:, frameidx - 1], flows_f_upmask[:, frameidx]]
@@ -947,37 +971,77 @@ class PipelineV2(nn.Module):
                     flow_net_list.append(flow_net_self)
                     flow_mask_list.append(flow_upmask_self)
 
-            imbg = self.forwardaf(disp, net, upmask, refims[:, frameidx],
-                                  flows_list=flow_list,
-                                  imgs_list=image_list,
-                                  flow_nets_list=flow_net_list,
-                                  flow_upmasks_list=flow_mask_list,
-                                  flowsb_list=flowb_list,
-                                  flowb_nets_list=flowb_net_list,
-                                  flowb_upmasks_list=flowb_mask_list, intermediate=intermediates)
-            if self.bgfgfuse_scheduler is not None and step is not None:
-                fg_pct = self.bgfgfuse_scheduler.get_value(step)
-                imfg = imbg * (1. - fg_pct) + refims[:, frameidx] * fg_pct
-            else:
-                imfg = refims[:, frameidx]
+            ctxmalist, ctxlist, ctx, ctx_ma = self.forwardaf(
+                refims[:, frameidx],
+                flows_list=flow_list,
+                imgs_list=image_list,
+                flow_nets_list=flow_net_list,
+                flow_upmasks_list=flow_mask_list,
+                flowsb_list=flowb_list,
+                flowb_nets_list=flowb_net_list,
+                flowb_upmasks_list=flowb_mask_list, intermediate=intermediates)
+            inputs = torch.cat([refims[:, frameidx], ctx, ctx_ma], dim=1)
 
-            mpi = alpha2mpi(alpha, imfg, imbg, blend_weight=blend_weight)
-            mpi_out.append(mpi)
-            net_out.append(net)
-            upmask_out.append(upmask)
+            # ============
+            # predict layered strcture (forward network)
+            # ============
+            intermediates["blendweight"] = None
+            intermediates["net_up"] = []
+            if isinstance(self.mpimodel, RGBADNet) and self.mpimodel.is_ldi:
+                net, alphas, rgbs = self.forwardldi(
+                    intermediates,
+                    inputs,
+                    [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx]],
+                    None
+                )
+                rgbs = rgbs.reshape(batchsz, -1, 3, heiori, widori)
+                if self.bgfgfuse_scheduler is not None and step is not None:
+                    fg_pct = self.bgfgfuse_scheduler.get_value(step)
+                    rgbs = rgbs * (1. - fg_pct) + refims[:, frameidx:frameidx+1] * fg_pct
+
+                alphas = alphas.reshape(batchsz, -1, 1, heiori, widori)
+                disps_up = intermediates["net_up"][-1][0].reshape(batchsz, -1, 1, heiori, widori)
+                scenerepr = torch.cat([rgbs, alphas, disps_up], dim=2)
+
+            elif isinstance(self.mpimodel, RGBADNet):
+                net, mpialpha, rgbs = self.forwardmpi(
+                    intermediates,
+                    inputs,
+                    [flows_b_net[:, frameidx - 1], flows_f_net[:, frameidx]],
+                    None
+                )
+
+                blend_weight = intermediates.pop("blendweight")
+                rgbs = rgbs.reshape(batchsz, -1, 3, heiori, widori)
+                if self.bgfgfuse_scheduler is not None and step is not None:
+                    fg_pct = self.bgfgfuse_scheduler.get_value(step)
+                    rgbs = rgbs * (1. - fg_pct) + refims[:, frameidx:frameidx+1] * fg_pct
+
+                mpirgb = (rgbs.unsqueeze(2) * blend_weight.unsqueeze(3)).sum(dim=1)
+                scenerepr = torch.cat([mpirgb, mpialpha.unsqueeze(2)], dim=2)
+
+            else:
+                raise NotImplementedError("ModelWithLoss: model other than RGBADNet is not implemented yet")
+
+            netups = intermediates.get("net_up", [])
+            net_up = netups[-1]
+            if isinstance(self.mpimodel, RGBADNet):
+                disp = self.ldi2disparity(net_up)
+            else:
+                disp = self.net2disparity(net_up).squeeze(1)
+
+            sreprs.append(scenerepr)
             disp_out.append(disp)
+            net_out.append(net)
 
             if frameidx >= framenum - 2:
                 break
 
             if intermediates is not None:
-                if "net_warp" in intermediates.keys():
-                    net_warp = self.forwardsf(
-                        flowf=flows_f[:, frameidx],
-                        flowb=flows_b[:, frameidx],
-                        net=net
-                    )
-                    intermediates["net_warp"].append(net_warp)
+                bg = rgbs[:, 0]
+                if "bg_supervise" in intermediates.keys():
+                    for i in range(len(ctxmalist)):
+                        intermediates["bg_supervise"].append([bg, erode(ctxmalist[i]), ctxlist[i]])
 
                 if "disp_warp" in intermediates.keys():
                     disp_warp = self.flowfwarp_warp(
@@ -987,9 +1051,9 @@ class PipelineV2(nn.Module):
                     intermediates["disp_warp"].append(disp_warp)
 
                 if "imbg" in intermediates.keys():
-                    intermediates["imbg"] = imbg
+                    intermediates["imbg"] = bg
 
-        return mpi_out, net_out, upmask_out, disp_out
+        return sreprs, net_out, disp_out
 
     @torch.no_grad()
     def valid_forward(self, *args: torch.Tensor, **kwargs):
@@ -1004,7 +1068,7 @@ class PipelineV2(nn.Module):
         depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
 
         intermediate = {"disp0": None, "disp_warp": [], "imbg": None}
-        mpi_list, net_list, upmask_list, disp_list = self.forward_multiframes(refims, None, intermediate)
+        mpi_list, net_list, disp_list = self.forward_multiframes(refims, None, intermediate)
         disp0 = intermediate["disp0"]
         imbg = intermediate["imbg"]
 
@@ -1065,9 +1129,10 @@ class PipelineV2(nn.Module):
         # val_dict["val_t_msle"] = temporal_scale
 
         if "visualize" in kwargs.keys() and kwargs["visualize"]:
-            netvis = net_list[1][:, :4] * torch.tensor([1, 1, 10, 10.]).type_as(refims).reshape(1, 4, 1, 1)
-            netvis = torch.cat(netvis.split(1, dim=1), dim=-1)
-            val_dict["vis_net"] = draw_dense_disp(netvis[:, 0], 1)
+            dispvis = net_list[1][0][0]
+            dispvis = torch.cat(dispvis.split(1, dim=0), dim=1)[0]
+            val_dict["vis_ldidisp"] = draw_dense_disp(dispvis, 1)
+            val_dict["vis_ldialpha"] = draw_dense_disp(net_list[1][1][0, 0], 1)
             val_dict["vis_dispgt"] = draw_dense_disp(disp_gt[:, 1], 1)
             val_dict["vis_disp"] = draw_dense_disp(disp_list[1], 1)
             val_dict["vis_bgimg"] = (imbg[0] * 255).permute(1, 2, 0).detach().cpu().type(torch.uint8).numpy()
@@ -1093,7 +1158,7 @@ class PipelineV2(nn.Module):
             self.offset_d8 = torch.stack([offsetx, offsety], 0).unsqueeze(0).float().cuda()
             self.offset_bhw2_d8 = self.offset_d8.permute(0, 2, 3, 1).contiguous()
 
-    def forwardmpi(self, tmpcfg, img, flow_net_list: list, net_warp=None):
+    def forwardmpi(self, tmpcfg, inputs, flow_net_list: list, net_warp=None):
         """
         Now this only return alpha channles (like depth estimation)
         """
@@ -1104,6 +1169,7 @@ class PipelineV2(nn.Module):
         # randomly drop one flow net if training
         if len(flow_net_list) == 1:
             with torch.no_grad():
+                img = inputs[:, :3]
                 selfflow, _, flow_net = self.flow_estim(img, img, ret_upmask=True)
                 flow_net_list.append(flow_net)
         if self.training:  # random switch and drop out
@@ -1114,14 +1180,64 @@ class PipelineV2(nn.Module):
                 flow_net_list = [flow_net_zero, flow_net_zero]
 
         flow_net = torch.cat(flow_net_list, dim=1)
-        net, upmask = self.mpimodel(img, flow_net, net_warp)
+        disps_low, alphas, rgbs_residual = self.mpimodel(inputs, flow_net, net_warp)
 
-        alpha, net_up, blendweight = self.net2alpha(net, upmask, ret_bw=True)
+        # Post network processing
+        # ================================
+        fgrgb, bgrgb, _ = torch.split(inputs, [3, 3, 1], dim=1)
+        rgbs = torch.cat([bgrgb, fgrgb], dim=1) + rgbs_residual
+        rgbs = torch.clamp(rgbs, -1, 1)
+
+        disp_min, disp_max = 1 / default_d_far, 1 / default_d_near
+        disps_low = disps_low * (disp_max - disp_min) + disp_min
+
+        net_out = disps_low, alphas, rgbs
+
+        net_up, mpialpha, blendweight = self.ldi2mpia(disps_low, alphas)
+
         if tmpcfg is not None and "net_up" in tmpcfg.keys():
             tmpcfg["net_up"].append(net_up)
         if tmpcfg is not None and "blendweight" in tmpcfg.keys():
             tmpcfg["blendweight"] = blendweight
-        return alpha, net, upmask
+        return net_out, mpialpha, rgbs
+
+    def forwardldi(self, tmpcfg, inputs, flow_net_list: list, net_warp=None):
+        """
+        Now this only return alpha channles (like depth estimation)
+        """
+        # randomly drop one flow net if training
+        if len(flow_net_list) == 1:
+            with torch.no_grad():
+                img = inputs[:, :3]
+                selfflow, _, flow_net = self.flow_estim(img, img, ret_upmask=True)
+                flow_net_list.append(flow_net)
+        if self.training:  # random switch and drop out
+            if np.random.randint(0, 2) == 0:  # randomly switch
+                flow_net_list[0], flow_net_list[1] = flow_net_list[1], flow_net_list[0]
+            if isinstance(self, PipelineV2SV) and np.random.rand() < self.flownet_dropout:  # random drop
+                flow_net_zero = torch.zeros_like(flow_net_list[0])
+                flow_net_list = [flow_net_zero, flow_net_zero]
+
+        flow_net = torch.cat(flow_net_list, dim=1)
+        disps_low, alphas, rgbs = self.mpimodel(inputs, flow_net, net_warp)
+        disp_min, disp_max = 1 / default_d_far, 1 / default_d_near
+        disps_low = disps_low * (disp_max - disp_min) + disp_min
+        net_out = disps_low, alphas, rgbs
+
+        disps_up = torchf.interpolate(disps_low, alphas.shape[-2:], None, 'bilinear')
+        alphas_bg = torch.ones_like(alphas[:, 0:1].unsqueeze(2)) * 0.99
+        alphas = torch.cat([alphas_bg, alphas.unsqueeze(2)], dim=1)
+
+        if tmpcfg is not None and "net_up" in tmpcfg.keys():
+            tmpcfg["net_up"].append([disps_up, alphas.squeeze(2)])
+        return net_out, alphas, rgbs
+
+    @staticmethod
+    def ldi2disparity(net):
+        disp, alpha = net
+        _alpha = alpha.clone()
+        _alpha[:, 0] = 1 - _alpha[:, 1]
+        return (disp * _alpha).sum(dim=1)
 
     @staticmethod
     def net2disparity(net, denorm=5*20):
@@ -1129,6 +1245,33 @@ class PipelineV2(nn.Module):
         fg, bg, fgt, _ = net.split(1, dim=1)
         _alpha = torch.exp(-fgt * denorm)
         return fg * (- _alpha + 1) + bg * _alpha
+
+    def ldi2mpia(self, disps_down, alphas):
+        planenum = self.mpimodel.num_layers
+        batchsz, num_layer, hei, wid = alphas.shape
+        num_layer += 1
+
+        alphas_bg = torch.ones_like(alphas[:, 0:1].unsqueeze(2)) * 0.99
+        alphas = torch.cat([alphas_bg, alphas.unsqueeze(2)], dim=1)
+
+        x = torch.reciprocal(make_depths(planenum)).reshape(1, 1, planenum, 1, 1).type_as(alphas)
+        disp_min, disp_max = 1 / default_d_far, 1 / default_d_near
+
+        if disps_down.shape[-2:] != alphas.shape[-2:]:
+            disps_up = torchf.interpolate(disps_down, alphas.shape[-2:], None, 'bilinear')
+        else:
+            disps_up = disps_down
+
+        d = (disps_up.unsqueeze(2) - x) * (planenum - 1.) / (disp_max - disp_min)
+        d = - torch.abs(torch.clamp(d, -0.9999, 0.9999)) + 1.
+        mpialpha = - torch.pow(- alphas + 1., d).prod(dim=1) + 1.
+        mpialpha = torch.clamp(mpialpha, 0, 1)
+        mpialpha[:, 0] = 1.  # the background should be all 1
+
+        d = d + 0.0001
+        blend_weight = d / d.sum(dim=1, keepdim=True)
+
+        return [disps_up, alphas.squeeze(2)], mpialpha, blend_weight
 
     def net2alpha(self, net, upmask, ret_bw=False):
         layernum = self.mpimodel.num_layers
@@ -1215,21 +1358,6 @@ class PipelineV2(nn.Module):
         else:
             return alpha, netout
 
-    def volume2alpha(self, x: torch.Tensor, depth, thick, sigma=4):
-        t = x - depth + thick
-        t = torch.relu(t)
-        t = torch.min(t, thick)
-        dt = t[:, 1:] - t[:, :-1]
-        return - torch.exp(-dt * sigma * Sigma_Denorm) + 1
-
-    def volume2alphaindepth(self, x, disp, thickindisp, sigma=1):
-        thickindisp = torch.min(disp - 1. / default_d_far, thickindisp)
-        depth0 = torch.reciprocal(disp)
-        t = x - depth0
-        t = torch.min(torch.relu(t), thickindisp * torch.reciprocal(disp - thickindisp) * depth0)
-        dt = t[:, :-1] - t[:, 1:]
-        return - torch.exp(-dt * sigma * Sigma_Denorm) + 1
-
     @staticmethod
     def multiparams2alpha(x, ds, th, sig):
         th = torch.min(ds - 1. / default_d_far, th)
@@ -1259,19 +1387,6 @@ class PipelineV2(nn.Module):
 
         expo = -(dt * sig).sum(dim=1)
         return -torch.exp(expo * 20) + 1
-
-    def params2alpha(self, x, ds1, ds2, t1, t2, s1, s2):
-        t1 = torch.min(ds1 - 1. / default_d_far, t1)
-        t2 = torch.min(ds2 - 1. / default_d_far, t2)
-        de1 = torch.reciprocal(ds1)
-        de2 = torch.reciprocal(ds2)
-        x1 = x - de1
-        x2 = x - de2
-        x1 = torch.min(torch.relu(x1), t1 * torch.reciprocal(ds1 - t1) * de1)
-        x2 = torch.min(torch.relu(x2), t2 * torch.reciprocal(ds2 - t2) * de2)
-        dx1 = x1[:, :-1] - x1[:, 1:]
-        dx2 = x2[:, :-1] - x2[:, 1:]
-        return -torch.exp(-(dx1 * s1 + dx2 * s2) * 10) + 1
 
     def square2alpha(self, x, depth, thick, scale=1):
         denorm = torch.tensor(self.mpimodel.num_layers - 1).type_as(x)
@@ -1332,153 +1447,60 @@ class PipelineV2(nn.Module):
         net_warp = self.flowfwarp_warp(flowf, flowb, net_last)
         return net_warp
 
-    def forwardaf(self, disparity, net, upmask, curim,
+    def forwardaf(self, curim,
                   flows_list: list, imgs_list: list, flow_nets_list: list, flow_upmasks_list: list,
                   flowsb_list: list, flowb_nets_list: list, flowb_upmasks_list: list,
                   intermediate=None):
         """
         Guarantee the flows[0] and imgs_list[0] to be the last frame
         """
-        assert len(flows_list) == len(imgs_list) == len(flow_nets_list) == len(flow_upmasks_list)
-        # =========================
-        # new pipeline
-        # =========================
-        if isinstance(self.afmodel, (AFNet, InPaintNet, AFNetBig)):
-            bglist, malist = [], []
-            for img, flow, flowb, flowupma, flowbupma in \
-                    zip(imgs_list, flows_list, flowsb_list, flow_upmasks_list, flowb_upmasks_list):
-                with torch.no_grad():
-                    # 0:curim  1:img  flow:0->1 flowb:1->0
-                    flow = upsample_flow(flow, flowupma) if flowupma is not None else flow
-                    flowb = upsample_flow(flowb, flowbupma) if flowbupma is not None else flowb
-                    # compute
-                    # occ1 = torch.norm(warp_flow(flow, flowb, self.offset_bhw2) + flowb, dim=1, keepdim=True)
-                    # occ1 = occ1.clamp_max(2)
-                    rangemap1 = forward_scatter(flow, torch.ones_like(img[:, 0:1]), self.offset)
-                    occ1 = - erode(rangemap1) + 1
-                    rangemap0 = forward_scatter_withweight(flowb, occ1, occ1, self.offset)
-                    rangemap0 = erode(rangemap0)
-                    flowbg = forward_scatter_withweight(flowb, -flowb, occ1, self.offset)
-                    for i in range(5):
-                        flowbg = media_filter(flowbg)
-                        flowbg = -warp_flow(flowb, flowbg, offset=self.offset_bhw2)
-                    imbg = warp_flow(img, flowbg, offset=self.offset_bhw2)
-                    bglist.append(imbg)
-                    malist.append(rangemap0)
+        bglist, malist = [], []
+        for img, flow, flowb, flowupma, flowbupma in \
+                zip(imgs_list, flows_list, flowsb_list, flow_upmasks_list, flowb_upmasks_list):
+            with torch.no_grad():
+                # 0:curim  1:img  flow:0->1 flowb:1->0
+                flow = upsample_flow(flow, flowupma) if flowupma is not None else flow
+                flowb = upsample_flow(flowb, flowbupma) if flowbupma is not None else flowb
+                # compute
+                # occ1 = torch.norm(warp_flow(flow, flowb, self.offset_bhw2) + flowb, dim=1, keepdim=True)
+                # occ1 = occ1.clamp_max(2)
+                rangemap1 = forward_scatter(flow, torch.ones_like(img[:, 0:1]), self.offset)
+                occ1 = - erode(rangemap1) + 1
+                rangemap0 = forward_scatter_withweight(flowb, occ1, occ1, self.offset)
+                rangemap0 = erode(rangemap0)
+                flowbg = forward_scatter_withweight(flowb, -flowb, occ1, self.offset)
+                for i in range(5):
+                    flowbg = media_filter(flowbg)
+                    flowbg = -warp_flow(flowb, flowbg, offset=self.offset_bhw2)
+                imbg = warp_flow(img, flowbg, offset=self.offset_bhw2)
+                bglist.append(imbg)
+                malist.append(rangemap0)
 
-            eps = 0.3
-            net_up = learned_upsample(net, upmask) if upmask is not None else net
-            if self.aflow_contextaware:
-                with torch.no_grad():
-                    fg = net[:, 0:1].detach()
-                    fge = erode(erode(fg))
-                    diff = learned_upsample(fg - fge, upmask.detach())
-                    context = dilate(diff, dilate=2) < 4. / 32.
-                    for ma in malist:
-                        context *= (ma < eps)
-                    imgin = curim * context
-            else:
-                imgin = curim
+        eps = 0.3
 
-            if isinstance(self.afmodel, AFNetBig):
-                # sort based on the number of pixel in mask from small to big
-                pixelnum = [float((ma > eps).sum()) for ma in malist]
-                idxs = np.argsort(pixelnum)
-                malist = [malist[i] for i in idxs]
-                bglist = [bglist[i] for i in idxs]
+        # sort based on the number of pixel in mask from small to big
+        pixelnum = [float((ma > eps).sum()) for ma in malist]
+        idxs = np.argsort(pixelnum)
+        malist = [malist[i] for i in idxs]
+        bglist = [bglist[i] for i in idxs]
 
-                frame = curim.clone()
+        frame = curim.clone()
 
-                accmask_yes = malist[0] > eps
+        accmask_yes = malist[0] > eps
 
-                mask_maybe = dilate(dilate(malist[0]), dilate=2) > eps
-                mask = mask_maybe.expand(-1, 3, -1, -1)
-                frame[mask] = bglist[0][mask]
-                for bgctx, mactx in zip(bglist[1:], malist[1:]):
-                    mask_maybe = dilate(dilate(mactx), dilate=2) > eps
-                    mask = torch.logical_and(torch.logical_not(accmask_yes), mask_maybe).expand(-1, 3, -1, -1)
-                    frame[mask] = bgctx[mask]
+        mask_maybe = dilate(dilate(malist[0]), dilate=2) > eps
+        mask = mask_maybe.expand(-1, 3, -1, -1)
+        frame[mask] = bglist[0][mask]
+        for bgctx, mactx in zip(bglist[1:], malist[1:]):
+            mask_maybe = dilate(dilate(mactx), dilate=2) > eps
+            mask = torch.logical_and(torch.logical_not(accmask_yes), mask_maybe).expand(-1, 3, -1, -1)
+            frame[mask] = bgctx[mask]
 
-                    accmask_yes = torch.logical_or(accmask_yes, mactx > 0.1)
-                accmask_yes = accmask_yes.type(torch.float32)
-                mask_in = dilate(dilate(accmask_yes), dilate=2)
-                frames_list = [torch.cat([frame, mask_in], dim=1)]
-                if self.afmodel.framenum == 0:
-                    frames_list = []
-            elif self.afmodel.hasmask:
-                frames_list = [torch.cat([bg, ma], dim=1) for bg, ma in zip(bglist, malist)]
-            else:
-                frames_list = [bg * (ma > eps) for bg, ma in zip(bglist, malist)]
+            accmask_yes = torch.logical_or(accmask_yes, mactx > 0.1)
+        accmask_yes = accmask_yes.type(torch.float32)
+        mask_in = dilate(dilate(accmask_yes), dilate=2)
 
-            # frames_list = [torch.cat([curim.clone(), torch.zeros_like(accmask_yes)], dim=1)]
-
-            if self.training and self.aflow_selfsu:  # should ensure that context aware is True and is AFNetBig
-                hei, wid = ma.shape[-2:]
-                rand_hei = np.random.randint(hei // 10, hei // 5)
-                rand_wid = np.random.randint(wid // 10, wid // 5)
-                rand_top = np.random.randint(hei // 10, hei - hei // 10)
-                rand_left = np.random.randint(wid // 10, wid - wid // 10)
-
-                ma_gen = torch.zeros_like(context)
-                ma_gen[..., rand_top: rand_top + rand_hei, rand_left: rand_left + rand_wid] = True
-                ma_gen = torch.logical_and(ma_gen, context)
-                frame_supervision = curim
-                imgin[ma_gen.expand(-1, 3, -1, -1)] = 0
-
-            net_in = net_up[:, :2] if self.afmodel.netcnl == 2 else net_up
-            net_in = net_in.detach()
-
-            inp = torch.cat([net_in, imgin] + frames_list, dim=1)
-
-            bg = self.afmodel(inp)
-            # bg = frame
-            if intermediate is not None and "bg_supervise" in intermediate.keys():
-                intermediate["bg_supervise"].append([bg, erode(malist[0]), bglist[0]])
-                intermediate["bg_supervise"].append([bg, erode(malist[1]), bglist[1]])
-                if self.aflow_selfsu:
-                    intermediate["bg_supervise"].append([bg, ma_gen, frame_supervision])
-            return bg
-
-        # =========================
-        # old pipeline
-        # =========================
-        masks, bgs = [], []
-        # lastmask = None
-        for flow, img, flow_net, flow_upmask in zip(flows_list, imgs_list, flow_nets_list, flow_upmasks_list):
-            if isinstance(self.afmodel, AFNet_HR_netflowin):
-                flow = upsample_flow(flow, flow_upmask) if flow_upmask is not None else flow
-                net_up = learned_upsample(net, upmask) if upmask is not None else net
-                bgflow, mask = self.afmodel(net_up, flow)
-            elif isinstance(self.afmodel, AFNet_AB_svdbg):
-                net_up = learned_upsample(net, upmask)
-                bg = self.afmodel(net_up, curim)
-                bgs = [bg]
-                masks = [torch.ones_like(bg)]
-                break
-            else:
-                raise NotImplementedError("AFModel incompatiable")
-            # if isinstance(self.afmodel, AFNet_HR_netflowin):
-            #     bgflow, mask = self.afmodel(flow, disparity)
-            # else:
-            #     bgflow, mask = self.afmodel(flow, disparity, lastmask)
-            #     lastmask = mask if lastmask is None else mask + lastmask
-
-            bg = warp_flow(img, bgflow, offset=self.offset_bhw2)
-            if intermediate is not None and "bgflow_fgflow" in intermediate.keys():
-                if flow.shape[-2:] == curim.shape[-2:]:
-                    intermediate["bgflow_fgflow"].append((bgflow, flow))
-                else:
-                    intermediate["bgflow_fgflow"].append((bgflow, upsample_flow(flow, flow_upmask)))
-
-            masks.append(mask)
-            bgs.append(bg)
-
-        bgs = torch.stack(bgs)
-        masks = torch.stack(masks)
-        weight = torchf.softmax(masks, dim=0)  # masks / masks.sum(dim=0, keepdim=True)
-        bg = (bgs * weight).sum(dim=0)
-
-        return bg
+        return malist, bglist, frame, mask_in
 
     def forward(self, *args: torch.Tensor, **kwargs):
         # tocuda and unzip
@@ -1506,7 +1528,7 @@ class PipelineV2(nn.Module):
             "net_up": [],
             "bg_supervise": []
         }
-        mpi_out, net_out, upmask_out, disp_out = self.forward_multiframes(refims, step, intermediates)
+        scene_reprs, net_out, disp_out = self.forward_multiframes(refims, step, intermediates)
         flows_f_upmask = intermediates["flows_f_upmask"]
         flows_f = intermediates["flows_f"]
         flows_b_upmask = intermediates["flows_b_upmask"]
@@ -1551,16 +1573,34 @@ class PipelineV2(nn.Module):
         else:
             raise RuntimeError(f"PipelineV2::unrecognized scale mode {self.scale_mode}")
 
+        if isinstance(self.mpimodel, RGBADNet) and self.mpimodel.is_ldi:
+            tarviews = []
+            for i in range(len(disp_out)):
+                ldi = scene_reprs[i]
+                ldi_flat = ldi.reshape(-1, 5, heiori, widori)
+                disp_dx = ldi_flat[:, 4:5] / scale[0] * -isleft[0] + shift_gt[0]
+                flow_f = torch.cat([disp_dx, torch.zeros_like(disp_dx)], dim=1)
+                soft_z = torch.exp(ldi_flat[:, 4:5] - 1) * self.soft_z_tau
+                novelview = forward_scatter_withweight(flow_f, ldi_flat[:, :4], soft_z, self.offset)
+                novelview = novelview.reshape(batchsz, -1, 4, heiori, widori)
+                bw = novelview[:, 1, 3:4]
+                novelview = novelview[:, 0, :3] * (-bw + 1) + novelview[:, 1, :3] * bw
+                tarviews.append(novelview)
+        elif isinstance(self.mpimodel, RGBADNet):
+            disparities = torch.reciprocal(depth * scale.reshape(-1, 1) * -isleft.reshape(-1, 1)) + shift_gt.reshape(-1, 1)
+            # render target view
+            tarviews = [
+                shift_newview(mpi_, -disparities, ret_mask=False)
+                for mpi_ in scene_reprs
+            ]
+        else:
+            raise NotImplementedError("PipelineV2.forward: model other than RGBADNet is not implemented yet")
+
         # disparity in ground truth space
-        disparities = torch.reciprocal(depth * scale.reshape(-1, 1) * -isleft.reshape(-1, 1)) + shift_gt.reshape(-1, 1)
-        # render target view
-        tarviews = [
-            shift_newview(mpi_, -disparities, ret_mask=False)
-            for mpi_ in mpi_out
-        ]
+
         return self.compute_loss(
             False, refims, tarims,
-            net_out, upmask_out, mpi_out, tarviews, disp_out, scale,
+            net_out, None, scene_reprs, tarviews, disp_out, scale,
             flows_f, flows_b, flows_f_upmask, flows_b_upmask,
             disp_diffs, certainty_maps,
             None, None,
@@ -1568,7 +1608,7 @@ class PipelineV2(nn.Module):
         )
 
     def compute_loss(self, issparse: bool, refims, tarims,
-                     net_out, upmask_out, mpi_out, tarviews, disp_out, scale,
+                     net_out, upmask_out, scene_reprs, tarviews, disp_out, scale,
                      flowsf, flowsb, flowsf_upmask, flowsb_upmask,
                      disp_diffs, certainty_maps,  # if issparse is False
                      ptdis_es, ptzs_gts,  # if issparse is True
@@ -1576,7 +1616,6 @@ class PipelineV2(nn.Module):
                      ):
         batchsz, framenum, _, heiori, widori = refims.shape
         layernum = self.mpimodel.num_layers
-        depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
         # compute final loss
         final_loss, loss_dict = torch.tensor(0., dtype=torch.float32).cuda(), {}
         loss_dict["scale"] = scale.detach().mean()
@@ -1584,7 +1623,7 @@ class PipelineV2(nn.Module):
             fg_pct = self.bgfgfuse_scheduler.get_value(step)
             loss_dict["fg_pct"] = torch.tensor(fg_pct).type_as(final_loss)
         # MPI loss
-        for mpiframeidx in range(len(mpi_out)):
+        for mpiframeidx in range(len(scene_reprs)):
             if "pixel_loss" in self.loss_weight.keys():
                 tarim = tarims if issparse else tarims[:, mpiframeidx]
                 l1_loss = self.photo_loss(tarviews[mpiframeidx], tarim)
@@ -1613,6 +1652,10 @@ class PipelineV2(nn.Module):
                     net_smth_loss = fg_up_loss.mean() + \
                                     fg_down_loss.mean() + \
                                     bg_down_loss.mean() * 0.2
+                elif isinstance(self.mpimodel, RGBADNet):
+                    ldi_disp = net_out[mpiframeidx][0]
+                    batchsz, ldi_layer_num, down_hei, down_wid = ldi_disp.shape
+                    net_smth_loss = smooth_loss(ldi_disp.reshape(-1, 1, down_hei, down_wid)).mean()
                 else:
                     raise RuntimeError(f"net_smth_loss::{type(self.mpimodel)} not recognized")
 
@@ -1634,58 +1677,20 @@ class PipelineV2(nn.Module):
                 else:
                     loss_dict["netsmth"] += net_smth_loss.detach()
 
-            fg_down, bg_down, fg_t_down, bg_t_down = net_out[mpiframeidx][:, :4].split(1, dim=1)
-            if isinstance(self.mpimodel, MPILDI_AB_alpha):
-                disp_down = None
-            else:
-                disp_down = self.net2disparity(net_out[mpiframeidx])
             # alpha_down, _ = self.net2alpha(net_out[mpiframeidx].detach(), None)
             # disp_down = estimate_disparity_torch(alpha_down.unsqueeze(2), depth).unsqueeze(1)
             if "disp_smth_loss" in self.loss_weight.keys():
-                assert isinstance(self.mpimodel, (MPI_LDI_res, MPI_LDI, MPI_LDIdiv, MPI_LDIbig, MPILDI_AB_nonet))
+                # assert isinstance(self.mpimodel, (MPI_LDI_res, MPI_LDI, MPI_LDIdiv, MPI_LDIbig, MPILDI_AB_nonet))
                 disp_up = disp_out[mpiframeidx]
                 guidence_up = refims[:, mpiframeidx + 1]
-                guidence_down = torchf.interpolate(guidence_up, (heiori // 8, widori // 8))
 
                 up_loss = smooth_grad(disp_up, guidence_up)
-                down_loss = smooth_grad(disp_down, guidence_down)
-                smth_loss = up_loss.mean() + down_loss.mean()
+                smth_loss = up_loss.mean()
                 final_loss += (smth_loss * self.loss_weight["disp_smth_loss"] * smth_schedule)
                 if "dispsmth" not in loss_dict.keys():
                     loss_dict["dispsmth"] = smth_loss.detach()
                 else:
                     loss_dict["dispsmth"] += smth_loss.detach()
-
-            if "net_prior0" in self.loss_weight.keys():
-                prior = (torch.relu(bg_down - fg_down.detach())).mean()
-                final_loss += (prior * self.loss_weight["net_prior0"])
-                if "net_prior0" not in loss_dict.keys():
-                    loss_dict["net_prior0"] = prior.detach()
-                else:
-                    loss_dict["net_prior0"] += prior.detach()
-
-            if "net_prior1" in self.loss_weight.keys():
-                with torch.no_grad():
-                    disp_dilate = dilate(dilate(disp_down.detach()))
-                    bgmask = (disp_dilate - disp_down.detach())
-
-                prior = ((bg_down - disp_down.detach()).abs() * bgmask).mean()
-                final_loss += (prior * self.loss_weight["net_prior1"])
-                if "net_prior1" not in loss_dict.keys():
-                    loss_dict["net_prior1"] = prior.detach()
-                else:
-                    loss_dict["net_prior1"] += prior.detach()
-
-            if "net_prior2" in self.loss_weight.keys():
-                disp_erode = erode(erode(disp_down.detach()))
-                bgmask = (disp_down.detach() - disp_erode)
-
-                prior = ((bg_down - disp_erode.detach()).abs() * bgmask).mean()
-                final_loss += (prior * self.loss_weight["net_prior2"] * smth_schedule)
-                if "net_prior2" not in loss_dict.keys():
-                    loss_dict["net_prior2"] = prior.detach()
-                else:
-                    loss_dict["net_prior2"] += prior.detach()
 
             if "depth_loss" in self.loss_weight.keys():
                 if issparse:
@@ -1737,43 +1742,43 @@ class PipelineV2(nn.Module):
             loss_dict["temp_nv"] = diff.detach()
 
         # Warmup
-        if "mask_warmup" in self.loss_weight.keys():
-            mask_loss = torch.tensor(0.).type_as(refims)
-            for i in range(len(upmask_out)):
-                if np.random.randint(0, 2) == 0:
-                    flow = flowsf[:, i + 1]
-                    flowmask = flowsf_upmask[:, i + 1]
-                else:
-                    flow = flowsb[:, i]
-                    flowmask = flowsb_upmask[:, i]
-
-                if self.upmask_magaware:
-                    with torch.no_grad():
-                        weightx, weighty = gradient(flow)
-                        weight = (weightx.abs() + weighty.abs()).sum(dim=1, keepdim=True)[..., 1:-1, 1:-1]
-                        weight = torch.clamp(weight, 0, 1)
-                else:
-                    weight = 1
-
-                diff = (upmask_out[i] - flowmask)[..., 1:-1, 1:-1].abs().mean(dim=1) * weight
-                mask_loss += diff.mean()
-
-                if not issparse and self.upmask_lr:
-                    with torch.no_grad():
-                        flow, flowmask, _ = self.flow_estim(refims[:, i + 1], tarims[:, i], ret_upmask=True)
-                        if self.upmask_magaware:
-                            weightx, weighty = gradient(flow)
-                            weight = (weightx.abs() + weighty.abs()).sum(dim=1, keepdim=True)[..., 1:-1, 1:-1]
-                            weight = torch.clamp(weight, 0, 1)
-                        else:
-                            weight = 1
-                        diff = (upmask_out[i] - flowmask)[..., 1:-1, 1:-1].abs().mean(dim=1) * weight
-                        mask_loss += diff.mean()
-
-            mask_loss /= len(upmask_out)
-            weight = self.loss_weight["mask_warmup"]
-            final_loss += (weight * mask_loss)
-            loss_dict["mask_warmup"] = mask_loss.detach()
+        # if "mask_warmup" in self.loss_weight.keys():
+        #     mask_loss = torch.tensor(0.).type_as(refims)
+        #     for i in range(len(upmask_out)):
+        #         if np.random.randint(0, 2) == 0:
+        #             flow = flowsf[:, i + 1]
+        #             flowmask = flowsf_upmask[:, i + 1]
+        #         else:
+        #             flow = flowsb[:, i]
+        #             flowmask = flowsb_upmask[:, i]
+        #
+        #         if self.upmask_magaware:
+        #             with torch.no_grad():
+        #                 weightx, weighty = gradient(flow)
+        #                 weight = (weightx.abs() + weighty.abs()).sum(dim=1, keepdim=True)[..., 1:-1, 1:-1]
+        #                 weight = torch.clamp(weight, 0, 1)
+        #         else:
+        #             weight = 1
+        #
+        #         diff = (upmask_out[i] - flowmask)[..., 1:-1, 1:-1].abs().mean(dim=1) * weight
+        #         mask_loss += diff.mean()
+        #
+        #         if not issparse and self.upmask_lr:
+        #             with torch.no_grad():
+        #                 flow, flowmask, _ = self.flow_estim(refims[:, i + 1], tarims[:, i], ret_upmask=True)
+        #                 if self.upmask_magaware:
+        #                     weightx, weighty = gradient(flow)
+        #                     weight = (weightx.abs() + weighty.abs()).sum(dim=1, keepdim=True)[..., 1:-1, 1:-1]
+        #                     weight = torch.clamp(weight, 0, 1)
+        #                 else:
+        #                     weight = 1
+        #                 diff = (upmask_out[i] - flowmask)[..., 1:-1, 1:-1].abs().mean(dim=1) * weight
+        #                 mask_loss += diff.mean()
+        #
+        #     mask_loss /= len(upmask_out)
+        #     weight = self.loss_weight["mask_warmup"]
+        #     final_loss += (weight * mask_loss)
+        #     loss_dict["mask_warmup"] = mask_loss.detach()
 
         if "bgflow_warmup" in self.loss_weight.keys():
             bgflow_suloss = torch.tensor(0.).type_as(refims)
@@ -1823,7 +1828,7 @@ class PipelineV2SV(PipelineV2):
         depth = make_depths(layernum).type_as(refims).unsqueeze(0).repeat(batchsz, 1)
 
         intermediate = {"disp0": None, "disp_warp": [], "imbg": None}
-        mpi_list, net_list, upmask_list, disp_list = self.forward_multiframes(refims, None, intermediate)
+        mpi_list, net_list, disp_list = self.forward_multiframes(refims, None, intermediate)
         disp0 = intermediate["disp0"]
         disp_warp_list = intermediate["disp_warp"]
         imbg = intermediate["imbg"]
@@ -1922,7 +1927,7 @@ class PipelineV2SV(PipelineV2):
             "net_up": [],
             "bg_supervise": []
         }
-        mpi_out, net_out, upmask_out, disp_out = self.forward_multiframes(refims, step, intermediates)
+        scene_reprs, net_out, disp_out = self.forward_multiframes(refims, step, intermediates)
         flows_f_upmask = intermediates["flows_f_upmask"]
         flows_f = intermediates["flows_f"]
         flows_b_upmask = intermediates["flows_b_upmask"]
@@ -1964,24 +1969,47 @@ class PipelineV2SV(PipelineV2):
         else:
             raise RuntimeError(f"PipelineSVV2::unrecognized scale mode {self.scale_mode}")
 
-        depth = depth * scale.reshape(-1, 1)
         # render target view
-        tarviews = [
-            render_newview(
-                mpi=mpi_out[i],
-                srcextrin=refextrins[:, i],
-                tarextrin=tarextrin,
-                srcintrin=intrin,
-                tarintrin=intrin,
-                depths=depth,
-                ret_mask=False
-            )
-            for i in range(len(mpi_out))
-        ]
+        if isinstance(self.mpimodel, RGBADNet) and self.mpimodel.is_ldi:
+            tarviews = []
+            for i in range(len(disp_out)):
+                ldi = scene_reprs[i]
+                ldi_flat = ldi.reshape(-1, 5, heiori, widori)
+                disp = ldi_flat[:, 4:5] / scale[0]
+                flow_f = compute_ldi_flow(
+                    disparity=disp,
+                    src_ext=refextrins[:, i],
+                    src_intr=intrin,
+                    tar_ext=tarextrin,
+                    tar_intr=intrin
+                )
+                soft_z = torch.exp(ldi_flat[:, 4:5] - 1) * self.soft_z_tau
+                novelview = forward_scatter_withweight(flow_f, ldi_flat[:, :4], soft_z, self.offset)
+                novelview = novelview.reshape(batchsz, -1, 4, heiori, widori)
+                bw = novelview[:, 1, 3:4]
+                novelview = novelview[:, 0, :3] * (-bw + 1) + novelview[:, 1, :3] * bw
+                tarviews.append(novelview)
+
+        elif isinstance(self.mpimodel, RGBADNet):
+            depth = depth * scale.reshape(-1, 1)
+            tarviews = [
+                render_newview(
+                    mpi=scene_reprs[i],
+                    srcextrin=refextrins[:, i],
+                    tarextrin=tarextrin,
+                    srcintrin=intrin,
+                    tarintrin=intrin,
+                    depths=depth,
+                    ret_mask=False
+                )
+                for i in range(len(scene_reprs))
+            ]
+        else:
+            raise NotImplementedError("PipelineV2SV.forward: model other than RGBADNet is not implemented yet")
 
         return self.compute_loss(
             True, refims, tarims,
-            net_out, upmask_out, mpi_out, tarviews, disp_out, scale,
+            net_out, None, scene_reprs, tarviews, disp_out, scale,
             flows_f, flows_b, flows_f_upmask, flows_b_upmask,
             None, None,
             ptdis_es, ptzs_gts,

@@ -26,17 +26,16 @@ def train(cfg: dict):
     log_prefix = cfg["log_prefix"]
     unique_id = cfg["unique_id"] if "unique_id" in cfg.keys() else ""
     if len(unique_id) == 0:
-        unique_id = os.environ["SLURM_JOBID"] if "SLURM_JOBID" in os.environ.keys() else datetime.now().strftime('%d%H%M')
+        unique_id = os.environ.get("SLURM_JOBID",
+                                   datetime.now().strftime('%d%H%M'))
         if "id" in cfg.keys():
             unique_id = f"{cfg['id']}_{unique_id}"
 
-    mpi_save_path = os.path.join(log_prefix, cfg["mpi_outdir"], f"{unique_id}")
     checkpoint_path = os.path.join(log_prefix, cfg["checkpoint_dir"])
     tensorboard_log_prefix = os.path.join(log_prefix, cfg["tensorboard_logdir"])
     cfgstr_out = os.path.join(tensorboard_log_prefix, "configs.txt")
     log_dir = os.path.join(tensorboard_log_prefix, str(unique_id))
 
-    mkdir_ifnotexist(mpi_save_path)
     mkdir_ifnotexist(checkpoint_path)
     mkdir_ifnotexist(tensorboard_log_prefix)
 
@@ -115,6 +114,34 @@ def train(cfg: dict):
             loss = loss.mean()
             loss_dict = {k: v.mean() for k, v in loss_dict.items()}
 
+            modelhasnan = False
+            for val in model.state_dict().values():
+                if torch.any(torch.isnan(val)):
+                    modelhasnan = True
+            if modelhasnan:
+                print(f"R{local_rank}:Warning! nan detected in the model!")
+                print(f"R{local_rank}:The loss dict is: {loss_dict}")
+                torch.save({
+                    "epoch": epoch,
+                    "step": step,
+                    "cfg": cfg_str,
+                    "state_dict": model.state_dict(),
+                    # "optimizer": optimizer.state_dict()
+                }, os.path.join(checkpoint_path, f"{unique_id}_naninmodel_r{local_rank}.pth"))
+                print(f"R{local_rank}:checkpoint saved {epoch}{unique_id}_nandebug_r{local_rank}.pth", flush=True)
+
+            if torch.any(torch.isnan(loss)) or torch.any(torch.isinf(loss)):
+                print(f"R{local_rank}: Warning! {'Nan' if torch.any(torch.isnan(loss)) else 'Inf'} detected in the loss!")
+                print(f"R{local_rank}: The loss dict is: {loss_dict}")
+                torch.save({
+                    "epoch": epoch,
+                    "step": step,
+                    "cfg": cfg_str,
+                    "state_dict": model.state_dict(),
+                    # "optimizer": optimizer.state_dict()
+                }, os.path.join(checkpoint_path, f"{unique_id}_naninloss_r{local_rank}.pth"))
+                exit()
+
             # first evaluate and then backward so that first evaluate is always the same
             optimizer.zero_grad()
             loss.backward()
@@ -149,8 +176,6 @@ def train(cfg: dict):
                             if "vis_" in k:
                                 tensorboard.add_image(k, _val_dict[k], step, dataformats='HWC')
                                 _val_dict.pop(k, None)
-                            if "save_" in k:
-                                save_mpi(_val_dict.pop(k), mpi_save_path)
 
                     val_dict = {k: val_dict[k] + v if k in val_dict.keys() else v
                                 for k, v in _val_dict.items()}
@@ -162,14 +187,15 @@ def train(cfg: dict):
                 print(f"CHECKING Consistency:: {modelloss.module.parameters().__next__()[0, 0, 0]}")
 
             if (step + 1) % savepth_iter_freq == 0 and local_rank == 0:
-                torch.save({
-                    "epoch": epoch,
-                    "step": step,
-                    "cfg": cfg_str,
-                    "state_dict": model.state_dict(),
-                    # "optimizer": optimizer.state_dict()
-                }, os.path.join(checkpoint_path, f"{unique_id}_r{local_rank}.pth"))
-                print(f"checkpoint saved {epoch}{unique_id}_r{local_rank}.pth", flush=True)
+                if not modelhasnan:
+                    torch.save({
+                        "epoch": epoch,
+                        "step": step,
+                        "cfg": cfg_str,
+                        "state_dict": model.state_dict(),
+                        # "optimizer": optimizer.state_dict()
+                    }, os.path.join(checkpoint_path, f"{unique_id}_r{local_rank}.pth"))
+                    print(f"checkpoint saved {epoch}{unique_id}_r{local_rank}.pth", flush=True)
 
     print("TRAINING Finished!!!!!!!!!!!!", flush=True)
     if tensorboard is not None:

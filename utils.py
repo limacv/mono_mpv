@@ -127,6 +127,18 @@ def select_module(name: str) -> nn.Module:
             "AppearanceFlow": AFNet(netcnl=4),
             "LBTC": TransformNet(plane_num - 1, conv_cnl_num=64)
         })
+    elif "RGBAD" == name:
+        return nn.ModuleDict({
+            "MPI": RGBADNet(plane_num, 2),
+            "SceneFlow": None,
+            "AppearanceFlow": None
+        })
+    elif "RGBAD_LDI" == name:
+        return nn.ModuleDict({
+            "MPI": RGBADNet(2, 2),  # set mpi_layers to 2 to make it an LDI
+            "SceneFlow": None,
+            "AppearanceFlow": None
+        })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 

@@ -5,7 +5,7 @@ if __name__ == "__main__":
     cfg = {
         # ======== dataset related =========
         "num_process": 1,
-        "dataset": "NvidiaNovelView",  # StereoVideo, NvidiaNovelView
+        "dataset": "StereoVideo",  # StereoVideo, NvidiaNovelView
         "datasetcfg": {
             "resolution": (448, 768),  # (540, 960)
             "max_baseline": 4,
@@ -18,8 +18,8 @@ if __name__ == "__main__":
         "scale_in_log": False,
 
         # ======== model and inference related =========
-        "checkpoint": "./log/checkpointsave/Ultly2ok_r0_6.pth",
-        "pipeline": "fullv4",
+        "checkpoint": "./log/checkpoint/LDI2MPI_newCEL5_r0.pth",
+        "pipeline": "ldifilter",
         "pipelinecfg": {"winsz": 7, "forwardaf_idx": [0, 2, -1]},
         "infer_cfg": "",
 

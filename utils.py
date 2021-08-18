@@ -139,6 +139,12 @@ def select_module(name: str) -> nn.Module:
             "SceneFlow": None,
             "AppearanceFlow": None
         })
+    elif "RGBAD_Disjoint" == name:
+        return nn.ModuleDict({
+            "MPI": RGBADDisjoint(plane_num, 2),
+            "SceneFlow": None,
+            "AppearanceFlow": None
+        })
     else:
         raise ValueError(f"unrecognized modelin name: {name}")
 
@@ -161,6 +167,8 @@ def select_modelloss(name: str):
         return PipelineFiltering
     elif "fulljoint" == name:
         return PipelineJoint
+    elif "ldifilter" == name:
+        return PipelineFilterLDI
     elif "lbtc" == name:
         return PipelineLBTC
     else:

@@ -890,6 +890,7 @@ class RGBADNet(nn.Module):
         )
         self.active01 = lambda x: torch.sigmoid(x)
         self.active11 = lambda x: torch.tanh(x)
+        self.active0inf = lambda x: -torch.exp(-torch.relu(x)) + 1
 
     @staticmethod
     def shapeto(x, tar):
@@ -910,12 +911,13 @@ class RGBADNet(nn.Module):
         x = self.up(self.up7b(self.up7(torch.cat(self.shapeto(x, down7), dim=1))))
         x = self.up(self.up6b(self.up6(torch.cat(self.shapeto(x, down6), dim=1))))
         x = self.up(self.up5b(self.up5(torch.cat(self.shapeto(x, down5), dim=1))))
+        x, down4 = self.shapeto(x, down4)
         disps = self.active01(self.depth_decoder(x))
-        x = self.up(self.up4b(self.up4(torch.cat(self.shapeto(x, down4), dim=1))))
+        x = self.up(self.up4b(self.up4(torch.cat([x, down4], dim=1))))
         x = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x, down3), dim=1))))
         x = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x, down2), dim=1))))
         x = torch.cat(self.shapeto(x, down1), dim=1)
-        alphas = self.active01(self.alpha_decoder(x))
+        alphas = self.active0inf(self.alpha_decoder(x))
         rgbs = self.active11(self.rgb_decoder(x))
         return disps, alphas, rgbs
 
@@ -930,9 +932,158 @@ class RGBADNet(nn.Module):
         nn.init.constant_(self.depth_decoder[-1].bias[0], -0.5)
         nn.init.constant_(self.depth_decoder[-1].bias[1], 0.5)
         nn.init.xavier_normal_(self.alpha_decoder[-1].weight)
-        nn.init.constant_(self.alpha_decoder[-1].bias, 0)
+        nn.init.constant_(self.alpha_decoder[-1].bias, 0.5)
         nn.init.xavier_normal_(self.rgb_decoder[-1].weight)
         nn.init.constant_(self.rgb_decoder[-1].bias, 0)
+
+
+class RGBADDisjoint(nn.Module):
+    def __init__(self, mpi_layers, num_layers=2):
+        super().__init__()
+        self.is_ldi = mpi_layers == num_layers
+        self.num_set = 2
+        self.num_layers = mpi_layers
+        self.ldi_layers = num_layers
+        self.down = nn.MaxPool2d(2, ceil_mode=True)
+        self.up = up
+
+        self.down1 = conv(3 + 3 + 1, 48, 7)
+        self.down1b = conv(48, 48, 7)
+        self.down2 = conv(48, 64, 5)
+        self.down2b = conv(64, 64, 5)
+        self.down3 = conv(64, 128, 3)
+        self.down3b = conv(128, 128, 3)
+        self.down4 = conv(128, 256, 3)
+        self.down4b = conv(256, 256, 3)
+        self.down5 = conv(256, 512, 3)
+        self.down5b = conv(512, 512, 3)
+        self.down6 = conv(512, 512, 3)
+        self.down6b = conv(512, 512, 3)
+        self.down7 = conv(512, 512, 3)
+        self.down7b = conv(512, 512, 3)
+        self.mid1 = conv(512, 512, 3)
+        self.mid2 = conv(512, 512, 3)
+        self.up7 = conv(512 + 512, 512, 3)
+        self.up7b = conv(512, 512, 3)
+        self.up6 = conv(512 + 512, 512, 3)
+        self.up6b = conv(512, 512, 3)
+
+        self.up51 = conv(512 + 512, 512, 3)
+        self.up51b = conv(512, 384, 3)
+        self.up5 = conv(512 + 512, 512, 3)
+        self.up5b = conv(512, 512, 3)
+
+        self.up41 = conv(384 + 256, 256, 3)
+        self.up41b = conv(256, 128, 3)
+        self.up4 = conv(512 + 256, 256, 3)
+        self.up4b = conv(256, 256, 3)
+
+        self.up31 = conv(128 + 128, 128, 3)
+        self.up31b = conv(128, 64, 3)
+        self.up3 = conv(384, 128, 3)
+        self.up3b = conv(128, 128, 3)
+
+        self.up21 = conv(64 + 64, 64, 3)
+        self.up21b = conv(64, 32, 3)
+        self.up2 = conv(128 + 64, 64, 3)
+        self.up2b = conv(64, 64, 3)
+
+        self.depth_decoder = nn.ModuleList([
+            nn.Sequential(
+                conv(384, 64, kernel_size=1),
+                conv(64, 32),
+                nn.Conv2d(32, 1, 3, padding=1)
+            ),
+            nn.Sequential(
+                conv(512, 128, kernel_size=1),
+                conv(128, 64),
+                nn.Conv2d(64, 1, 3, padding=1)
+            ),
+            ])
+        self.alpha_decoder = nn.Sequential(
+            conv(64 + 48, 64, 3),
+            conv(64, 32, 3),
+            conv(32, 16, 3),
+            nn.Conv2d(16, 1, 3, padding=1)
+        )
+        self.rgb_decoder = nn.ModuleList([
+            nn.Sequential(
+                conv(32 + 48, 64, 3),
+                conv(64, 64, 3),
+                nn.Conv2d(64, 3, 3, padding=1)
+            ),
+            nn.Sequential(
+                conv(64 + 48, 64, 3),
+                conv(64, 64, 3),
+                nn.Conv2d(64, 3, 3, padding=1)
+            ),
+            ])
+        self.active01 = lambda x: torch.sigmoid(x)
+        self.active11 = lambda x: torch.tanh(x)
+        self.active0inf = lambda x: -torch.exp(-torch.relu(x)) + 1
+
+    @staticmethod
+    def shapeto(x, tar):
+        return [x[..., :tar.shape[-2], :tar.shape[-1]], tar]
+
+    def forward(self, img, flow_net, disp_warp):
+        batchsz, _, hei, wid = img.shape
+        assert hei % 8 == 0 and wid % 8 == 0
+
+        down1 = self.down1b(self.down1(img))
+        down2 = self.down2b(self.down2(self.down(down1)))
+        down3 = self.down3b(self.down3(self.down(down2)))
+        down4 = self.down4b(self.down4(self.down(down3)))
+        down5 = self.down5b(self.down5(self.down(down4)))
+        down6 = self.down6b(self.down6(self.down(down5)))
+        down7 = self.down7b(self.down7(self.down(down6)))
+        x = self.up(self.mid2(self.mid1(self.down(down7))))
+        x = self.up(self.up7b(self.up7(torch.cat(self.shapeto(x, down7), dim=1))))
+        x = self.up(self.up6b(self.up6(torch.cat(self.shapeto(x, down6), dim=1))))
+        x, down5 = self.shapeto(x, down5)
+        x1 = self.up(self.up51b(self.up51(torch.cat([x, down5], dim=1))))
+        x2 = self.up(self.up5b(self.up5(torch.cat([x, down5], dim=1))))
+
+        x1, down4 = self.shapeto(x1, down4)
+        x2, down4 = self.shapeto(x2, down4)
+        disps1 = self.active01(self.depth_decoder[0](x1))
+        disps2 = self.active01(self.depth_decoder[1](x2))
+
+        x1 = self.up(self.up41b(self.up41(torch.cat([x1, down4], dim=1))))
+        x2 = self.up(self.up4b(self.up4(torch.cat([x2, down4], dim=1))))
+
+        x1 = self.up(self.up31b(self.up31(torch.cat(self.shapeto(x1, down3), dim=1))))
+        x2 = self.up(self.up3b(self.up3(torch.cat(self.shapeto(x2, down3), dim=1))))
+
+        x1 = self.up(self.up21b(self.up21(torch.cat(self.shapeto(x1, down2), dim=1))))
+        x2 = self.up(self.up2b(self.up2(torch.cat(self.shapeto(x2, down2), dim=1))))
+
+        x1 = torch.cat(self.shapeto(x1, down1), dim=1)
+        x2 = torch.cat(self.shapeto(x2, down1), dim=1)
+        rgbs1 = self.active11(self.rgb_decoder[0](x1))
+        rgbs2 = self.active11(self.rgb_decoder[1](x2))
+
+        alphas = self.active0inf(self.alpha_decoder(x2))
+        return torch.cat([disps1, disps2], dim=1), alphas, torch.cat([rgbs1, rgbs2], dim=1)
+
+    def initial_weights(self):
+        for layer in self.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
+        nn.init.xavier_normal_(self.depth_decoder[0][-1].weight)
+        nn.init.constant_(self.depth_decoder[0][-1].bias, -0.5)
+        nn.init.xavier_normal_(self.depth_decoder[1][-1].weight)
+        nn.init.constant_(self.depth_decoder[1][-1].bias, 0.5)
+
+        nn.init.xavier_normal_(self.alpha_decoder[-1].weight)
+        nn.init.constant_(self.alpha_decoder[-1].bias, 0.5)
+        nn.init.xavier_normal_(self.rgb_decoder[0][-1].weight)
+        nn.init.constant_(self.rgb_decoder[0][-1].bias, 0)
+        nn.init.xavier_normal_(self.rgb_decoder[0][-1].weight)
+        nn.init.constant_(self.rgb_decoder[0][-1].bias, 0)
 
 
 class MPI_AB_up(nn.Module):

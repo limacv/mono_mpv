@@ -487,19 +487,28 @@ class NetWriter:
         self.toimg = toimg
 
     def write(self, net: torch.Tensor):
-        assert net.dim() == 4 and net.shape[1] == 10
-        net = net.cpu()
-        dfg, dbg, tfg, tbg, imfg, imbg = torch.split(net[0], [1, 1, 1, 1, 3, 3])
+        if net.dim() == 5:  # a ldi
+            im, a, d = torch.split(net[0], [3, 1, 1], dim=1)
+            imbg, imfg = im
+            tbg, tfg = a
+            dbg, dfg = d
+        elif net.dim() == 4:
+            assert net.dim() == 4 and net.shape[1] == 10
+            net = net.cpu()
+            dfg, dbg, tfg, tbg, imfg, imbg = torch.split(net[0], [1, 1, 1, 1, 3, 3])
+            tfg *= 10
+        else:
+            raise RuntimeError
 
-        def discrete(img: torch.tensor, scale=1):
+        def discrete(img: torch.tensor):
             if img.shape[0] == 1:
                 img = torch.repeat_interleave(img, 3, dim=0)
-            img = (img * scale * 255).type(torch.uint8)
+            img = (img * 255).type(torch.uint8)
             return img
 
         savefig = torchvision.utils.make_grid([discrete(imfg), discrete(imbg),
                                                discrete(dfg), discrete(dbg),
-                                               discrete(tfg, scale=10), discrete(tbg)
+                                               discrete(tfg), discrete(tbg)
                                                ], nrow=2, padding=0)
 
         cnl, hei, wid = savefig.shape

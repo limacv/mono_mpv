@@ -28,7 +28,7 @@ def main(kwargs):
     for i in range(int(14000)):
         datas_all = [[]] * 7
         for dev in range(batchsz):
-            datas = dataset[1]
+            datas = dataset[0]
             datas_all = [ds_ + [d_] for ds_, d_ in zip(datas_all, datas)]
 
         datas = [torch.stack(data, dim=0).cuda() for data in datas_all]
@@ -74,14 +74,14 @@ def main(kwargs):
 main({
     "modelname": "RGBAD",  # MPINetv2, Fullv6, Fullv5.Fullv5resnet, Ultimately, RGBAD
     "pipelinename": "fulljoint",  # sv, disp_img, fullv2, fullsvv2, fulljoint, svjoint
-    "datasetname": "realestate10k_seq",
+    "datasetname": "mannequinchallenge_seq",
     # stereovideo_img, stereovideo_seq, mannequinchallenge_img, mannequinchallenge_seq, mannequin+realestate_img
     # mannequin+realestate_seq, m+r+s_seq, realestate10k_seq, realestate10k_img
     "istrain": True,
     "check_point": {
         # "MPI.": "mpinet_ori.pth",  # don't miss the MPI
         # "AppearanceFlow": "Ultimate_LR_r0.pth",
-        "": "LDI2MPI_r0.pth"
+        "": "LDI2MPI_CEL_r0.pth"
     },
 
     "device_ids": [0],
@@ -115,6 +115,7 @@ main({
                      "net_prior0": 1,
                      "net_prior1": 1,
                      "net_prior2": 1,
+                     "alpha_entropy": 1,
                      "blending_visible": True,
                      "tempnewview_mode": "imwarp",
                      "aflow_contextaware": True,
@@ -127,6 +128,7 @@ main({
                      "long_term": 100,
                      "sv_loss": 10,
                      "svg_loss": 10,
+                     "alpha_temp": 5,
                      "disp_smth_loss": 0.5,
                      },
 })

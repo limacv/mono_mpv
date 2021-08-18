@@ -10,6 +10,8 @@ import trainer_distributed as trainer
 import argparse
 import random
 
+unique_id = "LDI2MPI_scratch"
+
 cfg = {
     "local_rank": 0,  # will set later
     "world_size": 10,
@@ -17,12 +19,12 @@ cfg = {
     "log_prefix": "./log/",
     "tensorboard_logdir": "ldi2mpi_log/",
     "checkpoint_dir": "ldi2mpi_checkpoint/",
-    "unique_id": "LDI2MPI",
+    "unique_id": unique_id,
 
     "write_validate_result": True,
     "validate_num": 64,
     "valid_freq": 1000,
-    "train_report_freq": 20,
+    "train_report_freq": 5,
 
     # about training <<<<<<<<<<<<<<<<
     # comment of current epoch, will print on config.txt
@@ -40,13 +42,13 @@ cfg = {
     "lr_milestones": [12e3, 24e3, 36e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        "": "LDI2MPI_r0.pth",
+        "": unique_id + "_r0.pth",
         # "": "Ultly3_r0.pth"
     },
     "loss_weights": {
         "pixel_loss_cfg": 'l1',
         "pixel_loss": 1,
-        "net_smth_loss": 0.5,
+        # "net_smth_loss": 0.2,
         "depth_loss": 0.5,
         "disp_smth_loss": 0.1,
         "flownet_dropout": 1,
@@ -60,8 +62,8 @@ def main(cfg):
     """
     Please specify the id and comment!!!!!!!!!
     """
-    cfg["id"] = "LDI2MPI"
-    cfg["comment"] = "test run of RGBAD model"
+    cfg["id"] = unique_id
+    cfg["comment"] = "change upsampling method of disp_down from bilinear to learnedsampling"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

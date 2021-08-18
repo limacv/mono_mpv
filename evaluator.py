@@ -64,7 +64,7 @@ def evaluation_one(dataset, cudaid, pipeline, cfg):
         datas = dataset[sceneid]
         scene_name = datas['scene_name']
 
-        assert hasattr(pipeline, "infer_multiple"), f"{pipeline} show implement the infer_multiple methods"
+        assert hasattr(pipeline, "infer_multiple"), f"{pipeline} should implement the infer_multiple methods"
         mpis = pipeline.infer_multiple(datas["in_imgs"], ret_cfg)
         datas["mpis"] = mpis
         # distribute evaluation

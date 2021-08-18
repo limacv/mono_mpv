@@ -10,7 +10,7 @@ import trainer_distributed as trainer
 import argparse
 import random
 
-unique_id = "LDILDI"
+unique_id = "LDI2MPI_newCEL"
 
 cfg = {
     "local_rank": 0,  # will set later
@@ -33,7 +33,7 @@ cfg = {
 
     "trainset": "m+r+s_seq",
     "evalset": "stereovideo_seq",
-    "model_name": "RGBAD_LDI",
+    "model_name": "RGBAD",
     "modelloss_name": "fulljoint",
     "batch_size": 1,
     "num_epoch": 120,
@@ -42,7 +42,7 @@ cfg = {
     "lr_milestones": [12e3, 24e3, 36e3],
     "lr_values": [0.5, 0.25, 0.125],
     "check_point": {
-        "": unique_id + "_r0.pth",
+        "": "LDI2MPI_scratch_r0.pth",
         # "": "Ultly3_r0.pth"
     },
     "loss_weights": {
@@ -52,6 +52,8 @@ cfg = {
         "depth_loss": 0.5,
         "disp_smth_loss": 0.1,
         "flownet_dropout": 1,
+
+        "alpha_entropy": 0.01,
 
         "bg_supervision": 1,
     },
@@ -63,7 +65,7 @@ def main(cfg):
     Please specify the id and comment!!!!!!!!!
     """
     cfg["id"] = unique_id
-    cfg["comment"] = "change upsampling method of disp_down from bilinear to learnedsampling"
+    cfg["comment"] = "new cross entropy loss, fix a small bug"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_rank", type=int)

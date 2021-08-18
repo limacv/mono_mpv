@@ -5,14 +5,13 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.mpi_utils import *
-from models.flow_utils import *
+from models.flow_utils import forward_scatter_fusebatch
 
 lastposx, lastposy = 0, 0
 currentdx, currentdy, currentdz = 0, 0, 0
 focal = 1
 disp_min, disp_max = 1 / default_d_far, 1 / default_d_near
 load_partial_raw = True
-soft_z_tau = 10
 
 
 def click_callback(event, x, y, flags, param):
@@ -31,32 +30,34 @@ def click_callback(event, x, y, flags, param):
             currentdz -= 0.04
 
 
-def square2alpha(x, layer, planenum):
-    denorm = planenum - 1
-    scale, thick, depth = layer
-    n = denorm * scale * (x - depth + thick)
-    n = torch.max(n, torch.zeros(1).type_as(n))
-    n = torch.min(n, denorm * scale * thick)
-    return n[1:] - n[:-1]
+def ldiad2mpia(ldiad):
+    plane_disps = torch.reciprocal(make_depths(planenum)).reshape(1, 1, planenum, 1, 1).type_as(ldiad)
+    disp_min, disp_max = 1 / default_d_far, 1 / default_d_near
+
+    d = (ldiad[:, :, 1:2] - plane_disps) * (planenum - 1.) / (disp_max - disp_min)
+    d = - torch.abs(torch.clamp(d, -1, 1)) + 1.
+    mpialpha = - torch.pow(- ldiad[:, :, 0:1] + 1., d).prod(dim=1) + 1.
+    mpialpha = torch.clamp(mpialpha, 0, 1)
+    mpialpha[:, 0] = 1.  # the background should be all 1
+
+    d = d + 0.0001
+    blend_weight = d / d.sum(dim=1, keepdim=True)
+
+    return mpialpha, blend_weight
 
 
-def nsets2alpha(x, ds, th, sig):
-    th = torch.min(ds - 1. / default_d_far, th)
-    t = x - ds + th
-    t = torch.relu(t)
-    t = torch.min(t, th)
-    dt = t[:, :, 1:] - t[:, :, :-1]
-
-    expo = -(dt * sig).sum(dim=1)
-    return -torch.exp(expo * 20) + 1
+def ldi2mpi(ldi):
+    mpia, bw = ldiad2mpia(ldi[:, :, -2:])
+    rgbs = ldi[:, :, :3]
+    mpirgb = (rgbs.unsqueeze(2) * bw.unsqueeze(3)).sum(dim=1)
+    mpi = torch.cat([mpirgb, mpia.unsqueeze(2)], dim=2)
+    return mpi
 
 
 class MPRGBA:
     def __init__(self):
         self.layernum = planenum
-        self.x = torch.reciprocal(make_depths(planenum)).reshape(1, 1, planenum, 1, 1).cuda()
-        self.dx = float(self.x[0, 0, 2, 0, 0] - self.x[0, 0, 1, 0, 0])
-        self.depthes = make_depths(self.layernum)[1:].cuda()
+        self.depthes = make_depths(self.layernum).cuda()
         self.zeros = None
         self.raw_list = []
         self.hei, self.wid = 0, 0
@@ -88,47 +89,19 @@ class MPRGBA:
             fg, bg, dfg, dbg, afg, abg = net[:, :self.hei, :self.wid], net[:, :self.hei, self.wid:], \
                                          net[:, self.hei:2*self.hei, :self.wid], net[:, self.hei:2*self.hei, self.wid:], \
                                          net[:, 2*self.hei:, :self.wid], net[:, 2*self.hei:, self.wid:],
-            disp = torch.cat([dbg[0:1], dfg[0:1]], dim=0).unsqueeze(0)
-            thick = torch.cat([abg[0:1], afg[0:1]], dim=0).unsqueeze(0)
-            self.raw_list.append((disp.contiguous().cuda(), thick.contiguous().cuda(),
-                                  bg.unsqueeze(0).contiguous().cuda(), fg.unsqueeze(0).contiguous().cuda()))
+            disp = torch.cat([dbg[0:1], dfg[0:1]], dim=0)[None, :, None, ...]
+            disp = dilate(dilate(disp.squeeze(0), 3, 2)).unsqueeze(0)
+            alpha = torch.cat([abg[0:1], afg[0:1]], dim=0)[None, :, None, ...]  # 1, 2, 1, H, W
+            rgb = torch.stack([bg, fg])[None, ...]
+            ldi = torch.cat([rgb, alpha, disp], dim=2)
+
+            self.raw_list.append(ldi.contiguous().cuda())
+
         print("\nSuccess")
-        self.zeros = torch.zeros_like(afg[0:1].unsqueeze(0)).cuda()
+        self.zeros = torch.zeros_like(fg[0:1].unsqueeze(0)).cuda()
 
     def getmpi(self, i):
-        disp, alpha, imbg, imfg = self.raw_list[i]
-
-        rgb = torch.stack([imbg, imfg], dim=1)
-        rgbda = torch.cat([rgb, alpha.unsqueeze(2), disp.unsqueeze(2)], dim=2)
-        return rgbda
-
-    def init_coordxy(self):
-        if self.coord is None:
-            meshy, meshx = torch.meshgrid([torch.arange(0, self.hei), torch.arange(0, self.wid)])
-            meshx = meshx.unsqueeze(0).unsqueeze(-1).cuda()
-            meshy = meshy.unsqueeze(0).unsqueeze(-1).cuda()
-            self.coord = torch.cat([meshx, meshy, torch.ones_like(meshx)], dim=-1)
-        return self.coord
-
-    def render(self, repre: torch.Tensor, src_ext, tar_ext, src_intr, tar_intr, depth):
-        rgba, disp = repre.squeeze(0).split([4, 1], dim=1)
-        disp = dilate(dilate(disp, 3, 2), 3, 1)
-        depth = torch.reciprocal(disp).squeeze(1).unsqueeze(-1)
-        soft_z = torch.exp((disp - 1) * soft_z_tau)
-        coord = self.init_coordxy()
-
-        src_r, src_t = src_ext[None, None, :, :3, :3], src_ext[None, None, :, :3, 3, None]
-        tar_r, tar_t = tar_ext[None, None, :, :3, :3], tar_ext[None, None, :, :3, 3, None]
-
-        newcoord = src_intr.inverse() @ (coord * depth).unsqueeze(-1)
-        newcoord = (tar_r @ src_r.inverse() @ (newcoord - src_t)) + tar_t
-        newcoord = (tar_intr @ newcoord).squeeze(-1)
-        newcoord = newcoord[..., :2] / newcoord[..., -1:]
-        flow = newcoord - coord[..., :2]
-        rgba = forward_scatter_withweight(flow.permute(0, 3, 1, 2), rgba, soft_z)
-        img = rgba[0, :3] * (- rgba[1, 3:4] + 1) + rgba[1, :3] * rgba[1, 3:4]
-        # img = rgba[1, :3] * rgba[1, 3:4]
-        return img
+        return ldi2mpi(self.raw_list[i])
 
 
 videopath = "./"
@@ -137,10 +110,12 @@ parser = argparse.ArgumentParser(description="visualize the mpi")
 parser.add_argument("videoname")
 parser.add_argument("--isnet", default="auto", help="choose among 'mpi', 'net', 'auto', default is auto"
                                                     "select the video type")
-parser.add_argument("--planenum", default=32, help="the number of planes")
+parser.add_argument("--planenum", default=32, type=int, help="the number of planes")
 args = parser.parse_args()
 videoname = args.videoname
 planenum = args.planenum
+plane_disps = torch.reciprocal(make_depths(planenum)).reshape(1, 1, planenum, 1, 1).cuda()
+plane_distance = float(plane_disps[0, 0, 2, 0, 0] - plane_disps[0, 0, 1, 0, 0])
 isnet = True if args.isnet.lower() == "net" or (args.isnet.lower() == "auto" and '_net' in videoname) \
     else False
 
@@ -173,23 +148,24 @@ if __name__ == "__main__":
     cv2.namedWindow("mpi")
     cv2.setMouseCallback("mpi", click_callback)
     update = True
-    cur_repr = None
+    curmpi = None
     with torch.no_grad():
         while True:
-            cosx, sinx, cosy, siny = np.cos(currentdx), np.sin(currentdx), np.cos(currentdy), np.sin(currentdy)
-            target_pose = torch.tensor(
-                [[cosx, -sinx * siny, -sinx * cosy, currentdx],
-                 [0.0, cosy, -siny, currentdy],
-                 [sinx, cosx * siny, cosx * cosy, currentdz]]
-            ).type(torch.float32).cuda().unsqueeze(0)
-            tarintrin[0, 0, 0] = repos.wid / 2 * focal
-            tarintrin[0, 1, 1] = repos.hei / 2 * focal
-
             if update:
-                cur_repr = next(repos)
+                curmpi = next(repos)
+            if mode == "mpi":
+                cosx, sinx, cosy, siny = np.cos(currentdx), np.sin(currentdx), np.cos(currentdy), np.sin(currentdy)
+                target_pose = torch.tensor(
+                    [[cosx, -sinx * siny, -sinx * cosy, currentdx],
+                     [0.0, cosy, -siny, currentdy],
+                     [sinx, cosx * siny, cosx * cosy, currentdz]]
+                ).type(torch.float32).cuda().unsqueeze(0)
+                tarintrin[0, 0, 0] = repos.wid / 2 * focal
+                tarintrin[0, 1, 1] = repos.hei / 2 * focal
+                view = render_newview(curmpi, source_pose, target_pose, intrin, tarintrin, repos.depthes)[0]
 
-            view = repos.render(cur_repr, source_pose, target_pose, intrin, tarintrin, repos.depthes)
-            view = view.squeeze(0)
+            elif mode == "disp":
+                estimate_disparity_torch(curmpi.unsqueeze(0), repos.depthes)
 
             vis = (view * 255).permute(1, 2, 0).type(torch.uint8).cpu().numpy()
             cv2.imshow("mpi", vis)
@@ -203,10 +179,3 @@ if __name__ == "__main__":
                 print(target_pose)
                 print("focal length:")
                 print(focal)
-            elif key == ord('w'):
-                print("increase tau")
-                soft_z_tau *= 1.1
-            elif key == ord('s'):
-                print("decrease tau")
-                soft_z_tau /= 1.1
-

@@ -10,6 +10,7 @@ from util.config import fakeSummaryWriter
 from tensorboardX import SummaryWriter
 
 plane_num = 24
+only0cantalk = True
 
 
 def train(cfg: dict):
@@ -84,6 +85,7 @@ def train(cfg: dict):
               f"Validation: gtnum={validate_gtnum}, freq={validate_freq}\n" \
               f"\n"
 
+    cantalk = only0cantalk and local_rank == 0 or not only0cantalk
     if local_rank == 0:
         tensorboard = SummaryWriter(log_dir)
         # write configure of the current training
@@ -114,23 +116,17 @@ def train(cfg: dict):
             loss = loss.mean()
             loss_dict = {k: v.mean() for k, v in loss_dict.items()}
 
+            # first evaluate and then backward so that first evaluate is always the same
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
             modelhasnan = False
             for val in model.state_dict().values():
                 if torch.any(torch.isnan(val)):
                     modelhasnan = True
-            if modelhasnan:
-                print(f"R{local_rank}:Warning! nan detected in the model!")
-                print(f"R{local_rank}:The loss dict is: {loss_dict}")
-                torch.save({
-                    "epoch": epoch,
-                    "step": step,
-                    "cfg": cfg_str,
-                    "state_dict": model.state_dict(),
-                    # "optimizer": optimizer.state_dict()
-                }, os.path.join(checkpoint_path, f"{unique_id}_naninmodel_r{local_rank}.pth"))
-                print(f"R{local_rank}:checkpoint saved {epoch}{unique_id}_nandebug_r{local_rank}.pth", flush=True)
 
-            if torch.any(torch.isnan(loss)) or torch.any(torch.isinf(loss)):
+            if modelhasnan or torch.any(torch.isnan(loss)) or torch.any(torch.isinf(loss)):
                 print(f"R{local_rank}: Warning! {'Nan' if torch.any(torch.isnan(loss)) else 'Inf'} detected in the loss!")
                 print(f"R{local_rank}: The loss dict is: {loss_dict}")
                 torch.save({
@@ -142,11 +138,6 @@ def train(cfg: dict):
                 }, os.path.join(checkpoint_path, f"{unique_id}_naninloss_r{local_rank}.pth"))
                 exit()
 
-            # first evaluate and then backward so that first evaluate is always the same
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
             # recored iter loss
             tensorboard.add_scalar("final_loss", float(loss), step)
             for lossname, lossval in loss_dict.items():
@@ -155,7 +146,7 @@ def train(cfg: dict):
                 tensorboard.add_scalar("lr", lr_cur, step)
 
             # output loss message
-            if step % train_report_freq == 0:
+            if step % train_report_freq == 0 and cantalk:
                 time_per_iter = (time.time() - start_time) / train_report_freq
                 # output iter infomation
                 loss_str = " | ".join([f"{k}:{v:.3f}" for k, v in loss_dict.items()])
@@ -165,7 +156,7 @@ def train(cfg: dict):
                 start_time = time.time()
 
             # perform evaluation
-            if step % validate_freq == 0:
+            if step % validate_freq == 0 and cantalk:
                 val_dict, val_display = {}, None
                 vis_id = np.random.randint(0, len(evaluatedata))
                 for i, evaldatas in enumerate(evaluatedata):
@@ -184,9 +175,9 @@ def train(cfg: dict):
                 for val_name, val_value in val_dict.items():
                     tensorboard.add_scalar(val_name, val_value, step)
                 print(f"EVAL{local_rank}:: " + ' | '.join([f"{k}: {v:.3f}" for k, v in val_dict.items()]), flush=True)
-                print(f"CHECKING Consistency:: {modelloss.module.parameters().__next__()[0, 0, 0]}")
+                # print(f"CHECKING Consistency:: {modelloss.module.parameters().__next__()[0, 0, 0]}")
 
-            if (step + 1) % savepth_iter_freq == 0 and local_rank == 0:
+            if (step + 1) % savepth_iter_freq == 0 and cantalk:
                 if not modelhasnan:
                     torch.save({
                         "epoch": epoch,

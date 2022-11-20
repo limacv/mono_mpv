@@ -57,6 +57,13 @@ def make_depths(num_plane, min_depth=default_d_near, max_depth=default_d_far):
     return torch.reciprocal(torch.linspace(1. / max_depth, 1. / min_depth, num_plane, dtype=torch.float32))
 
 
+def ldi2disparity(net):
+    alpha, disp = net[:, :, -2:].split(1, dim=2)
+    _alpha = alpha.clone()
+    _alpha[:, 0] = 1 - _alpha[:, 1]
+    return (disp * _alpha).sum(dim=1).squeeze(1)
+
+
 def estimate_disparity_torch(mpi: torch.Tensor, depthes: torch.Tensor, blendweight=None, retbw=False):
     """Compute disparity map from a set of MPI layers.
     mpi: tensor of shape B x LayerNum x 4 x H x W

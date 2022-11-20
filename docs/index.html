@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="description"
+        content="Layered Multiplane Videos for Novel View Synthesis">
+  <meta name="keywords" content="Layered Multiplane Videos, MPV, MPI, Novel View Synthesis, NVS">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Layered Multiplane Videos</title>
+
+  <link rel="stylesheet" href="./static/css/bulma.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-carousel.min.css">
+  <link rel="stylesheet" href="./static/css/bulma-slider.min.css">
+  <link rel="stylesheet" href="./static/css/fontawesome.all.min.css">
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="./static/css/index.css">
+  <link rel="icon" href="./static/images/favicon.svg">
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  <script defer src="./static/js/fontawesome.all.min.js"></script>
+  <script src="./static/js/bulma-carousel.min.js"></script>
+  <script src="./static/js/bulma-slider.min.js"></script>
+  <script src="./static/js/index.js"></script>
+</head>
+<body>
+
+
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-1 publication-title">Layered Multiplane Videos for Novel View Synthesis</h1>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">
+              <a href="https://limacv.github.io/homepage/">Ma Li</a><sup>1</sup>,</span>
+            <span class="author-block">
+              <a href="https://liaojing.github.io/html/">Liao Jing</a><sup>2</sup>,
+            </span>
+            <span class="author-block">
+              <a href="https://www.cse.ust.hk/~psander/">Pedro V. Sander</a><sup>1</sup>
+            </span>
+          </div>
+
+          <div class="is-size-5 publication-authors">
+            <span class="author-block"><sup>1</sup>The Hong Kong University of Science and Technology</span>
+          </div>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block"><sup>2</sup>City University of Hong Kong</span>
+          </div>
+
+          <div class="column has-text-centered">
+            <div class="publication-links">
+              <!-- PDF Link. -->
+              <span class="link-block">
+                <a href="https://limacv.github.io/mono_mpv/docs/pdf/ICCV21.pdf"
+                   class="external-link button is-normal is-rounded is-dark"
+                   target="_blank">
+                  <span class="icon">
+                      <i class="fas fa-file-pdf"></i>
+                  </span>
+                  <span>Paper</span>
+                </a>
+              </span>
+              <!-- PDF Link. -->
+              <span class="link-block">
+                <a href="https://limacv.github.io/mono_mpv/docs/pdf/ICCV21_supple.pdf"
+                   class="external-link button is-normal is-rounded is-dark"
+                   target="_blank">
+                  <span class="icon">
+                      <i class="fas fa-file-pdf"></i>
+                  </span>
+                  <span>Supple</span>
+                </a>
+              </span>
+              <!-- Code Link. -->
+              <span class="link-block">
+                <a href="https://github.com/limacv/mono_mpv"
+                   class="external-link button is-normal is-rounded is-dark"
+                   target="_blank">
+                  <span class="icon">
+                      <i class="fab fa-github"></i>
+                  </span>
+                  <span>Code</span>
+                  </a>
+              </span>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="hero teaser">
+  <div class="container is-max-desktop">
+    <div class="hero-body">
+      <h2 align="center">
+      <video autoplay muted loop width="30%" height="30%">
+        <source src="images/nvs.mp4"
+                type="video/mp4">
+      </video>
+      <video autoplay muted loop width="30%" height="30%">
+        <source src="images/defocus.mp4"
+                type="video/mp4">
+      </video>
+      <video autoplay muted loop width="30%" height="30%">
+        <source src="images/dolly.mp4"
+                type="video/mp4">
+      </video>
+      </h2>
+      <h2 class="subtitle has-text-centered">
+        We construct Layered Multiplane Videos from only monocular videos,
+        allowing real-time novel view synthesis, defocus and dolly zoom effects.
+      </h2>
+    </div>
+  </div>
+</section>
+
+
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <!-- Abstract. -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          <p>
+            The multiplane images (MPI) has shown great promise
+as a representation for efficient novel view synthesis. In
+this work, we present a new MPI-based approach for real-time novel view synthesis of monocular videos.
+            We first formulate a new representation, referred to as layered MPI
+(LMPI), to reduce the number of parameters in MPI and
+make it suitable for videos. Then we propose a pipeline
+that generates sequence of temporally consistent LMPI using a single monocular video as input. The pipeline exploits
+the information from multiple frames, does not require any
+camera pose information, and can generate compelling layered multiplane video results. Experiments validate that our
+framework achieves better visual quality than several baselines and is capable of interactive novel view synthesis during video playback.
+          </p>
+        </div>
+      </div>
+    </div>
+    <!--/ Abstract. -->
+
+    <!-- Pipeline. -->
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Pipeline</h2>
+        <div class="pipeline">
+          <img src="images/pipeline.jpg"
+                 class="pipeline image"
+                 alt="pipeline image"/>
+          <!-- <iframe src="https://www.youtube.com/embed/MrKrnHhk8IA?rel=0&amp;showinfo=0"
+                  frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe> -->
+        </div>
+      </div>
+    </div>
+
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <div class="content has-text-justified">
+          <p>
+             For each frame, we operate on a local time window, and generate LMPI for
+rendering. LMPI consists of a parameter P<sub>t</sub> that describe the scene geometry,
+            and foreground / background image I<sub>t</sub> / B<sub>t</sub> that stores the scene appearance.
+            The pipeline consists of two modules that generate parameter map and background image respectively.
+Parameter map estimation module (green) first predicts a coarse parameter map and an upsampling weight. The coarse parameter map
+is then upsampled to get final fine parameter map. Background estimation module (red) first aggregates context image
+and context mask from neighbor frames, then use U-Net to generate the final background image.
+        </div>
+      </div>
+    </div>
+    <!--/ Pipeline. -->
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Supplementary Video</h2>
+      </div>
+    </div>
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <div class="content has-text-justified">
+          <video width="100%" height="100%" controls preload="none">
+            <source src="pdf/supple_video.mp4"
+                    type="video/mp4">
+          </video>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<footer class="footer">
+  <div class="container">
+    <!-- <div class="content has-text-centered">
+      <a class="icon-link"
+         href="https://homes.cs.washington.edu/~kpar/nerfies/videos/nerfies_paper.pdf">
+        <i class="fas fa-file-pdf"></i>
+      </a>
+      <a class="icon-link" href="https://github.com/keunhong" class="external-link" disabled>
+        <i class="fab fa-github"></i>
+      </a>
+    </div> -->
+    <div class="columns is-centered">
+      <div class="column is-8">
+        <div class="content">
+          <p>
+            The source code of this website is borrowed from 
+            <a href="https://github.com/nerfies/nerfies.github.io">nerfies</a>.
+          </p>
+          <p>
+            This website is licensed under a <a rel="license"
+                                                href="http://creativecommons.org/licenses/by-sa/4.0/">Creative
+            Commons Attribution-ShareAlike 4.0 International License</a>.
+          </p>
+          <p>
+            This means you are free to borrow the <a
+              href="https://github.com/limacv/deblurnerf">source code</a> of this website,
+            we just ask that you link back to this page in the footer.
+            Please remember to remove the analytics code included in the header of the website which
+            you do not want on your website.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

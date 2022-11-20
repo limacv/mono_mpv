@@ -65,11 +65,15 @@ def evaluation_one(dataset, cudaid, pipeline, cfg):
         scene_name = datas['scene_name']
 
         assert hasattr(pipeline, "infer_multiple"), f"{pipeline} should implement the infer_multiple methods"
-        mpis = pipeline.infer_multiple(datas["in_imgs"], ret_cfg)
-        datas["mpis"] = mpis
+        reprs = pipeline.infer_multiple(datas["in_imgs"], ret_cfg)
         # distribute evaluation
         if datasetname == "StereoVideo":
-            EVAL_DICT_PERSCENE, newviews_save, disparitys_save = evaluation_mpi_SB(datas, flow_estim, cfg)
+            if "ret_ldi" in ret_cfg:
+                datas["ldis"] = reprs
+                EVAL_DICT_PERSCENE, newviews_save, disparitys_save = evaluation_ldi_SB(datas, flow_estim, cfg)
+            else:
+                datas["mpis"] = reprs
+                EVAL_DICT_PERSCENE, newviews_save, disparitys_save = evaluation_mpi_SB(datas, flow_estim, cfg)
         elif datasetname == "NvidiaNovelView":
             EVAL_DICT_PERSCENE, newviews_save, disparitys_save = evaluation_mpi_NVNVS(datas, flow_estim, cfg)
         else:
@@ -132,7 +136,6 @@ def evaluation_mpi_SB(datas, flow_estim, cfg):
     scale_in_log = cfg["scale_in_log"]
     scene_name = datas['scene_name']
     EVAL_DICT_PERSCENE = MetricCounter()
-    depths_raw = make_depths(32)
     dd = None
 
     mpis = [mpi.cpu() for mpi in datas["mpis"]]
@@ -143,6 +146,7 @@ def evaluation_mpi_SB(datas, flow_estim, cfg):
     assert len(mpis) == len(datas["in_imgs"])
     assert "gt_disparity" in datas.keys()
 
+    depths_raw = make_depths(mpis[0].shape[1])
     for frameidx, mpi in enumerate(mpis):
         input_img = datas["in_imgs"][frameidx]
         # ===========================================
@@ -224,6 +228,198 @@ def evaluation_mpi_SB(datas, flow_estim, cfg):
         disp_raw = estimate_disparity_torch(mpi, depths_raw).squeeze(0).cpu()
         disparitys_save.append(disp_raw)
         disp_cor = estimate_disparity_torch(mpi, dde).squeeze(0).cpu()
+        disparitys_out.append(disp_cor)
+
+        gt_disparity = datas["gt_disparity"][frameidx]
+        valid_mask = torch.logical_and(-1e3 < gt_disparity, gt_disparity < 1e3)
+        valid_count = valid_mask.sum()
+        gt_disparity[torch.logical_not(valid_mask)] = 1e3
+        disparitys_gts.append(gt_disparity)
+
+        abs_rel = (gt_disparity - disp_cor).abs() / gt_disparity.abs().clamp_min(np.finfo(np.float).eps)
+        abs_rel = abs_rel[valid_mask].sum() / denorm
+
+        log10 = torch.log10(((disp_cor - shift_gt) / (gt_disparity - shift_gt)).abs()).abs()
+        thr1 = torch.logical_and(log10 < thresh1, valid_mask).sum() / denorm
+        thr2 = torch.logical_and(log10 < thresh2, valid_mask).sum() / denorm
+        thr3 = torch.logical_and(log10 < thresh3, valid_mask).sum() / denorm
+        log10 = log10[valid_mask].sum() / denorm
+
+        rmse = (((disp_cor - gt_disparity) * valid_mask) ** 2).sum() / denorm
+
+        # diff = ((disp_cor - gt_disparity).abs() * valid_mask).sum() / valid_mask.sum()
+        # diff_scale = torch.log10(((disp_cor - shift_gt) / (gt_disparity - shift_gt)).abs()) ** 2
+        # inliner_num = ((diff_scale < thresh) * valid_mask).sum()
+        # diff_scale = (diff_scale * valid_mask).sum() / valid_mask.sum()
+
+        EVAL_DICT_PERSCENE.collect("disp_abs_rel", float(abs_rel), count=valid_count / denorm)
+        EVAL_DICT_PERSCENE.collect("disp_log10", float(log10), count=valid_count / denorm)
+        EVAL_DICT_PERSCENE.collect("disp_rmse", float(rmse), count=valid_count / denorm)
+        EVAL_DICT_PERSCENE.collect("disp_sigma1", float(thr1), count=valid_count / denorm)
+        EVAL_DICT_PERSCENE.collect("disp_sigma2", float(thr2), count=valid_count / denorm)
+        EVAL_DICT_PERSCENE.collect("disp_sigma3", float(thr3), count=valid_count / denorm)
+
+    # ===========================================
+    # Depth temporal consistency
+    # ===========================================
+    # consistency for depth
+    refimgs = [img.unsqueeze(0).cuda() for img in datas["in_imgs"]]
+    flow_cache = Flow_Cacher(4)
+    for frameidx in range(1, len(disparitys_out) - 1):
+        idx0, idx1, idx2 = frameidx - 1, frameidx, frameidx + 1
+        flow10 = flow_cache.estimate_flow(flow_estim, refimgs[idx1], refimgs[idx0])
+        flow01 = flow_cache.estimate_flow(flow_estim, refimgs[idx0], refimgs[idx1])
+        flow12 = flow_cache.estimate_flow(flow_estim, refimgs[idx1], refimgs[idx2])
+        flow21 = flow_cache.estimate_flow(flow_estim, refimgs[idx2], refimgs[idx1])
+        occ10 = torch.norm(warp_flow(flow01, flow10) + flow10, dim=1) < 1.5
+        occ12 = torch.norm(warp_flow(flow21, flow12) + flow12, dim=1) < 1.5
+
+        disp01 = warp_flow(disparitys_out[idx0].unsqueeze(0).unsqueeze(0), flow10)
+        disp21 = warp_flow(disparitys_out[idx2].unsqueeze(0).unsqueeze(0), flow12)
+
+        diff1 = ((disp01 - disparitys_out[idx1]) * occ10).abs().sum() / denorm
+        occ02 = torch.logical_and(occ10, occ12)
+        diff2 = ((disp01 + disp21 - 2 * disparitys_out[idx1]) * occ02).abs().sum() / denorm
+        EVAL_DICT_PERSCENE.collect("temp_disp_o1", float(diff1), count=float(occ10.sum() / denorm))
+        EVAL_DICT_PERSCENE.collect("temp_disp_o2", float(diff2), count=float(occ02.sum() / denorm))
+    refimgs.clear()
+
+    # ===========================================
+    # Novel view temporal consistency
+    # ===========================================
+    # Consistency for novel views
+    newviews_gt = [img.unsqueeze(0).cuda() for img in datas["gt_imgs"]]
+    newviews_save_cuda = [i_.cuda() for i_ in newviews_save]
+    flow_cache = Flow_Cacher(2)
+    for frameidx in range(1, len(newviews_save)):
+        flowgt10 = flow_cache.estimate_flow(flow_estim, newviews_gt[frameidx], newviews_gt[frameidx - 1])
+        flowgt01 = flow_cache.estimate_flow(flow_estim, newviews_gt[frameidx - 1], newviews_gt[frameidx])
+        occgt10 = torch.norm(warp_flow(flowgt01, flowgt10) + flowgt10, dim=1) < 1.5
+
+        flowout10 = flow_cache.estimate_flow(flow_estim, newviews_save_cuda[frameidx],
+                                             newviews_save_cuda[frameidx - 1])
+
+        newview01 = warp_flow(newviews_save[frameidx - 1], flowgt10)
+        nvsdiff1 = ((newview01 - newviews_save[frameidx]) * occgt10).abs().sum() / denorm
+        nvsepe = (torch.norm(flowout10 - flowgt10, dim=1) * occgt10).sum() / denorm
+        EVAL_DICT_PERSCENE.collect("temp_nvs_o1", float(nvsdiff1), count=float(occgt10.sum() / denorm))
+        EVAL_DICT_PERSCENE.collect("temp_nvs_epe", float(nvsepe), count=float(occgt10.sum() / denorm))
+
+    newviews_gt.clear()
+    newviews_save_cuda.clear()
+
+    return EVAL_DICT_PERSCENE, newviews_save, disparitys_save
+
+
+@torch.no_grad()
+def evaluation_ldi_SB(datas, flow_estim, cfg):
+    eval_crop_margin = cfg.get("eval_crop_margin", 0)
+    const_scale = cfg["const_scale"]
+    scale_in_log = cfg["scale_in_log"]
+    scene_name = datas['scene_name']
+    soft_z_tau = cfg["soft_z_tau"]
+    EVAL_DICT_PERSCENE = MetricCounter()
+    cor_disp = None
+
+    ldis = [ldi.cpu() for ldi in datas["ldis"]]
+    newviews_save = []
+    disparitys_save = []
+    disparitys_out = []
+    disparitys_gts = []
+    assert len(ldis) == len(datas["in_imgs"])
+    assert "gt_disparity" in datas.keys()
+
+    for frameidx, ldi in enumerate(ldis):
+        input_img = datas["in_imgs"][frameidx]
+        # ===========================================
+        # estimate the scale & shift and estimate disparity map
+        # ===========================================
+        if not const_scale or (const_scale and frameidx == 0):  # only estimate scale in first frame
+            disp_raw = ldi2disparity(ldi).squeeze(0)
+
+            gt_disparity = datas["gt_disparity"][frameidx]
+            valid_mask = torch.logical_and(-1e3 < gt_disparity, gt_disparity < 1e3)
+            gt_disparity[torch.logical_not(valid_mask)] = 1e3
+            if not scale_in_log:
+                shift_es = 0  # torch.median(disp_raw.reshape(-1)[valid_mask.reshape(-1)])
+                shift_gt = 0  # torch.median(gt_disparity.reshape(-1)[valid_mask.reshape(-1)])
+                scale_es = ((disp_raw - shift_es).abs() * valid_mask).sum(dim=[-1, -2]) \
+                           / valid_mask.sum(dim=[-1, -2])
+                scale_gt = ((gt_disparity - shift_gt).abs() * valid_mask).sum(dim=[-1, -2]) \
+                           / valid_mask.sum(dim=[-1, -2])
+                cor_disp = lambda d_: (d_ - shift_es) / -scale_es * scale_gt + shift_gt
+                # cor_disp = (torch.reciprocal(depths_raw) - shift_es) / -scale_es * scale_gt + shift_gt
+
+            else:
+                # only estimate an naive shift of gt (max plus a small margin)
+                gt_disparity[torch.logical_not(valid_mask)] = -1e3
+                shift_gt = torch.max(gt_disparity) + 10
+                if "stereoblur" in scene_name.lower():
+                    shift_gt = 0
+                disp_diff = disp_raw / -(gt_disparity - shift_gt)
+                scale = torch.exp((torch.log(disp_diff) * valid_mask).sum(dim=[-1, -2])
+                                  / valid_mask.sum(dim=[-1, -2]))
+                # cor_disp = torch.reciprocal(depths_raw * -scale) + shift_gt
+                cor_disp = lambda d_: (d_ / -scale) + shift_gt
+
+        # ===========================================
+        # render new view and quality
+        # ===========================================
+        batchsz, layernum, _, heiori, widori = ldi.shape
+        ldi_flat = ldi.reshape(-1, 5, heiori, widori)
+        disp_dx = cor_disp(ldi_flat[:, 4:5])
+        flow_f = torch.cat([disp_dx, torch.zeros_like(disp_dx)], dim=1)
+        soft_z = torch.exp(ldi_flat[:, 4:5] - 1) * soft_z_tau
+        novelview = forward_scatter_withweight(flow_f, ldi_flat[:, :4], soft_z)
+        novelview = novelview.reshape(batchsz, -1, 4, heiori, widori)
+        bw = novelview[:, 1, 3:4]
+        tarview = novelview[:, 0, :3] * (-bw + 1) + novelview[:, 1, :3] * bw
+
+        tarviewgt = datas["gt_imgs"][frameidx].unsqueeze(0)
+        tarview = torch.clamp(tarview, 0, 1)
+        tarviewgt = torch.clamp(tarviewgt, 0, 1)
+
+        for metric_name in ["ssim", "psnr", "mse", "lpips"]:
+            val = compute_img_metric(tarview, tarviewgt, metric_name, margin=eval_crop_margin)
+            EVAL_DICT_PERSCENE.collect(metric_name, float(val))
+
+        flow_cache = Flow_Cacher(1)
+        # rough align the result
+
+        apflow = flow_cache.estimate_flow(flow_estim, tarviewgt.cuda(), tarview.cuda())
+        epe = apflow.norm(dim=1)
+        EVAL_DICT_PERSCENE.collect("visflowepe", float(epe.mean()))
+        EVAL_DICT_PERSCENE.collect("visflowmax", float(epe.max()))
+        EVAL_DICT_PERSCENE.collect("visflowmid", float(torch.median(epe)))
+
+        apflow_smth = torchf.interpolate(apflow, scale_factor=0.01, mode='area')
+        apflow_smth = torchf.interpolate(apflow_smth, apflow.shape[-2:], mode='bicubic')
+        tarview_warp = warp_flow(tarview, apflow_smth)
+
+        for metric_name in ["ssim", "psnr", "mse", "lpips"]:
+            val = compute_img_metric(tarview_warp, tarviewgt, metric_name, margin=eval_crop_margin)
+            EVAL_DICT_PERSCENE.collect(f"flowcor_{metric_name}", float(val))
+
+        newviews_save.append(tarview.cpu())
+        # disocclude region
+        flowf = flow_cache.estimate_flow(flow_estim, tarviewgt.cuda(), input_img.unsqueeze(0).cuda())
+        flowb = flow_cache.estimate_flow(flow_estim, input_img.unsqueeze(0).cuda(), tarviewgt.cuda())
+        disocc = (torch.norm(warp_flow(flowb, flowf) + flowf, dim=1) > 1).type(torch.float32).unsqueeze(1)
+        disocc = dilate(dilate(disocc))
+        for metric_name in ["ssim", "psnr"]:
+            val = compute_img_metric(tarview_warp, tarviewgt, metric_name, margin=eval_crop_margin, mask=disocc)
+            EVAL_DICT_PERSCENE.collect(f"disocc_{metric_name}", float(val))
+
+        # ===========================================
+        # Depth quality
+        # ===========================================
+        denorm = 1000.  # can be arbitrary, now the count is unit by K
+        thresh1 = np.log10(1.25)  # log(1.25) ** 2
+        thresh2 = np.log10(1.25 ** 2)  # log(1.25) ** 2
+        thresh3 = np.log10(1.25 ** 3)  # log(1.25) ** 2
+        disp_raw = ldi2disparity(ldi).squeeze(0).cpu()
+        disparitys_save.append(disp_raw)
+        disp_cor = cor_disp(disp_raw)
         disparitys_out.append(disp_cor)
 
         gt_disparity = datas["gt_disparity"][frameidx]
@@ -476,6 +672,7 @@ def evaluation_mpi_NVNVS(datas, flow_estim, cfg):
 def process_one(*args):
     import traceback
     try:
+        print("start evaluation_one")
         ret = evaluation_one(*args)
     except Exception as e:
         print(f"Error!!!!!!!!!!!!!!!!!!!!!!!!!\n {e}", flush=True)
@@ -524,7 +721,7 @@ def evaluation(cfg):
             if not os.path.exists(saveroot):
                 saveroot = "D:\\MSI_NB\\source\\data\\Visual"
         saveroot = os.path.join(saveroot, f"{datasetname}_{os.path.basename(checkpointname).split('.')[0]}"
-                                          f"_{modelname}_{pipelinename}")
+                                          f"_{modelname}_{pipelinename}_{ret_cfg}")
     mkdir_ifnotexist(saveroot)
     cfg["saveroot"] = saveroot
 

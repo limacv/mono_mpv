@@ -928,7 +928,7 @@ class PipelineV2(nn.Module):
                         None
                     )
                     net_up = tmp.get("net_up", [])[-1]
-                    disp0 = self.ldi2disparity(torch.stack(net_up[::-1], dim=2))
+                    disp0 = ldi2disparity(torch.stack(net_up[::-1], dim=2))
                     intermediates["disp0"] = disp0
 
                 if "net_warp" in intermediates.keys():
@@ -1027,7 +1027,7 @@ class PipelineV2(nn.Module):
             netups = intermediates.get("net_up", [])
             net_up = netups[-1]
             if isinstance(self.mpimodel, (RGBADNet, RGBADDisjoint)):
-                disp = self.ldi2disparity(torch.stack(net_up[::-1], dim=2))
+                disp = ldi2disparity(torch.stack(net_up[::-1], dim=2))
             else:
                 disp = self.net2disparity(net_up).squeeze(1)
 
@@ -1248,13 +1248,6 @@ class PipelineV2(nn.Module):
         return net_out, alphas, rgbs
 
     @staticmethod
-    def ldi2disparity(net):
-        alpha, disp = net[:, :, -2:].split(1, dim=2)
-        _alpha = alpha.clone()
-        _alpha[:, 0] = 1 - _alpha[:, 1]
-        return (disp * _alpha).sum(dim=1).squeeze(1)
-
-    @staticmethod
     def net2disparity(net, denorm=5*20):
         assert net.shape[1] == 4
         fg, bg, fgt, _ = net.split(1, dim=1)
@@ -1266,7 +1259,7 @@ class PipelineV2(nn.Module):
         x = torch.reciprocal(make_depths(planenum)).reshape(1, 1, planenum, 1, 1).type_as(ldiad)
         disp_min, disp_max = 1 / default_d_far, 1 / default_d_near
 
-        d = (ldiad[:, :, 1:2] - x) * (planenum - 1.) / (disp_max - disp_min)
+        d = (ldiad[:, :, 1:2] - x) / 2 * (planenum - 1.) / (disp_max - disp_min)
         d = - torch.abs(torch.clamp(d, -1, 1)) + 1.
         mpialpha = - torch.pow(- ldiad[:, :, 0:1] + 1., d).prod(dim=1) + 1.
         mpialpha = torch.clamp(mpialpha, 0, 1)
@@ -2274,8 +2267,9 @@ class PipelineFilterLDI(PipelineV2):
         self.winsz = cfg.pop("winsz", 9)  # level0 bootstrap len
         self.mididx = self.winsz // 2
         self.forwardaf_idx = cfg.get("forwardaf_idx", [-self.mididx, -self.mididx + 2,  self.mididx - 2, self.mididx])
-        self.defer_num = self.mididx
+        self.defer_num = self.mididx * 2
 
+        self.mpimodel.num_layers = cfg.get("mpi_layer_num", 32)
         print(f"PipelineFiltering::winsz={self.winsz}\n")
 
         x = np.zeros(self.winsz)
@@ -2427,7 +2421,7 @@ class PipelineFilterLDI(PipelineV2):
         self.eval()
         # ret_cfg += "ret_net"
 
-        mpis = []
+        reprs = []
         disps = []
         for img in imgs:
             if img.dim() == 3:
@@ -2435,23 +2429,30 @@ class PipelineFilterLDI(PipelineV2):
             img = img.cuda()
             mpi = self.infer_forward(img, ret_cfg + 'ret_net')
             if mpi is not None:
-                mpi, net = mpi
-                disps.append(self.net2disparity(net[:, :4]).to(device))
-                mpis.append(mpi.to(device))
+                mpi, ldi = mpi
+                disps.append(ldi2disparity(ldi).to(device))
+                if "ret_ldi" in ret_cfg:
+                    reprs.append(ldi.to(device))
+                else:
+                    reprs.append(mpi.to(device))
 
         pad_img = [self.img_window[-i] for i in range(-self.defer_num, 0)][::-1]
         for img in pad_img:
             mpi = self.infer_forward(img, ret_cfg + 'ret_net')
             if mpi is not None:
-                mpi, net = mpi
-                disps.append(self.net2disparity(net[:, :4]).to(device))
-                mpis.append(mpi.to(device))
+                mpi, ldi = mpi
+                disps.append(ldi2disparity(ldi).to(device))
+
+                if "ret_ldi" in ret_cfg:
+                    reprs.append(ldi.to(device))
+                else:
+                    reprs.append(mpi.to(device))
 
         self.clear()
         if 'ret_disp' in ret_cfg:
-            return mpis, disps
+            return reprs, disps
         else:
-            return mpis
+            return reprs
 
 
 class PipelineFilteringSV(ModelandDispLoss):

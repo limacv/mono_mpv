@@ -1,7 +1,7 @@
 from video_inference_cfg import *
 
 
-path = "./log/checkpoint/LDI2MPI_newCEL5_r0.pth"
+path = "./log/checkpoint/LDI2MPI_cel_tmp_r0.pth"
 pipeline = smart_select_pipeline(path,
                                  force_pipelinename="ldifilter",)
 
@@ -70,7 +70,7 @@ with torch.no_grad():
             continue
         if isinstance(mpi, tuple):
             mpi, ldi = mpi
-            disparity_list.append(pipeline.ldi2disparity(ldi).cpu())
+            disparity_list.append(ldi2disparity(ldi).cpu())
 
         # maskout.write((renderto(mpi, newview_pose, device='cuda:0') > 0.3).cpu())
 

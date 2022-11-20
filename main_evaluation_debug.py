@@ -11,7 +11,7 @@ if __name__ == "__main__":
             "max_baseline": 4,
             "proj_to_view1": True,
 
-            "seq_len": 20,
+            "seq_len": 7,
             "maxskip": 2
         },
         "const_scale": True,
@@ -20,8 +20,9 @@ if __name__ == "__main__":
         # ======== model and inference related =========
         "checkpoint": "./log/checkpoint/LDI2MPI_newCEL5_r0.pth",
         "pipeline": "ldifilter",
-        "pipelinecfg": {"winsz": 7, "forwardaf_idx": [0, 2, -1]},
+        "pipelinecfg": {"winsz": 7, "forwardaf_idx": [0, 2, -1], "mpi_layer_num": 64},
         "infer_cfg": "",
+        # "soft_z_tau": 13,
 
         # ======= computing error related ===========
         "eval_crop_margin": 0.1,

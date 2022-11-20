@@ -12,13 +12,13 @@ import os
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-07-16-53-18.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_processed\\test\\HD720-02-16-06-57.mp4"
 # video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-04-15-33-25.mp4"
-video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
+# video_path = "D:\\MSI_NB\\source\\data\\StereoBlur_test\\test\\HD720-02-15-49-26.mp4"
 # video_path = "Z:\\dataset\\StereoVideoFinalv3\\videos\\StereoBlur_HD720-02-15-49-26_0.mp4"
 # video_path = "Z:\\tmp\\VisualVideo\\crop\\zsoapbox.mp4"
 # video_path = "Z:\\dataset\\StereoVideoFinalv3\\videos\\StereoBlur_HD720-02-15-34-24_1.mp4"
 # video_path = "Z:\\dataset\\WebVideo\\cook\\_4fH_GX3rEM_2.mp4"
 # video_path = "Z:\\dataset\\WebVideo\\penguin_Trim1.mp4"
-# video_path = "Z:\\dataset\\DAVIS-2017-Unsupervised-trainval-480p\\DAVIS\\JPEGImages\\vis\\soapbox.mp4"
+video_path = "Z:\\dataset\\DAVIS-2017-Unsupervised-trainval-480p\\DAVIS\\JPEGImages\\vis\\car-turn.mp4"
 outputres = (848, 480)  # (960, 540)
 
 # outputres = (640, 360)  # (960, 540)

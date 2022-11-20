@@ -4,9 +4,9 @@ import sys
 sys.path.append("../")
 from evaluator import MetricCounter
 
-root = "Z:\\tmp\\VisualEval"
+root = "Z:\\tmp\\Visual"
 
-item = "StereoVideo_3D-Photo_hisdepth"
+item = "StereoVideo_LDI2MPI_cel_tmp_r0_auto_ldifilter_ret_ldi"
 
 metrics = ['ssim', 'psnr', 'mse', 'lpips',
            'visflowepe', 'visflowmax', 'visflowmid',
